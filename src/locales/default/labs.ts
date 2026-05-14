@@ -14,7 +14,7 @@ export default {
     'Render Markdown in the input area in real time (bold text, code blocks, tables, etc.).',
   'features.inputMarkdown.title': 'Input Markdown Rendering',
   'features.messenger.desc':
-    'Talk to your agents from Telegram (and other messengers) via the shared LobeHub bot. Adds a Messenger tab in Settings for binding your account and choosing which agent receives messages.',
+    'Enable messaging app integrations for chatting with Lobe AI outside the web app.',
   'features.messenger.title': 'Messenger',
   'title': 'Labs',
 };

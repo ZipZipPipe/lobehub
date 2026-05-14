@@ -1,3 +1,4 @@
+import { INBOX_SESSION_ID } from '@lobechat/const';
 import { and, count, desc, eq, gte, isNull, lte, or, sql } from 'drizzle-orm';
 
 import {
@@ -113,8 +114,11 @@ export class AgentSignalReviewContextModel {
         and(
           eq(agents.id, agentId),
           eq(agents.userId, this.userId),
-          or(eq(agents.virtual, false), isNull(agents.virtual)),
-          sql`COALESCE((${agents.chatConfig}->'selfIteration'->>'enabled')::boolean, false) = true`,
+          or(eq(agents.virtual, false), isNull(agents.virtual), eq(agents.slug, INBOX_SESSION_ID)),
+          or(
+            eq(agents.slug, INBOX_SESSION_ID),
+            sql`COALESCE((${agents.chatConfig}->'selfIteration'->>'enabled')::boolean, false) = true`,
+          ),
         ),
       )
       .limit(1);
@@ -136,7 +140,7 @@ export class AgentSignalReviewContextModel {
       .limit(options.limit);
   };
 
-  /** Lists grouped review-window tool activity for nightly maintenance context. */
+  /** Lists grouped review-window tool activity for nightly self-iteration context. */
   listToolActivity = (options: ListAgentSignalActivityWindowOptions) => {
     const effectiveAgentId = sql<string>`COALESCE(${messages.agentId}, ${topics.agentId})`;
 
@@ -158,7 +162,7 @@ export class AgentSignalReviewContextModel {
         `,
         sampleArgs: sql<string[]>`
           COALESCE(
-            jsonb_agg(DISTINCT left(${messagePlugins.arguments}::text, 500))
+            jsonb_agg(DISTINCT left(${messagePlugins.arguments}::text, 2000))
               FILTER (WHERE ${messagePlugins.arguments} IS NOT NULL),
             '[]'::jsonb
           )
@@ -197,7 +201,7 @@ export class AgentSignalReviewContextModel {
       .limit(20);
   };
 
-  /** Lists review-window agent document activity for nightly maintenance context. */
+  /** Lists review-window agent document activity for nightly self-iteration context. */
   listDocumentActivity = (options: ListAgentSignalActivityWindowOptions) => {
     return this.db
       .select({

@@ -55,7 +55,7 @@ export const UserLabSchema = z.object({
    */
   enableInputMarkdown: z.boolean().optional(),
   /**
-   * enable the shared Messenger bot integration (Telegram, Slack)
+   * enable messenger integrations
    */
   enableMessenger: z.boolean().optional(),
 });
@@ -63,6 +63,8 @@ export const UserLabSchema = z.object({
 export type UserLab = z.infer<typeof UserLabSchema>;
 
 export interface UserPreference {
+  /** Last-used app for "Open working directory in…" split button. Empty/unknown values fall back to platform default. */
+  defaultOpenInApp?: string;
   /**
    * disable markdown rendering in chat input editor
    * @deprecated Use lab.enableInputMarkdown instead
@@ -141,6 +143,7 @@ export interface SSOProvider {
 
 export const UserPreferenceSchema = z
   .object({
+    defaultOpenInApp: z.string().optional(),
     guide: UserGuideSchema.optional(),
     hideSyncAlert: z.boolean().optional(),
     lab: UserLabSchema.optional(),

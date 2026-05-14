@@ -15,7 +15,7 @@ import { FORM_STYLE } from '@/const/layoutTokens';
 import SettingHeader from '@/routes/(main)/settings/features/SettingHeader';
 import { autoUpdateService } from '@/services/electron/autoUpdate';
 import { messengerService } from '@/services/messenger';
-import { featureFlagsSelectors, useServerConfigStore } from '@/store/serverConfig';
+import { useServerConfigStore } from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { labPreferSelectors, preferenceSelectors, settingsSelectors } from '@/store/user/selectors';
 
@@ -37,24 +37,15 @@ const Page = memo(() => {
   const [setSettings, isUserStateInit] = useUserStore((s) => [s.setSettings, s.isUserStateInit]);
   const [loading, setLoading] = useState(false);
 
-  const [
-    isPreferenceInit,
-    enableAgentSelfIteration,
-    enableInputMarkdown,
-    enableGatewayMode,
-    enableMessenger,
-    updateLab,
-  ] = useUserStore((s) => [
-    preferenceSelectors.isPreferenceInit(s),
-    labPreferSelectors.enableAgentSelfIteration(s),
-    labPreferSelectors.enableInputMarkdown(s),
-    labPreferSelectors.enableGatewayMode(s),
-    labPreferSelectors.enableMessenger(s),
-    s.updateLab,
-  ]);
+  const [isPreferenceInit, enableInputMarkdown, enableGatewayMode, enableMessenger, updateLab] =
+    useUserStore((s) => [
+      preferenceSelectors.isPreferenceInit(s),
+      labPreferSelectors.enableInputMarkdown(s),
+      labPreferSelectors.enableGatewayMode(s),
+      labPreferSelectors.enableMessenger(s),
+      s.updateLab,
+    ]);
 
-  const { enableAgentSelfIteration: canShowAgentSelfIterationLab } =
-    useServerConfigStore(featureFlagsSelectors);
   const hasGatewayUrl = useServerConfigStore((s) => !!s.serverConfig.agentGatewayUrl);
   // Only surface the Messenger lab when the server actually has a messenger
   // bot configured — otherwise toggling it would do nothing useful.
@@ -114,23 +105,6 @@ const Page = memo(() => {
   };
 
   const labItems: FormItemProps[] = [
-    ...(canShowAgentSelfIterationLab
-      ? [
-          {
-            children: (
-              <Switch
-                checked={enableAgentSelfIteration}
-                loading={!isPreferenceInit}
-                onChange={(checked: boolean) => updateLab({ enableAgentSelfIteration: checked })}
-              />
-            ),
-            className: styles.labItem,
-            desc: tLabs('features.agentSelfIteration.desc'),
-            label: tLabs('features.agentSelfIteration.title'),
-            minWidth: undefined,
-          } satisfies FormItemProps,
-        ]
-      : []),
     {
       children: (
         <Switch
