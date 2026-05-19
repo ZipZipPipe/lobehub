@@ -5,10 +5,10 @@ import { type ChatInputActionsProps } from '@lobehub/editor/react';
 import { type MenuProps } from '@lobehub/ui';
 import { Alert, Flexbox } from '@lobehub/ui';
 import { type ReactNode } from 'react';
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { type ActionKeys } from '@/features/ChatInput';
+import type { ActionKeys, ChatInputFeature } from '@/features/ChatInput';
 import { ChatInputProvider, DesktopChatInput } from '@/features/ChatInput';
 import {
   type SendButtonHandler,
@@ -20,12 +20,7 @@ import { fileChatSelectors, useFileStore } from '@/store/file';
 
 import WideScreenContainer from '../../WideScreenContainer';
 import InterventionBar from '../InterventionBar';
-import {
-  dataSelectors,
-  messageStateSelectors,
-  useConversationStore,
-  useConversationStoreApi,
-} from '../store';
+import { dataSelectors, messageStateSelectors, useConversationStore } from '../store';
 import TodoProgress from '../TodoProgress';
 import QueueTray from './QueueTray';
 import { getConversationChatInputUiState } from './utils';
@@ -33,21 +28,13 @@ import { getConversationChatInputUiState } from './utils';
 /** Max recent messages to feed into auto-complete context (≈10 conversation turns) */
 const MAX_CONTEXT_MESSAGES = 25;
 
-const useGetMessages = () => {
-  const storeApi = useConversationStoreApi();
-  return useCallback(
-    () =>
-      dataSelectors
-        .dbMessages(storeApi.getState())
-        .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'tool')
-        .slice(-MAX_CONTEXT_MESSAGES)
-        .map((m) => ({
-          content: typeof m.content === 'string' ? m.content : '',
-          role: m.role as 'user' | 'assistant' | 'system',
-        })),
-    [storeApi],
-  );
-};
+const toChatInputMessages = (messages: ReturnType<typeof dataSelectors.dbMessages>) =>
+  messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'tool')
+    .map((m) => ({
+      content: typeof m.content === 'string' ? m.content : '',
+      role: m.role as 'user' | 'assistant' | 'system',
+    }));
 
 export interface ChatInputProps {
   /**
@@ -69,22 +56,18 @@ export interface ChatInputProps {
    */
   disableFollowUpVariant?: boolean;
   /**
-   * Disable the @ mention trigger and its placeholder hint
-   */
-  disableMention?: boolean;
-  /**
    * Disable enqueuing follow-up messages while the agent is streaming.
    * Hides the QueueTray and gates handleSend so Enter does not enqueue.
    */
   disableQueue?: boolean;
   /**
-   * Disable the / slash command trigger
-   */
-  disableSlash?: boolean;
-  /**
    * Extra action items to append to the ActionBar
    */
   extraActionItems?: ChatInputActionsProps['items'];
+  /**
+   * Chat input capability switches. Omitted capabilities keep the default enabled state.
+   */
+  feature?: ChatInputFeature;
   /**
    * Swap the action bar and send area for skeleton placeholders while
    * the underlying agent/session config is still hydrating. The editor
@@ -149,9 +132,8 @@ const ChatInput = memo<ChatInputProps>(
     actionBarStyle,
     allowExpand,
     disableFollowUpVariant,
-    disableMention,
     disableQueue,
-    disableSlash,
+    feature,
     leftActions = [],
     leftContent,
     rightActions = [],
@@ -169,7 +151,12 @@ const ChatInput = memo<ChatInputProps>(
   }) => {
     const { t } = useTranslation('chat');
 
-    const getMessages = useGetMessages();
+    const dbMessages = useConversationStore(dataSelectors.dbMessages);
+    const contextWindowMessages = useMemo(() => toChatInputMessages(dbMessages), [dbMessages]);
+    const getMessages = useCallback(
+      () => contextWindowMessages.slice(-MAX_CONTEXT_MESSAGES),
+      [contextWindowMessages],
+    );
 
     // ConversationStore state
     const context = useConversationStore((s) => s.context);
@@ -347,8 +334,8 @@ const ChatInput = memo<ChatInputProps>(
       <ChatInputProvider
         agentId={agentId}
         allowExpand={allowExpand}
-        disableMention={disableMention}
-        disableSlash={disableSlash}
+        contextWindowMessages={contextWindowMessages}
+        feature={feature}
         getMessages={getMessages}
         leftActions={leftActions}
         mentionItems={mentionItems}
