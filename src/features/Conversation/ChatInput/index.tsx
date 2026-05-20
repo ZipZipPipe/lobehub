@@ -8,6 +8,7 @@ import { type ReactNode } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useBusinessChatInputSendAreaPrefix } from '@/business/client/hooks/useBusinessChatInputSendAreaPrefix';
 import type { ActionKeys, ChatInputFeature } from '@/features/ChatInput';
 import { ChatInputProvider, DesktopChatInput } from '@/features/ChatInput';
 import {
@@ -16,6 +17,7 @@ import {
 } from '@/features/ChatInput/store/initialState';
 import { useChatStore } from '@/store/chat';
 import { operationSelectors } from '@/store/chat/selectors';
+import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { fileChatSelectors, useFileStore } from '@/store/file';
 
 import WideScreenContainer from '../../WideScreenContainer';
@@ -160,6 +162,7 @@ const ChatInput = memo<ChatInputProps>(
 
     // ConversationStore state
     const context = useConversationStore((s) => s.context);
+    const draftKey = useMemo(() => messageMapKey(context), [context]);
     const [agentId, inputMessage, sendMessage, stopGenerating] = useConversationStore((s) => [
       s.context.agentId,
       s.inputMessage,
@@ -229,6 +232,7 @@ const ChatInput = memo<ChatInputProps>(
     // When disableQueue is set (e.g. onboarding), block sending while loading.
     const disabled = isInputEmpty || isUploadingFiles || (!!disableQueue && isInputLoading);
     const shouldUsePlainSendButton = !showSendMenu && !!sendMenu;
+    const businessSendAreaPrefix = useBusinessChatInputSendAreaPrefix(sendAreaPrefix);
 
     // Send handler - gets message, clears editor immediately, then sends
     const handleSend: SendButtonHandler = useCallback(
@@ -322,7 +326,7 @@ const ChatInput = memo<ChatInputProps>(
               leftContent={leftContent}
               placeholderVariant={placeholderVariant}
               runtimeConfigSlot={runtimeConfigSlot}
-              sendAreaPrefix={sendAreaPrefix}
+              sendAreaPrefix={businessSendAreaPrefix}
               showRuntimeConfig={showRuntimeConfig}
             />
           </>
@@ -335,6 +339,7 @@ const ChatInput = memo<ChatInputProps>(
         agentId={agentId}
         allowExpand={allowExpand}
         contextWindowMessages={contextWindowMessages}
+        draftKey={draftKey}
         feature={feature}
         getMessages={getMessages}
         leftActions={leftActions}

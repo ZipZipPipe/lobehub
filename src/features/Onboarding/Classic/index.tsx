@@ -8,11 +8,13 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import Loading from '@/components/Loading/BrandTextLoading';
 import ModeSwitch from '@/features/Onboarding/components/ModeSwitch';
 import OnboardingContainer from '@/routes/onboarding/_layout';
+import AgentPickerStep from '@/routes/onboarding/features/AgentPickerStep';
 import FullNameStep from '@/routes/onboarding/features/FullNameStep';
 import InterestsStep from '@/routes/onboarding/features/InterestsStep';
 import ProSettingsStep from '@/routes/onboarding/features/ProSettingsStep';
 import { useUserStore } from '@/store/user';
 import { onboardingSelectors } from '@/store/user/selectors';
+import { isDev } from '@/utils/env';
 
 const ClassicOnboardingPage = memo(() => {
   const navigate = useNavigate();
@@ -47,8 +49,11 @@ const ClassicOnboardingPage = memo(() => {
       case 2: {
         return <InterestsStep onBack={goToPreviousStep} onNext={goToNextStep} />;
       }
+      case 3: {
+        return <ProSettingsStep onBack={goToPreviousStep} onNext={goToNextStep} />;
+      }
       case MAX_ONBOARDING_STEPS: {
-        return <ProSettingsStep onBack={goToPreviousStep} />;
+        return <AgentPickerStep onBack={goToPreviousStep} />;
       }
       default: {
         return null;
@@ -56,10 +61,12 @@ const ClassicOnboardingPage = memo(() => {
     }
   };
 
+  const contentMaxWidth = currentStep === MAX_ONBOARDING_STEPS ? 780 : 600;
+
   return (
     <OnboardingContainer>
-      <Flexbox gap={24} style={{ maxWidth: 600, width: '100%' }}>
-        <ModeSwitch />
+      <Flexbox gap={24} style={{ maxWidth: contentMaxWidth, width: '100%' }}>
+        {isDev && <ModeSwitch />}
         {renderStep()}
       </Flexbox>
     </OnboardingContainer>
