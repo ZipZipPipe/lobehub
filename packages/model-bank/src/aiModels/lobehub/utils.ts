@@ -88,15 +88,28 @@ export const gptImage1Schema = {
 export const gptImage2Schema = {
   imageUrls: { default: [], maxCount: 1, maxFileSize: 5 * 1024 * 1024 },
   prompt: { default: '' },
+
+  quality: {
+    default: 'medium',
+    enum: ['auto', 'low', 'medium', 'high'],
+  },
+
   size: {
     default: 'auto',
     enum: [
       'auto',
+
+      // 1K / common sizes
       '1024x1024',
       '1536x1024',
       '1024x1536',
+
+      // 2K
       '2048x2048',
       '2048x1152',
+      '1152x2048',
+
+      // 4K
       '3840x2160',
       '2160x3840',
     ],
