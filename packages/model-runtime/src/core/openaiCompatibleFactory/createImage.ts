@@ -63,7 +63,20 @@ async function generateByImageMode(
   if (userInput.size === 'auto') {
     delete userInput.size;
   }
-
+  
+  if (model === 'gpt-image-2' || model.startsWith('gpt-image-2')) {
+    if (userInput.quality === 'standard') {
+      userInput.quality = 'medium';
+    }
+  
+    if (userInput.quality === 'hd') {
+      userInput.quality = 'high';
+    }
+  
+    if (userInput.background === 'transparent') {
+      delete userInput.background;
+    }
+  }
   // gpt-image-2 dropped input_fidelity ("output is already high fidelity by default").
   // https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide
   // Match the gpt-image-1 family (including dated snapshots like
