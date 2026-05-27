@@ -12,7 +12,7 @@ import {
   createAgentSignalMemoryWriterSystemRole,
 } from '@lobechat/prompts';
 import { LayersEnum, RequestTrigger, ThreadType } from '@lobechat/types';
-import { nanoid } from '@lobechat/utils';
+import { isRecord, nanoid, pickTrimmedString } from '@lobechat/utils';
 
 import { PluginModel } from '@/database/models/plugin';
 import { ThreadModel } from '@/database/models/thread';
@@ -151,12 +151,11 @@ const toManifestRecord = (manifestMap: Map<string, LobeToolManifest>) => {
 };
 
 const createFunctionCallSupportChecker = async () => {
-  const { LOBE_DEFAULT_MODEL_LIST } = await import('model-bank');
+  const { loadModels } = await import('@/business/client/model-bank/loadModels');
+  const builtinModels = await loadModels();
 
   return (model: string, provider: string) => {
-    const info = LOBE_DEFAULT_MODEL_LIST.find(
-      (item) => item.id === model && item.providerId === provider,
-    );
+    const info = builtinModels.find((item) => item.id === model && item.providerId === provider);
 
     return info?.abilities?.functionCall ?? true;
   };
@@ -179,11 +178,8 @@ const hasFailedMemoryWrite = (state: AgentState) => {
   );
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 const getString = (value: unknown) => {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+  return pickTrimmedString(value);
 };
 
 const parseToolArguments = (value: unknown): Record<string, unknown> | undefined => {

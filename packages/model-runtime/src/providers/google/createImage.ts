@@ -1,4 +1,10 @@
-import type { Content, GenerateContentConfig, GoogleGenAI, Part } from '@google/genai';
+import type {
+  Content,
+  GenerateContentConfig,
+  GenerateContentResponse,
+  GoogleGenAI,
+  Part,
+} from '@google/genai';
 import { imageUrlToBase64 } from '@lobechat/utils';
 
 import { convertGoogleAIUsage } from '../../core/usageConverters/google-ai';
@@ -10,6 +16,45 @@ import { parseDataUri } from '../../utils/uriParser';
 
 // Maximum number of images allowed for processing
 const MAX_IMAGE_COUNT = 10;
+
+export const GOOGLE_IMAGE_TEXT_ONLY_RESPONSE_MESSAGE = [
+  'The model returned text instead of an image.',
+  'Ask it to generate or edit an image, or try a safer prompt if the request may have been blocked.',
+].join(' ');
+
+interface ErrorWithRawProviderResponse extends Error {
+  providerResponse?: GenerateContentResponse;
+}
+
+// Keep raw provider responses available to upstream error handlers without
+// exposing text-only no-image responses through JSON serialization.
+const attachNonSerializableProviderResponse = <T extends object>(
+  target: T,
+  response: GenerateContentResponse,
+): T & { providerResponse?: GenerateContentResponse } => {
+  Object.defineProperty(target, 'providerResponse', {
+    configurable: true,
+    enumerable: false,
+    value: response,
+  });
+
+  return target;
+};
+
+const createGoogleImageNoImageError = (
+  message: string,
+  response: GenerateContentResponse,
+): ErrorWithRawProviderResponse =>
+  attachNonSerializableProviderResponse(
+    new Error(message),
+    response,
+  ) as ErrorWithRawProviderResponse;
+
+const getTextFromParts = (parts: Part[]) =>
+  parts
+    .map((part) => part.text?.trim())
+    .filter(Boolean)
+    .join('\n');
 
 /**
  * Process a single image URL and convert it to Google AI Part format
@@ -45,14 +90,15 @@ async function processImageForParts(imageUrl: string): Promise<Part> {
 /**
  * Extract image data from generateContent response
  */
-function extractImageFromResponse(response: any): CreateImageResponse {
+function extractImageFromResponse(response: GenerateContentResponse): CreateImageResponse {
   const candidate = response.candidates?.[0];
+
   if (candidate?.finishReason === 'NO_IMAGE') {
-    throw new Error('No image generated');
+    throw createGoogleImageNoImageError('No image generated', response);
   }
   if (!candidate?.content?.parts) {
     // Handle cases where Google returns 200 but omits image parts (often moderation)
-    throw new Error('No image generated');
+    throw createGoogleImageNoImageError('No image generated', response);
   }
 
   for (const part of candidate.content.parts) {
@@ -62,8 +108,12 @@ function extractImageFromResponse(response: any): CreateImageResponse {
     }
   }
 
+  if (candidate.finishReason === 'STOP' && getTextFromParts(candidate.content.parts)) {
+    throw createGoogleImageNoImageError(GOOGLE_IMAGE_TEXT_ONLY_RESPONSE_MESSAGE, response);
+  }
+
   // Fallback when no inlineData is present (commonly moderation or policy blocks)
-  throw new Error('No image data found in response');
+  throw createGoogleImageNoImageError('No image data found in response', response);
 }
 
 /**
@@ -154,7 +204,7 @@ async function generateImageByChatModel(
   }
 
   const config: GenerateContentConfig = {
-    responseModalities: ['Image'],
+    responseModalities: ['TEXT', 'IMAGE'],
     ...(Object.keys(imageConfig).length > 0 ? { imageConfig } : {}),
   };
 
@@ -199,10 +249,17 @@ export async function createGoogleImage(
     }
 
     const { errorType, error: parsedError } = parseGoogleErrorMessage(err.message);
-    throw AgentRuntimeError.createImage({
+    const providerResponse = (err as ErrorWithRawProviderResponse).providerResponse;
+    const agentError = AgentRuntimeError.createImage({
       error: parsedError,
       errorType,
       provider,
     });
+
+    if (providerResponse) {
+      attachNonSerializableProviderResponse(agentError, providerResponse);
+    }
+
+    throw agentError;
   }
 }

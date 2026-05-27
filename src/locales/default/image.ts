@@ -21,6 +21,7 @@ export default {
   'config.quality.options.high': 'High',
   'config.quality.options.standard': 'Standard',
   'config.resolution.label': 'Resolution',
+  'config.resolution.options.512': '512px',
   'config.resolution.options.1K': '1K',
   'config.resolution.options.2K': '2K',
   'config.resolution.options.4K': '4K',

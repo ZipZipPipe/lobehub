@@ -18,9 +18,11 @@ import AuthRequiredModal from '@/features/Electron/AuthRequiredModal';
 import OverlayCaptureUploader from '@/features/Electron/ScreenCapture/OverlayCaptureUploader';
 import OverlayMessageDispatcher from '@/features/Electron/ScreenCapture/OverlayMessageDispatcher';
 import OverlaySnapshotPublisher from '@/features/Electron/ScreenCapture/OverlaySnapshotPublisher';
+import TabCacheBridges from '@/features/Electron/titlebar/TabBar/TabCacheBridges';
 import TitleBar from '@/features/Electron/titlebar/TitleBar';
 import HotkeyHelperPanel from '@/features/HotkeyHelperPanel';
 import NavPanel from '@/features/NavPanel';
+import { RouteMetaBridge } from '@/features/RouteMeta';
 import { useFeedbackModal } from '@/hooks/useFeedbackModal';
 import { usePlatform } from '@/hooks/usePlatform';
 import { MarketAuthProvider } from '@/layout/AuthProvider/MarketAuth';
@@ -51,6 +53,8 @@ const Layout: FC = () => {
 
   return (
     <HotkeysProvider initiallyActiveScopes={[HotkeyScopeEnum.Global]}>
+      <RouteMetaBridge />
+      {isDesktop && <TabCacheBridges />}
       <Suspense fallback={null}>
         {isDesktop && <DesktopAutoOidcOnFirstOpen />}
         {isDesktop && <DesktopNavigationBridge />}

@@ -7,6 +7,7 @@ import { useFetchAgentDocuments } from '@/hooks/useFetchAgentDocuments';
 import { useFetchTopicMemories } from '@/hooks/useFetchMemoryForTopic';
 import { useFetchNotebookDocuments } from '@/hooks/useFetchNotebookDocuments';
 import { useChatStore } from '@/store/chat';
+import { operationSelectors } from '@/store/chat/selectors';
 import { featureFlagsSelectors, useServerConfigStore } from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { settingsSelectors } from '@/store/user/selectors';
@@ -44,6 +45,11 @@ export interface ChatListProps {
    */
   footerSlot?: ReactNode;
   /**
+   * Optional content rendered as the first item inside the virtualized list.
+   * It scrolls with messages and does not participate in conversation state.
+   */
+  headerSlot?: ReactNode;
+  /**
    * Custom item renderer. If not provided, uses default ChatItem.
    */
   itemContent?: (index: number, id: string) => ReactNode;
@@ -66,6 +72,7 @@ const ChatList = memo<ChatListProps>(
     defaultWorkflowExpandLevel,
     disableActionsBar,
     footerSlot,
+    headerSlot,
     welcome,
     itemContent,
     showWelcome,
@@ -78,8 +85,14 @@ const ChatList = memo<ChatListProps>(
       s.useFetchMessages,
     ]);
     const activeAgentId = useChatStore((s) => s.activeAgentId);
+    // Suppress SWR focus revalidate while the current topic is streaming —
+    // the server-pushed UIChatMessage[] snapshot at step boundaries is the
+    // source of truth during that window. A focus refetch could hit DB
+    // mid-fan-out and clobber the in-memory streamed state with a stale
+    // assistant placeholder.
+    const isStreaming = useChatStore(operationSelectors.isAgentRuntimeRunningByContext(context));
     const { enableAgentSelfIteration } = useServerConfigStore(featureFlagsSelectors);
-    useFetchMessages(context, skipFetch);
+    useFetchMessages(context, { revalidateOnFocus: !isStreaming, skipFetch });
     const displayMessages = useConversationStore(dataSelectors.displayMessages);
     const displayMessageIds = useConversationStore(dataSelectors.displayMessageIds);
     const latestMessageId = displayMessageIds.at(-1);
@@ -155,6 +168,7 @@ const ChatList = memo<ChatListProps>(
         <VirtualizedList
           dataSource={displayMessageIds}
           footerSlot={footerSlot}
+          headerSlot={headerSlot}
           itemContent={itemContent ?? defaultItemContent}
         />
       </MessageActionProvider>

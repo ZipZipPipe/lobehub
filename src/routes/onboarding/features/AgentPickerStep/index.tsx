@@ -1,23 +1,24 @@
 'use client';
 
-import {
-  type AgentTemplate,
-  getTemplatesByCategoryPriority,
-  type MarketplaceCategory,
+import type {
+  AgentTemplate,
+  MarketplaceCategory,
 } from '@lobechat/builtin-tool-web-onboarding/agentMarketplace';
+import { getTemplatesByCategoryPriority } from '@lobechat/builtin-tool-web-onboarding/agentMarketplace';
 import { Button, Flexbox, Text } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { Undo2Icon } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import useSWR from 'swr';
 
-import { fetchOnboardingAgentTemplates } from '@/services/agentMarketplace';
+import { useOnboardingAgentTemplates } from '@/hooks/useOnboardingAgentTemplates';
 import { installMarketplaceAgents } from '@/services/installMarketplaceAgents';
 import {
+  trackOnboardingCompleted,
   trackOnboardingMarketplacePicked,
   trackOnboardingMarketplaceShown,
+  trackOnboardingStepCompleted,
 } from '@/services/onboardingMetrics';
 import { useUserStore } from '@/store/user';
 import { userProfileSelectors } from '@/store/user/selectors';
@@ -36,28 +37,21 @@ interface AgentPickerStepProps {
 const EMPTY_TEMPLATES: AgentTemplate[] = [];
 
 const AgentPickerStep = memo<AgentPickerStepProps>(({ onBack }) => {
-  const { t, i18n } = useTranslation('onboarding');
+  const { t } = useTranslation('onboarding');
   const { t: tTool } = useTranslation('tool');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const showBack = searchParams.get('entry') !== 'skip';
+  const isAgentSkipEntry = searchParams.get('entry') === 'skip';
+  const showBack = !isAgentSkipEntry;
+  const completionFlow = isAgentSkipEntry ? 'agent' : 'classic';
 
   const finishOnboarding = useUserStore((s) => s.finishOnboarding);
   const interests = useUserStore(userProfileSelectors.interests);
 
   const categoryHints = useMemo(() => interestsToCategoryHints(interests), [interests]);
   const [requestId] = useState(() => Math.random().toString(36).slice(2));
-  const swrLocale = i18n.resolvedLanguage || i18n.language;
 
-  const {
-    data: allTemplates = EMPTY_TEMPLATES,
-    error,
-    isLoading,
-  } = useSWR(
-    ['onboarding-agent-picker-templates', swrLocale],
-    () => fetchOnboardingAgentTemplates(),
-    { dedupingInterval: 60_000, revalidateOnFocus: false, shouldRetryOnError: false },
-  );
+  const { data: allTemplates = EMPTY_TEMPLATES, error, isLoading } = useOnboardingAgentTemplates();
 
   const orderedTemplates = useMemo(
     () => getTemplatesByCategoryPriority(allTemplates, categoryHints),
@@ -104,16 +98,28 @@ const AgentPickerStep = memo<AgentPickerStepProps>(({ onBack }) => {
     trackOnboardingMarketplaceShown({ categoryHints, requestId });
   }, [categoryHints, requestId]);
 
-  const finish = useCallback(async () => {
-    await finishOnboarding();
-    navigate('/');
-  }, [finishOnboarding, navigate]);
+  const finish = useCallback(
+    async (action: 'continue' | 'skip', selectedCount: number) => {
+      await finishOnboarding();
+      trackOnboardingStepCompleted({
+        action,
+        entry: isAgentSkipEntry ? 'agent_skip' : 'classic',
+        flow: completionFlow,
+        selectedCount,
+        step: 'agentpicker',
+        stepIndex: 4,
+      });
+      trackOnboardingCompleted({ flow: completionFlow, targetUrl: '/' });
+      navigate('/');
+    },
+    [completionFlow, finishOnboarding, isAgentSkipEntry, navigate],
+  );
 
   const handleSkip = useCallback(async () => {
     if (pendingRef.current) return;
     pendingRef.current = true;
     setPending('skip');
-    await finish();
+    await finish('skip', 0);
   }, [finish]);
 
   const handleContinue = useCallback(async () => {
@@ -128,7 +134,7 @@ const AgentPickerStep = memo<AgentPickerStepProps>(({ onBack }) => {
     } catch (installError) {
       console.error('[AgentPickerStep] install failed', installError);
     }
-    await finish();
+    await finish('continue', selectedTemplateIds.length);
   }, [categoryHints, finish, requestId, selected]);
 
   const handleBack = useCallback(() => {

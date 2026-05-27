@@ -27,12 +27,16 @@ export const DEFAULT_AGENT_CHAT_CONFIG: LobeAgentChatConfig = {
   enableAgentMode: true,
   enableCompressHistory: true,
   enableContextCompression: true,
+  enableFollowUpChips: false,
   enableHistoryCount: false,
   enableStreaming: true,
   historyCount: 20,
   reasoningBudgetToken: 1024,
   searchFCModel: DEFAULT_AGENT_SEARCH_FC_MODEL,
   searchMode: 'auto',
+  selfIteration: {
+    enabled: false,
+  },
 };
 
 export const DEFAULT_AGENT_CONFIG: LobeAgentConfig = {
