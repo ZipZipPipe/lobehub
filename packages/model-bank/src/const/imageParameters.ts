@@ -1,15 +1,6 @@
-import type { ModelParamsSchema } from 'model-bank';
+import type { ModelParamsSchema } from '../standard-parameters';
 
-// Common parameters for Imagen models
-export const imagenBaseParameters: ModelParamsSchema = {
-  aspectRatio: {
-    default: '1:1',
-    enum: ['1:1', '16:9', '9:16', '3:4', '4:3'],
-  },
-  prompt: { default: '' },
-};
-
-export const NANO_BANANA_ASPECT_RATIOS = [
+const NANO_BANANA_ASPECT_RATIOS = [
   'auto',
   '1:1', // 1024x1024 / 2048x2048 / 4096x4096
   '2:3', // 848x1264 / 1696x2528 / 3392x5056
@@ -22,6 +13,42 @@ export const NANO_BANANA_ASPECT_RATIOS = [
   '16:9', // 1376x768 / 2752x1536 / 5504x3072
   '21:9', // 1584x672 / 3168x1344 / 6336x2688
 ];
+
+const NANO_BANANA_2_ASPECT_RATIOS = [...NANO_BANANA_ASPECT_RATIOS, '1:4', '4:1', '1:8', '8:1'];
+
+export const gptImage1Schema: ModelParamsSchema = {
+  imageUrls: { default: [], maxCount: 1, maxFileSize: 5 * 1024 * 1024 },
+  prompt: { default: '' },
+  size: {
+    default: 'auto',
+    enum: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+  },
+};
+
+export const gptImage2Schema: ModelParamsSchema = {
+  imageUrls: { default: [], maxCount: 1, maxFileSize: 5 * 1024 * 1024 },
+  prompt: { default: '' },
+  quality: {
+    default: 'medium',
+    enum: ['auto', 'low', 'medium', 'high'],
+  },
+  size: {
+    default: 'auto',
+    enum: [
+      'auto',
+      '1024x1024',
+      '1536x1024',
+      '1024x1536',
+      '2048x2048',
+      '2048x1152',
+      '1152x2048',
+      '2048x878',
+      '878x2048',
+      '3840x2160',
+      '2160x3840',
+    ],
+  },
+};
 
 export const nanoBananaParameters: ModelParamsSchema = {
   aspectRatio: {
@@ -49,14 +76,6 @@ export const nanoBananaProParameters: ModelParamsSchema = {
   },
 };
 
-export const NANO_BANANA_2_ASPECT_RATIOS = [
-  ...NANO_BANANA_ASPECT_RATIOS,
-  '1:4',
-  '4:1',
-  '1:8',
-  '8:1',
-];
-
 export const nanoBanana2Parameters: ModelParamsSchema = {
   aspectRatio: {
     default: 'auto',
@@ -68,50 +87,8 @@ export const nanoBanana2Parameters: ModelParamsSchema = {
   prompt: { default: '' },
   resolution: {
     default: '1K',
+    // Gemini image generation API accepts `"512" | "1K" | "2K" | "4K"`.
+    // See https://ai.google.dev/gemini-api/docs/image-generation
     enum: ['512', '1K', '2K', '4K'],
-  },
-};
-
-export const gptImage1Schema = {
-  imageUrls: { default: [], maxCount: 1, maxFileSize: 5 * 1024 * 1024 },
-  prompt: { default: '' },
-  size: {
-    default: 'auto',
-    enum: ['auto', '1024x1024', '1536x1024', '1024x1536'],
-  },
-};
-
-// gpt-image-2 accepts any resolution satisfying: max edge ≤ 3840px, both edges
-// multiples of 16px, aspect ratio ≤ 3:1, pixels between 655,360 and 8,294,400.
-// Until the schema/UI supports free-form W×H input, we expose the official
-// "Popular sizes" list from https://developers.openai.com/docs/guides/image-generation.
-export const gptImage2Schema = {
-  imageUrls: { default: [], maxCount: 1, maxFileSize: 5 * 1024 * 1024 },
-  prompt: { default: '' },
-
-  quality: {
-    default: 'medium',
-    enum: ['auto', 'low', 'medium', 'high'],
-  },
-
-  size: {
-    default: 'auto',
-    enum: [
-      'auto',
-
-      // 1K / common sizes
-      '1024x1024',
-      '1536x1024',
-      '1024x1536',
-
-      // 2K
-      '2048x2048',
-      '2048x1152',
-      '1152x2048',
-
-      // 4K
-      '3840x2160',
-      '2160x3840',
-    ],
   },
 };
