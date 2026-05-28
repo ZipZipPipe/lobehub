@@ -122,28 +122,26 @@ export const videoRouter = router({
       }
     }
 
-    // In development, convert localhost proxy URLs to S3 URLs for API access
+    // For xAI video generation, convert stored file keys to full URLs for runtime/provider access.
+    // Keep configForDatabase as storage keys only; only generationParams gets full URLs.
     let generationParams = params;
-    if (process.env.NODE_ENV === 'development') {
+
+    if (provider === 'xai') {
       const updates: Record<string, unknown> = {};
 
-      if (typeof params.imageUrl === 'string' && params.imageUrl) {
-        const s3Url = await fileService.getFullFileUrl(configForDatabase.imageUrl as string);
-        if (s3Url) {
-          log('Dev: converted imageUrl proxy URL to S3 URL: %s -> %s', params.imageUrl, s3Url);
-          updates.imageUrl = s3Url;
+      if (typeof configForDatabase.imageUrl === 'string' && configForDatabase.imageUrl) {
+        const fullUrl = await fileService.getFullFileUrl(configForDatabase.imageUrl);
+        if (fullUrl) {
+          log('XAI: converted runtime video imageUrl to full URL: %s -> %s', configForDatabase.imageUrl, fullUrl);
+          updates.imageUrl = fullUrl;
         }
       }
 
-      if (typeof params.endImageUrl === 'string' && params.endImageUrl) {
-        const s3Url = await fileService.getFullFileUrl(configForDatabase.endImageUrl as string);
-        if (s3Url) {
-          log(
-            'Dev: converted endImageUrl proxy URL to S3 URL: %s -> %s',
-            params.endImageUrl,
-            s3Url,
-          );
-          updates.endImageUrl = s3Url;
+      if (typeof configForDatabase.endImageUrl === 'string' && configForDatabase.endImageUrl) {
+        const fullUrl = await fileService.getFullFileUrl(configForDatabase.endImageUrl);
+        if (fullUrl) {
+          log('XAI: converted runtime video endImageUrl to full URL: %s -> %s', configForDatabase.endImageUrl, fullUrl);
+          updates.endImageUrl = fullUrl;
         }
       }
 
