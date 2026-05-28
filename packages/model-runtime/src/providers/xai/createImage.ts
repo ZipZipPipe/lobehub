@@ -74,6 +74,7 @@ export async function createXAIImage(
     const requestBody: XAIImageRequest = {
       model,
       prompt: params.prompt,
+      response_format: 'url',
     };
 
     if (!isImageEdit && params.aspectRatio) {
