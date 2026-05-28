@@ -126,33 +126,40 @@ export const imageRouter = router({
       }
     }
 
-    // In development, convert localhost proxy URLs to S3 URLs for async task access
-    let generationParams = params;
-    if (process.env.NODE_ENV === 'development') {
-      const updates: Record<string, unknown> = {};
+      // For xAI image editing, convert stored file keys to full URLs for runtime/provider access.
+      // Keep configForDatabase as storage keys only; only generationParams gets full URLs.
+      let generationParams = params;
 
-      // Handle single imageUrl: localhost/f/{id} -> S3 URL
-      if (typeof params.imageUrl === 'string' && params.imageUrl) {
-        const s3Url = await fileService.getFullFileUrl(configForDatabase.imageUrl as string);
-        if (s3Url) {
-          log('Dev: converted proxy URL to S3 URL: %s -> %s', params.imageUrl, s3Url);
-          updates.imageUrl = s3Url;
+      if (provider === 'xai') {
+        const updates: Record<string, unknown> = {};
+
+        // Handle single imageUrl: files/... -> S3/R2 full URL
+        if (typeof configForDatabase.imageUrl === 'string' && configForDatabase.imageUrl) {
+          const fullUrl = await fileService.getFullFileUrl(configForDatabase.imageUrl);
+          if (fullUrl) {
+            log('XAI: converted runtime imageUrl to full URL: %s -> %s', configForDatabase.imageUrl, fullUrl);
+            updates.imageUrl = fullUrl;
+          }
+        }
+
+        // Handle multiple imageUrls: files/... -> S3/R2 full URLs
+        if (Array.isArray(configForDatabase.imageUrls) && configForDatabase.imageUrls.length > 0) {
+          const fullUrls = await Promise.all(
+            (configForDatabase.imageUrls as string[]).map((key) => fileService.getFullFileUrl(key)),
+          );
+
+          const validFullUrls = fullUrls.filter(Boolean);
+
+          if (validFullUrls.length > 0) {
+            log('XAI: converted runtime imageUrls to full URLs: %O', validFullUrls);
+            updates.imageUrls = validFullUrls;
+          }
+        }
+
+        if (Object.keys(updates).length > 0) {
+          generationParams = { ...params, ...updates };
         }
       }
-
-      // Handle multiple imageUrls
-      if (Array.isArray(params.imageUrls) && params.imageUrls.length > 0) {
-        const s3Urls = await Promise.all(
-          (configForDatabase.imageUrls as string[]).map((key) => fileService.getFullFileUrl(key)),
-        );
-        log('Dev: converted proxy URLs to S3 URLs: %O', s3Urls);
-        updates.imageUrls = s3Urls;
-      }
-
-      if (Object.keys(updates).length > 0) {
-        generationParams = { ...params, ...updates };
-      }
-    }
 
     // Defensive check: ensure no full URLs enter the database
     validateNoUrlsInConfig(configForDatabase, 'configForDatabase');

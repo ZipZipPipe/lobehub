@@ -86,13 +86,22 @@ export async function createXAIImage(
     }
 
     if (isImageEdit) {
-      if (hasImageUrl && params.imageUrl) {
+      const inputImages = [
+        ...(hasImageUrl && params.imageUrl ? [params.imageUrl] : []),
+        ...(hasImageUrls && params.imageUrls ? params.imageUrls : []),
+      ].filter((url): url is string => Boolean(url));
+
+      if (inputImages.length === 0) {
+        throw new Error('XAI image edit requires at least one image URL');
+      }
+
+      if (inputImages.length === 1) {
         requestBody.image = {
           type: 'image_url',
-          url: params.imageUrl,
+          url: inputImages[0],
         };
-      } else if (hasImageUrls && params.imageUrls) {
-        requestBody.images = params.imageUrls.map((url) => ({
+      } else {
+        requestBody.images = inputImages.slice(0, 3).map((url) => ({
           type: 'image_url',
           url,
         }));
