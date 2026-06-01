@@ -7,7 +7,7 @@ import { cx } from 'antd-style';
 import Link from 'next/link';
 import { type FC, type PropsWithChildren } from 'react';
 
-import { ProductLogo } from '@/components/Branding';
+import Image from 'next/image';
 import { useIsDark } from '@/hooks/useIsDark';
 
 import AuthLangButton from './AuthLangButton';
@@ -32,7 +32,13 @@ const AuthContainer: FC<PropsWithChildren> = ({ children }) => {
           width={'100%'}
         >
           <Link aria-label={'LobeHub'} href={'/'} style={{ display: 'inline-flex' }}>
-            <ProductLogo size={40} />
+            <Image
+              alt={'LobeHub'}
+              height={40}
+              src={'/icons/icon-192x192.png'}
+              style={{ borderRadius: 8 }}
+              width={40}
+            />
           </Link>
           <Flexbox horizontal align={'center'}>
             <AuthLangButton size={18} />
