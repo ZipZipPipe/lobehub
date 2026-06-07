@@ -46,6 +46,8 @@ interface LobeAgentRuntimeContext {
   userId: string;
 }
 
+const VISUAL_ANALYSIS_MAX_TOKENS = 4096;
+
 const buildError = (content: string, code: string): BuiltinServerRuntimeOutput => ({
   content,
   error: { code, message: content },
@@ -321,6 +323,7 @@ class LobeAgentExecutionRuntime {
           role: 'user' as const,
         },
       ],
+      max_tokens: VISUAL_ANALYSIS_MAX_TOKENS,
       model,
       stream: false,
     } satisfies ChatStreamPayload;

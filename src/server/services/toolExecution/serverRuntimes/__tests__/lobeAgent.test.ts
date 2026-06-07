@@ -185,6 +185,7 @@ describe('lobeAgentRuntime', () => {
     });
     expect(mockChat).toHaveBeenCalledWith(
       expect.objectContaining({
+        max_tokens: 4096,
         messages: [
           expect.objectContaining({
             content: [

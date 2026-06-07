@@ -159,7 +159,7 @@ ENV APP_URL="" \
     FEATURE_FLAGS="" \
     PROXY_URL="" \
     VISUAL_UNDERSTANDING_PROVIDER="cli-proxy-api" \
-    VISUAL_UNDERSTANDING_MODEL="gemini-3.5-flash"
+    VISUAL_UNDERSTANDING_MODEL="gemini-3.1-flash-lite"
 
 # Database
 ENV KEY_VAULTS_SECRET="" \
