@@ -51,6 +51,36 @@ describe('DeepSeek OpenAI-compatible chatCompletion.handlePayload', () => {
     expect(result.messages).toEqual(payload.messages);
   });
 
+  it('should downgrade image_url parts before sending to text-only DeepSeek models', () => {
+    const payload = {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What is in this image?' },
+            { type: 'image_url', image_url: { url: 'https://example.com/image.webp' } },
+          ],
+        },
+      ],
+      model: 'deepseek-v4-pro',
+    };
+
+    const result = openAIParams.chatCompletion!.handlePayload!(payload as any);
+
+    expect(result.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is in this image?' },
+          {
+            type: 'text',
+            text: '[image omitted: delegated to visual understanding tool]',
+          },
+        ],
+      },
+    ]);
+  });
+
   it('should handle empty reasoning content', () => {
     const payload = {
       messages: [

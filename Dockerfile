@@ -157,7 +157,9 @@ ENV APP_URL="" \
     DEFAULT_AGENT_CONFIG="" \
     SYSTEM_AGENT="" \
     FEATURE_FLAGS="" \
-    PROXY_URL=""
+    PROXY_URL="" \
+    VISUAL_UNDERSTANDING_PROVIDER="cli-proxy-api" \
+    VISUAL_UNDERSTANDING_MODEL="gemini-3.5-flash"
 
 # Database
 ENV KEY_VAULTS_SECRET="" \

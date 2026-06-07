@@ -8,6 +8,23 @@ import { getModelPropertyWithFallback } from '../../utils/getFallbackModelProper
 import { sanitizeDeepSeekJsonPayload } from './sanitizePayload';
 
 const isDeepSeekV4Model = (model: string) => model.startsWith('deepseek-v4');
+const VISION_DOWNGRADE_PLACEHOLDER = '[image omitted: delegated to visual understanding tool]';
+
+const downgradeUnsupportedImageParts = (content: unknown) => {
+  if (!Array.isArray(content)) return content;
+
+  let changed = false;
+  const downgraded = content.map((part) => {
+    if (part && typeof part === 'object' && part.type === 'image_url') {
+      changed = true;
+      return { text: VISION_DOWNGRADE_PLACEHOLDER, type: 'text' };
+    }
+
+    return part;
+  });
+
+  return changed ? downgraded : content;
+};
 const isEmptyContent = (content: unknown) =>
   content === '' || content === null || content === undefined;
 const hasReasoningContent = (reasoning: any) => typeof reasoning?.content === 'string';
@@ -138,10 +155,13 @@ export const buildDeepSeekOpenAIPayload = (
   // Transform reasoning object to reasoning_content string for multi-turn conversations
   const messages = payload.messages.map((message: any) => {
     const { reasoning, ...rest } = message;
+    const downgradedContent = downgradeUnsupportedImageParts(rest.content);
+    const normalizedRest =
+      downgradedContent === rest.content ? rest : { ...rest, content: downgradedContent };
 
     const reasoningContent =
-      typeof rest.reasoning_content === 'string'
-        ? rest.reasoning_content
+      typeof normalizedRest.reasoning_content === 'string'
+        ? normalizedRest.reasoning_content
         : typeof reasoning?.content === 'string'
           ? reasoning.content
           : undefined;
@@ -150,19 +170,19 @@ export const buildDeepSeekOpenAIPayload = (
     // messages to carry reasoning_content, or the API returns a 400.
     if (message.role === 'assistant' && shouldForceAssistantReasoningContent) {
       return {
-        ...rest,
+        ...normalizedRest,
         reasoning_content: reasoningContent ?? '',
       };
     }
 
     if (reasoningContent !== undefined) {
       return {
-        ...rest,
+        ...normalizedRest,
         reasoning_content: reasoningContent,
       };
     }
 
-    return rest;
+    return normalizedRest;
   });
 
   // DeepSeek rejects `reasoning_effort` when thinking is explicitly disabled.
