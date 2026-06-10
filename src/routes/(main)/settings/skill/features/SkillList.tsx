@@ -17,10 +17,9 @@ import { createStaticStyles } from 'antd-style';
 import isEqual from 'fast-deep-equal';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import type React from 'react';
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import AddSkillButton from '@/features/SkillStore/SkillList/AddSkillButton';
 import { useFetchInstalledPlugins } from '@/hooks/useFetchInstalledPlugins';
 import { serverConfigSelectors, useServerConfigStore } from '@/store/serverConfig';
 import { useToolStore } from '@/store/tool';
@@ -31,6 +30,7 @@ import {
   lobehubSkillStoreSelectors,
   pluginSelectors,
 } from '@/store/tool/selectors';
+import { connectorSelectors } from '@/store/tool/slices/connector';
 import { KlavisServerStatus } from '@/store/tool/slices/klavisStore';
 import { LobehubSkillStatus } from '@/store/tool/slices/lobehubSkillStore/types';
 import { type LobeToolType } from '@/types/tool/tool';
@@ -99,6 +99,9 @@ const SkillList = memo<SkillListProps>(
     const marketAgentSkills = useToolStore(agentSkillsSelectors.getMarketAgentSkills, isEqual);
     const userAgentSkills = useToolStore(agentSkillsSelectors.getUserAgentSkills, isEqual);
     const builtinSkills = useToolStore((s) => s.builtinSkills, isEqual);
+    const customConnectors = useToolStore(connectorSelectors.customConnectors, isEqual);
+    const isConnectorsInit = useToolStore((s) => s.isConnectorsInit);
+    const fetchConnectors = useToolStore((s) => s.fetchConnectors);
     const allBuiltinTools = useToolStore((s) => s.builtinTools, isEqual);
     const uninstalledBuiltinTools = useToolStore(
       builtinToolSelectors.uninstalledBuiltinTools,
@@ -122,6 +125,12 @@ const SkillList = memo<SkillListProps>(
     useFetchUserKlavisServers(isKlavisEnabled);
     useFetchAgentSkills(true);
     useFetchUninstalledBuiltinTools(true);
+
+    // Load custom connectors (new connector store) so user-added OAuth MCP
+    // connectors appear in the Connectors tab list.
+    useEffect(() => {
+      if (!isConnectorsInit) fetchConnectors();
+    }, [isConnectorsInit, fetchConnectors]);
 
     const getLobehubSkillServerByProvider = (providerId: string) => {
       return allLobehubSkillServers.find((server) => server.identifier === providerId);
@@ -323,7 +332,6 @@ const SkillList = memo<SkillListProps>(
       return (
         <Center className={styles.container} paddingBlock={48}>
           <Empty description={t('tab.skillDesc')} icon={SkillsIcon} title={t('tab.skillEmpty')} />
-          <AddSkillButton />
         </Center>
       );
     }
@@ -378,6 +386,20 @@ const SkillList = memo<SkillListProps>(
         />
       ));
 
+    // Custom connectors from the connector store (user-added OAuth MCP servers)
+    const renderCustomConnectors = () =>
+      customConnectors.map((c) => (
+        <McpSkillItem
+          identifier={c.identifier}
+          isSelected={selectedIdentifier === c.identifier}
+          key={c.id}
+          runtimeType="mcp"
+          title={c.name || c.identifier}
+          type={'customPlugin' as LobeToolType}
+          onSelect={onSelect ? () => onSelect(c.identifier, 'mcp-connector') : undefined}
+        />
+      ));
+
     // Split integrations into builtin tools vs builtin skills
     const builtinToolItems = integrations.filter((i) => i.type === 'builtin');
     const builtinSkillItems = integrations.filter((i) => i.type === 'builtinAgent');
@@ -413,11 +435,14 @@ const SkillList = memo<SkillListProps>(
     // Skills tab: prompt/agent-based skills (show description/content)
     const hasBuiltinTools = builtinToolItems.length > 0 && isConnectorView;
     const hasBuiltinSkills = builtinSkillItems.length > 0 && !isConnectorView;
-    const hasCommunitySkills =
-      !isConnectorView && (communitySkillItems.length > 0 || marketAgentSkills.length > 0);
+    // Skills tab only shows agent-based community skills; Lobehub/Klavis OAuth
+    // connectors live exclusively in the Connectors view (hasCommunityConnectors).
+    const hasCommunitySkills = !isConnectorView && marketAgentSkills.length > 0;
     const hasCommunityTools = communityMCPs.length > 0 && isConnectorView;
-    // In connector view: custom MCPs. In skill view: user agent skills
-    const hasCustomConnectors = customMCPs.length > 0 && isConnectorView;
+    // In connector view: custom MCPs (old plugins) + custom connectors (new store).
+    // In skill view: user agent skills
+    const hasCustomConnectors =
+      isConnectorView && (customMCPs.length > 0 || customConnectors.length > 0);
     const hasCustomSkills = userAgentSkills.length > 0 && !isConnectorView;
     // Lobehub/Klavis OAuth skills go in Connectors tab (they provide tools)
     const hasCommunityConnectors = communitySkillItems.length > 0 && isConnectorView;
@@ -502,40 +527,12 @@ const SkillList = memo<SkillListProps>(
             }),
           )}
 
-        {/* Skill view: community skills */}
+        {/* Skill view: community agent skills only (OAuth connectors are in the Connectors view) */}
         {hasCommunitySkills &&
           renderSection(
             'communitySkills',
             t('skillGroup.communitySkills', '社区 Skill'),
-            <>
-              {communitySkillItems.map((item) => {
-                if (item.type === 'lobehub') {
-                  return (
-                    <LobehubSkillItem
-                      isSelected={selectedIdentifier === item.provider.id}
-                      key={item.provider.id}
-                      provider={item.provider}
-                      server={getLobehubSkillServerByProvider(item.provider.id)}
-                      onSelect={
-                        onSelect ? () => onSelect(item.provider.id, 'lobehub-connector') : undefined
-                      }
-                    />
-                  );
-                }
-                return (
-                  <KlavisSkillItem
-                    isSelected={selectedIdentifier === item.serverType.identifier}
-                    key={item.serverType.identifier}
-                    server={getKlavisServerByIdentifier(item.serverType.identifier)}
-                    serverType={item.serverType}
-                    onSelect={
-                      onSelect ? () => onSelect(item.serverType.identifier, 'plugin') : undefined
-                    }
-                  />
-                );
-              })}
-              {renderMarketAgentSkills()}
-            </>,
+            renderMarketAgentSkills(),
           )}
 
         {hasCommunityTools &&
@@ -549,7 +546,10 @@ const SkillList = memo<SkillListProps>(
           renderSection(
             'customConnectors',
             t('skillGroup.customConnectors', '自定义 Connectors'),
-            renderCustomMCPs(),
+            <>
+              {renderCustomConnectors()}
+              {renderCustomMCPs()}
+            </>,
           )}
 
         {hasCustomSkills &&
@@ -559,9 +559,6 @@ const SkillList = memo<SkillListProps>(
             renderUserAgentSkills(),
           )}
 
-        <div style={{ marginTop: 8 }}>
-          <AddSkillButton />
-        </div>
       </div>
     );
   },

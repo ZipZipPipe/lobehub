@@ -1,4 +1,5 @@
-import { and, eq, gte, isNotNull, sql } from 'drizzle-orm';
+import type { VerifyCheckItem } from '@lobechat/types';
+import { and, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import { today } from '@/utils/time';
 
@@ -10,6 +11,17 @@ import type {
 } from '../schemas/agentOperations';
 import { agentOperations } from '../schemas/agentOperations';
 import type { LobeChatDatabase } from '../type';
+import { buildWorkspaceWhere } from '../utils/workspace';
+
+/** Verify rollup states, mirrors the `verify_status` enum column. */
+export type VerifyStatus =
+  | 'unverified'
+  | 'planned'
+  | 'verifying'
+  | 'passed'
+  | 'failed'
+  | 'repairing'
+  | 'delivered';
 
 export interface RecordOperationStartParams {
   agentId?: string | null;
@@ -69,11 +81,16 @@ export interface RecordOperationCompletionParams {
 export class AgentOperationModel {
   private readonly db: LobeChatDatabase;
   private readonly userId: string;
+  private readonly workspaceId?: string;
 
-  constructor(db: LobeChatDatabase, userId: string) {
+  constructor(db: LobeChatDatabase, userId: string, workspaceId?: string) {
     this.db = db;
     this.userId = userId;
+    this.workspaceId = workspaceId;
   }
+
+  private ownership = () =>
+    buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, agentOperations);
 
   /**
    * Insert the initial row when an operation is created. Idempotent via
@@ -99,6 +116,7 @@ export class AgentOperationModel {
       topicId: params.topicId ?? null,
       trigger: params.trigger,
       userId: this.userId,
+      workspaceId: this.workspaceId ?? null,
     };
 
     await this.db.insert(agentOperations).values(values).onConflictDoNothing();
@@ -140,14 +158,14 @@ export class AgentOperationModel {
     await this.db
       .update(agentOperations)
       .set(updates)
-      .where(and(eq(agentOperations.id, operationId), eq(agentOperations.userId, this.userId)));
+      .where(and(eq(agentOperations.id, operationId), this.ownership()));
   }
 
   async findById(operationId: string) {
     const [row] = await this.db
       .select()
       .from(agentOperations)
-      .where(and(eq(agentOperations.id, operationId), eq(agentOperations.userId, this.userId)))
+      .where(and(eq(agentOperations.id, operationId), this.ownership()))
       .limit(1);
     return row ?? null;
   }
@@ -171,7 +189,7 @@ export class AgentOperationModel {
       .from(agentOperations)
       .where(
         and(
-          eq(agentOperations.userId, this.userId),
+          this.ownership(),
           isNotNull(agentOperations.startedAt),
           isNotNull(agentOperations.completedAt),
           gte(agentOperations.createdAt, startDate),
@@ -200,5 +218,65 @@ export class AgentOperationModel {
       )
       .returning({ id: agentOperations.id });
     return rows.length === 1;
+  }
+
+  // ============================================
+  // Verify (delivery checker) — plan snapshot lives on this row
+  // ============================================
+
+  /**
+   * Write a draft check plan onto the operation and flip the rollup to `planned`.
+   * The plan is mutable while a draft; it is frozen on `confirmVerifyPlan`.
+   */
+  async setVerifyPlan(operationId: string, items: VerifyCheckItem[]): Promise<void> {
+    await this.db
+      .update(agentOperations)
+      .set({ verifyPlan: items, verifyStatus: 'planned' })
+      .where(and(eq(agentOperations.id, operationId), eq(agentOperations.userId, this.userId)));
+  }
+
+  /** Replace the draft plan items (user edited the plan before confirming). */
+  async replaceVerifyPlanItems(operationId: string, items: VerifyCheckItem[]): Promise<void> {
+    await this.db
+      .update(agentOperations)
+      .set({ verifyPlan: items })
+      .where(
+        and(
+          eq(agentOperations.id, operationId),
+          eq(agentOperations.userId, this.userId),
+          // only a not-yet-confirmed plan may be edited
+          isNull(agentOperations.verifyPlanConfirmedAt),
+        ),
+      );
+  }
+
+  /** Freeze the plan (records confirmation time). Results relate to frozen items. */
+  async confirmVerifyPlan(operationId: string, confirmedAt: Date = new Date()): Promise<void> {
+    await this.db
+      .update(agentOperations)
+      .set({ verifyPlanConfirmedAt: confirmedAt })
+      .where(and(eq(agentOperations.id, operationId), eq(agentOperations.userId, this.userId)));
+  }
+
+  /** Update the denormalized rollup. Always go through the service-layer chokepoint. */
+  async updateVerifyStatus(operationId: string, verifyStatus: VerifyStatus | null): Promise<void> {
+    await this.db
+      .update(agentOperations)
+      .set({ verifyStatus })
+      .where(and(eq(agentOperations.id, operationId), eq(agentOperations.userId, this.userId)));
+  }
+
+  /** Read just the verify-related fields for an operation. */
+  async getVerifyState(operationId: string) {
+    const [row] = await this.db
+      .select({
+        verifyPlan: agentOperations.verifyPlan,
+        verifyPlanConfirmedAt: agentOperations.verifyPlanConfirmedAt,
+        verifyStatus: agentOperations.verifyStatus,
+      })
+      .from(agentOperations)
+      .where(and(eq(agentOperations.id, operationId), eq(agentOperations.userId, this.userId)))
+      .limit(1);
+    return row ?? null;
   }
 }

@@ -8,6 +8,7 @@ import type {
 } from '../schemas';
 import { userConnectors } from '../schemas';
 import type { LobeChatDatabase } from '../type';
+import { buildWorkspacePayload, buildWorkspaceWhere } from '../utils/workspace';
 
 interface GateKeeper {
   decrypt: (ciphertext: string) => Promise<{ plaintext: string }>;
@@ -27,15 +28,22 @@ type UpdateConnectorParams = Partial<
 export class ConnectorModel {
   private userId: string;
   private db: LobeChatDatabase;
+  private gateKeeper?: GateKeeper;
+  private workspaceId?: string;
 
-  constructor(db: LobeChatDatabase, userId: string) {
+  constructor(db: LobeChatDatabase, userId: string, workspaceId?: string, gateKeeper?: GateKeeper) {
     this.db = db;
     this.userId = userId;
+    this.workspaceId = workspaceId;
+    this.gateKeeper = gateKeeper;
   }
+
+  private ownership = () =>
+    buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, userConnectors);
 
   create = async (
     params: CreateConnectorParams,
-    gateKeeper?: GateKeeper,
+    gateKeeper: GateKeeper | undefined = this.gateKeeper,
   ): Promise<UserConnectorItem> => {
     const credentials = params.credentials
       ? await encryptCredentials(params.credentials, gateKeeper)
@@ -43,51 +51,51 @@ export class ConnectorModel {
 
     const [result] = await this.db
       .insert(userConnectors)
-      .values({ ...params, credentials, userId: this.userId })
+      .values(
+        buildWorkspacePayload(
+          { userId: this.userId, workspaceId: this.workspaceId },
+          { ...params, credentials },
+        ),
+      )
       .returning();
 
     return result;
   };
 
   delete = async (id: string): Promise<void> => {
-    await this.db
-      .delete(userConnectors)
-      .where(and(eq(userConnectors.id, id), eq(userConnectors.userId, this.userId)));
+    await this.db.delete(userConnectors).where(and(eq(userConnectors.id, id), this.ownership()));
   };
 
-  query = async (gateKeeper?: GateKeeper): Promise<DecryptedConnector[]> => {
-    const rows = await this.db
-      .select()
-      .from(userConnectors)
-      .where(eq(userConnectors.userId, this.userId));
+  query = async (
+    gateKeeper: GateKeeper | undefined = this.gateKeeper,
+  ): Promise<DecryptedConnector[]> => {
+    const rows = await this.db.select().from(userConnectors).where(this.ownership());
 
     return Promise.all(rows.map((r) => decryptRow(r, gateKeeper)));
   };
 
   queryByIdentifiers = async (
     identifiers: string[],
-    gateKeeper?: GateKeeper,
+    gateKeeper: GateKeeper | undefined = this.gateKeeper,
   ): Promise<DecryptedConnector[]> => {
     if (identifiers.length === 0) return [];
 
     const rows = await this.db
       .select()
       .from(userConnectors)
-      .where(
-        and(
-          eq(userConnectors.userId, this.userId),
-          inArray(userConnectors.identifier, identifiers),
-        ),
-      );
+      .where(and(this.ownership(), inArray(userConnectors.identifier, identifiers)));
 
     return Promise.all(rows.map((r) => decryptRow(r, gateKeeper)));
   };
 
-  findById = async (id: string, gateKeeper?: GateKeeper): Promise<DecryptedConnector | null> => {
+  findById = async (
+    id: string,
+    gateKeeper: GateKeeper | undefined = this.gateKeeper,
+  ): Promise<DecryptedConnector | null> => {
     const [row] = await this.db
       .select()
       .from(userConnectors)
-      .where(and(eq(userConnectors.id, id), eq(userConnectors.userId, this.userId)))
+      .where(and(eq(userConnectors.id, id), this.ownership()))
       .limit(1);
 
     if (!row) return null;
@@ -97,7 +105,7 @@ export class ConnectorModel {
   update = async (
     id: string,
     patch: UpdateConnectorParams,
-    gateKeeper?: GateKeeper,
+    gateKeeper: GateKeeper | undefined = this.gateKeeper,
   ): Promise<void> => {
     const credentials =
       patch.credentials !== undefined && patch.credentials !== null
@@ -113,14 +121,14 @@ export class ConnectorModel {
     await this.db
       .update(userConnectors)
       .set(set)
-      .where(and(eq(userConnectors.id, id), eq(userConnectors.userId, this.userId)));
+      .where(and(eq(userConnectors.id, id), this.ownership()));
   };
 
   updateStatus = async (id: string, status: ConnectorStatus): Promise<void> => {
     await this.db
       .update(userConnectors)
       .set({ status, updatedAt: new Date() })
-      .where(and(eq(userConnectors.id, id), eq(userConnectors.userId, this.userId)));
+      .where(and(eq(userConnectors.id, id), this.ownership()));
   };
 }
 

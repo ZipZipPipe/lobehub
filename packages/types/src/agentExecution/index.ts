@@ -73,6 +73,11 @@ export interface ExecAgentAppContext {
     repos?: string[];
     workingDirectory?: string;
   };
+  /**
+   * Whether this operation is an isolated sub-agent execution. Used to disable
+   * recursive sub-agent dispatch.
+   */
+  isSubAgent?: boolean;
   /** Scope identifier */
   scope?: string | null;
   /** Session ID */
@@ -91,59 +96,6 @@ export interface ExecAgentAppContext {
   threadId?: string | null;
   /** Topic ID */
   topicId?: string | null;
-}
-
-/**
- * A project-level skill discovered on the device filesystem
- * (`.agents/skills` / `.claude/skills`) by the client at request time.
- * Only frontmatter + the absolute SKILL.md path are carried; the SKILL.md
- * body and directory tree are loaded on demand at activation time via the
- * readFile / listFiles tools.
- */
-export interface ProjectSkillMeta {
-  /** Skill description from SKILL.md frontmatter. */
-  description?: string;
-  /** Skill name from frontmatter (falls back to the directory name). */
-  name: string;
-  /** Absolute path to the skill's SKILL.md on the device filesystem. */
-  path: string;
-}
-
-/**
- * A single project-root agent instructions file (`AGENTS.md` / `CLAUDE.md`) read
- * from the device filesystem during workspace init. Unlike skills (metadata
- * only), the full body is carried so it can be injected into the system role and
- * rendered in web without a second device round-trip. Carried as a list on
- * {@link WorkspaceInitResult} since multiple files can coexist (e.g. both
- * `AGENTS.md` and `CLAUDE.md`, or future nested files).
- */
-export interface WorkspaceInstructions {
-  /** Full file content (capped at read time, e.g. 64KB). */
-  content: string;
-  /** Source file the instructions were read from. */
-  source: 'AGENTS.md' | 'CLAUDE.md';
-}
-
-/**
- * Result of scanning a bound project directory ("workspace init"): the agent
- * instructions file plus the project-level skills discovered under
- * `.agents/skills` + `.claude/skills`. Produced in a single device round-trip
- * (`deviceGateway.initWorkspace`) and cached on `devices.workingDirs[].workspace`
- * so subsequent runs within the TTL — and the web UI — reuse it without
- * re-scanning. Intentionally open to growth (env info, git status, …) as more
- * environment-preparation logic lands.
- *
- * The scanned root is not stored here — it is always the enclosing
- * `WorkingDirEntry.path`.
- */
-export interface WorkspaceInitResult {
-  /**
-   * Project-root agent instructions files (`AGENTS.md` / `CLAUDE.md`). Empty
-   * when none are present.
-   */
-  instructions: WorkspaceInstructions[];
-  /** Project-level skills discovered under the project root (metadata only). */
-  skills: ProjectSkillMeta[];
 }
 
 /**
@@ -301,13 +253,13 @@ export interface ExecGroupAgentResponse {
 // ============ SubAgent Task Execution Types ============
 
 /**
- * Parameters for execSubAgentTask - execute SubAgent task
+ * Parameters for execSubAgent - execute SubAgent task
  * Supports both Group mode and Single Agent mode
  *
  * - Group mode: pass groupId, Thread will be associated with the Group
  * - Single Agent mode: omit groupId, Thread will only be associated with the Agent
  */
-export interface ExecSubAgentTaskParams {
+export interface ExecSubAgentParams {
   /** The SubAgent ID to execute the task */
   agentId: string;
   /** The Group ID (optional, only for Group mode) */
@@ -335,9 +287,9 @@ export interface ExecSubAgentTaskParams {
 }
 
 /**
- * Result from execSubAgentTask
+ * Result from execSubAgent
  */
-export interface ExecSubAgentTaskResult {
+export interface ExecSubAgentResult {
   /** The assistant message ID created for this task */
   assistantMessageId: string;
   /** Error message if task failed to start */
@@ -351,14 +303,14 @@ export interface ExecSubAgentTaskResult {
 }
 
 /**
- * @deprecated Use ExecSubAgentTaskParams instead
+ * @deprecated Use ExecSubAgentParams instead
  */
-export type ExecGroupSubAgentTaskParams = ExecSubAgentTaskParams;
+export type ExecGroupSubAgentTaskParams = ExecSubAgentParams;
 
 /**
- * @deprecated Use ExecSubAgentTaskResult instead
+ * @deprecated Use ExecSubAgentResult instead
  */
-export type ExecGroupSubAgentTaskResult = ExecSubAgentTaskResult;
+export type ExecGroupSubAgentTaskResult = ExecSubAgentResult;
 
 /**
  * Current activity for real-time progress display

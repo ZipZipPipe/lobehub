@@ -1,32 +1,9 @@
-import type { WorkspaceInitResult } from '@lobechat/types';
+import type { WorkingDirEntry } from '@lobechat/types';
 import { index, jsonb, pgTable, text, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import { timestamps, timestamptz } from './_helpers';
 import { users } from './user';
 import { workspaces } from './workspace';
-
-/**
- * A working directory the device has used. Structured (rather than a bare path
- * string) so metadata such as the detected repo type survives — a remote client
- * viewing this device can't re-probe its filesystem, so whatever isn't captured
- * here at the source is lost. Mirrors the client-local `RecentDirEntry` shape.
- */
-export interface WorkingDirEntry {
-  path: string;
-  repoType?: 'git' | 'github';
-  /**
-   * Cached "workspace init" scan of this directory (AGENTS.md + project skills).
-   * Populated server-side at run start via `deviceGateway.initWorkspace` and
-   * reused within the TTL gated by `workspaceScannedAt`. Also read directly by
-   * the web UI to render the project's skills / instructions.
-   */
-  workspace?: WorkspaceInitResult;
-  /**
-   * Epoch ms when `workspace` was last scanned. Hoisted to the top level (out of
-   * `workspace`) so freshness can be checked without deserializing the payload.
-   */
-  workspaceScannedAt?: number;
-}
 
 /**
  * Stable device identity anchor — one row per physical machine per user.
@@ -45,6 +22,14 @@ export const devices = pgTable(
     userId: text('user_id')
       .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
+    // NOTE: devices are a USER-LEVEL identity, not workspace-scoped content. A
+    // physical machine belongs to the user across all of their workspaces (the
+    // unique key is (userId, deviceId), see below). `workspaceId` here only
+    // records which workspace the device was registered from — it is NOT used to
+    // filter device lookups. So `DeviceModel`/`deviceRouter` intentionally scope
+    // by userId only and do NOT use `buildWorkspaceWhere`. Do not "fix" them to
+    // workspace-scope reads, or a user's device would disappear inside their own
+    // workspaces.
     workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
 
     /** Machine-derived id (sha256 truncated to 32 chars; 64 leaves room for fallback randomUUID) */
