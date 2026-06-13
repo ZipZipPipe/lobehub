@@ -159,14 +159,19 @@ function createMockStore(overrides: Record<string, any> = {}) {
   // for each subagent run, mirroring `startOperation`'s contract just
   // enough that the executor can build dispatchers + completion calls.
   let subOpCounter = 0;
-  return {
+  const store = {
     associateMessageWithOperation: vi.fn(),
     completeOperation: vi.fn(),
     drainQueuedMessages: vi.fn(() => []),
     internal_dispatchMessage: vi.fn(),
     internal_toggleToolCallingStreaming: vi.fn(),
     markUnreadCompleted: vi.fn(),
-    operations: {} as Record<string, any>,
+    operations: {
+      'op-1': {
+        context: { agentId: 'agent-1', scope: 'main', topicId: 'topic-1' },
+        metadata: { startTime: 0 },
+      },
+    } as Record<string, any>,
     refreshMessages: vi.fn(async () => {}),
     refreshThreads: vi.fn(async () => {}),
     replaceMessages: vi.fn(),
@@ -181,6 +186,19 @@ function createMockStore(overrides: Record<string, any> = {}) {
     updateTopicMetadata: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as any;
+
+  if (!store.updateOperationMetadata) {
+    store.updateOperationMetadata = vi.fn((operationId: string, metadata: Record<string, any>) => {
+      const operation = store.operations[operationId];
+      if (!operation) return;
+      operation.metadata = {
+        ...operation.metadata,
+        ...metadata,
+      };
+    });
+  }
+
+  return store;
 }
 
 const defaultContext = {
@@ -336,6 +354,11 @@ const ccMessageDelta = (usage: {
 const codexThreadStarted = (threadId = 'codex-thread-1') => ({
   thread_id: threadId,
   type: 'thread.started',
+});
+
+const codexSessionConfigured = (model = 'gpt-5.5') => ({
+  model,
+  type: 'session_configured',
 });
 
 const codexTurnStarted = () => ({
@@ -721,7 +744,7 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
 
       // Realistic CC partial-messages flow: message_start primes the turn,
       // assistant events echo a stale usage, message_delta carries the final.
-      await runWithEvents([
+      const { store } = await runWithEvents([
         ccInit(),
         ccMessageStart('msg_01'),
         ccAssistant('msg_01', [{ text: 'a', type: 'text' }]),
@@ -767,6 +790,13 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
       // No cache tokens for this turn — these fields should be absent
       expect(u2.inputCachedTokens).toBeUndefined();
       expect(u2.inputWriteCacheTokens).toBeUndefined();
+
+      expect(store.operations['op-1'].metadata.usageMetrics).toEqual({
+        totalCost: 0,
+        totalInputTokens: 650,
+        totalOutputTokens: 130,
+        totalTokens: 780,
+      });
     });
 
     it('should ignore stale usage on assistant events (from message_start echo)', async () => {
@@ -1279,6 +1309,44 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
   });
 
   describe('Codex multi-turn persistence', () => {
+    it('should persist Codex host model metadata onto the current assistant message', async () => {
+      await runWithEvents(
+        [
+          codexSessionConfigured('gpt-5.5'),
+          codexThreadStarted(),
+          codexTurnStarted(),
+          codexAgentMessage('item_0', 'Done.'),
+          codexTurnCompleted({ cached_input_tokens: 4, input_tokens: 6, output_tokens: 3 }),
+        ],
+        {
+          params: {
+            heterogeneousProvider: { command: 'codex', type: 'codex' as const },
+          },
+        },
+      );
+
+      const modelWrites = mockUpdateMessage.mock.calls.filter(
+        ([id, value]: any) =>
+          id === 'ast-initial' && value.model === 'gpt-5.5' && value.provider === 'codex',
+      );
+      expect(modelWrites.length).toBeGreaterThan(0);
+
+      const usageWrite = modelWrites.find(([, value]: any) => value.metadata?.usage);
+      expect(usageWrite?.[1]).toMatchObject({
+        metadata: {
+          usage: {
+            inputCachedTokens: 4,
+            inputCacheMissTokens: 6,
+            totalInputTokens: 10,
+            totalOutputTokens: 3,
+            totalTokens: 13,
+          },
+        },
+        model: 'gpt-5.5',
+        provider: 'codex',
+      });
+    });
+
     it('should switch to a new assistant before persisting the next turn tool', async () => {
       const idCounter = { assistant: 0, tool: 0 };
       mockCreateMessage.mockImplementation(async (params: any) => {

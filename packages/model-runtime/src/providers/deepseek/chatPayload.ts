@@ -5,9 +5,10 @@ import type OpenAI from 'openai';
 import { buildDefaultAnthropicPayload } from '../../core/anthropicCompatibleFactory';
 import type { ChatStreamPayload } from '../../types';
 import { getModelPropertyWithFallback } from '../../utils/getFallbackModelProperty';
+import { isDeepSeekV4FamilyModel } from '../../utils/modelParse';
 import { sanitizeDeepSeekJsonPayload } from './sanitizePayload';
 
-const isDeepSeekV4Model = (model: string) => model.startsWith('deepseek-v4');
+export const isDeepSeekV4Model = (model: string | undefined) => isDeepSeekV4FamilyModel(model);
 const VISION_DOWNGRADE_PLACEHOLDER = '[image omitted: delegated to visual understanding tool]';
 
 const downgradeUnsupportedImageParts = (content: unknown) => {
@@ -25,6 +26,7 @@ const downgradeUnsupportedImageParts = (content: unknown) => {
 
   return changed ? downgraded : content;
 };
+
 const isEmptyContent = (content: unknown) =>
   content === '' || content === null || content === undefined;
 const hasReasoningContent = (reasoning: any) => typeof reasoning?.content === 'string';

@@ -39,6 +39,7 @@ import { threadService } from '@/services/thread';
 import { type ChatStore, useChatStore } from '@/store/chat/store';
 import { resolveNotificationNavigatePath } from '@/store/chat/utils/desktopNotification';
 import { markdownToTxt } from '@/utils/markdownToTxt';
+import { addUsageToOperationMetrics } from '@/utils/operationUsageMetrics';
 
 import { messageMapKey } from '../../../utils/messageMapKey';
 import { mergeQueuedMessages } from '../../operation/types';
@@ -1227,16 +1228,27 @@ export const executeHeterogeneousAgent = async (
           return;
         }
 
+        if (turnUsage) {
+          const operation = get().operations[operationId];
+          get().updateOperationMetadata(operationId, {
+            usageMetrics: addUsageToOperationMetrics(operation?.metadata?.usageMetrics, turnUsage),
+          });
+        }
+
         if (event.data.model) lastModel = event.data.model;
         if (event.data.provider) lastProvider = event.data.provider;
-        if (turnUsage) {
+        const updateValue: Record<string, any> = {};
+        if (turnUsage) updateValue.metadata = { usage: turnUsage };
+        if (event.data.model) updateValue.model = event.data.model;
+        if (event.data.provider) updateValue.provider = event.data.provider;
+
+        if (Object.keys(updateValue).length > 0) {
           persistQueue = persistQueue.then(async () => {
             await messageService
-              .updateMessage(
-                currentAssistantMessageId,
-                { metadata: { usage: turnUsage } },
-                { agentId: context.agentId, topicId: context.topicId },
-              )
+              .updateMessage(currentAssistantMessageId, updateValue, {
+                agentId: context.agentId,
+                topicId: context.topicId,
+              })
               .catch(console.error);
           });
         }

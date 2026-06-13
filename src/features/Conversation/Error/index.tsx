@@ -1,7 +1,7 @@
 import type { HeterogeneousAgentSessionError } from '@lobechat/electron-client-ipc';
 import { HeterogeneousAgentSessionErrorCode } from '@lobechat/electron-client-ipc';
 import { type ILobeAgentRuntimeErrorType } from '@lobechat/model-runtime';
-import { AgentRuntimeErrorType } from '@lobechat/model-runtime';
+import { AgentRuntimeErrorType, getErrorCodeSpec } from '@lobechat/model-runtime';
 import { type ChatMessageError, type ErrorType, type IToolErrorType } from '@lobechat/types';
 import { ChatErrorType } from '@lobechat/types';
 import { type AlertProps } from '@lobehub/ui';
@@ -76,12 +76,84 @@ const OllamaSetupGuide = dynamic(() => import('./OllamaSetupGuide'), {
   ssr: false,
 });
 
+const PlanLimitCard = dynamic(() => import('./PlanLimitCard'), { loading, ssr: false });
+
+const DeprecatedModelError = dynamic(() => import('./DeprecatedModelError'), {
+  loading,
+  ssr: false,
+});
+
+const QuotaLimitError = dynamic(() => import('./QuotaLimitError'), { loading, ssr: false });
+
+const TraceIdError = dynamic(() => import('./TraceIdError'), { loading, ssr: false });
+
 const HETEROGENEOUS_AGENT_STATUS_GUIDE_ERROR_CODES = new Set<string>([
   HeterogeneousAgentSessionErrorCode.AuthRequired,
   HeterogeneousAgentSessionErrorCode.CliNotFound,
   HeterogeneousAgentSessionErrorCode.Overloaded,
   HeterogeneousAgentSessionErrorCode.RateLimit,
 ]);
+
+// `UnknownChatFetchError` is excluded: its localized copy is a generic
+// "unknown error" message, so the trace-id report UI is strictly more useful.
+const LEGACY_LOCALIZED_ERROR_TYPES = new Set<string>(
+  Object.values(ChatErrorType)
+    .map(String)
+    .filter((type) => type !== ChatErrorType.UnknownChatFetchError),
+);
+
+/**
+ * Whether `getRuntimeErrorMessage` resolves a dedicated localized message for
+ * this error type — known runtime codes (spec table) plus legacy
+ * `error:response.<X>` entries (ChatErrorType members and HTTP status codes).
+ */
+const hasLocalizedErrorMessage = (
+  errorType?: IToolErrorType | ILobeAgentRuntimeErrorType | ErrorType,
+): boolean => {
+  if (errorType === undefined || errorType === null) return false;
+  if (typeof errorType === 'number') return true;
+  if (getErrorCodeSpec(String(errorType))) return true;
+  return LEGACY_LOCALIZED_ERROR_TYPES.has(String(errorType));
+};
+
+const isGoogleBlockedProviderError = (error?: ChatMessageError | null): boolean => {
+  if (error?.type !== 'ProviderBizError') return false;
+
+  const body = error.body as
+    | {
+        context?: {
+          finishReason?: unknown;
+          promptFeedback?: {
+            blockReason?: unknown;
+          };
+        };
+        provider?: unknown;
+      }
+    | undefined;
+
+  if (body?.provider !== 'google') return false;
+
+  return (
+    typeof body.context?.promptFeedback?.blockReason === 'string' ||
+    typeof body.context?.finishReason === 'string'
+  );
+};
+
+const shouldShowTraceIdError = (
+  error?: ChatMessageError | null,
+): error is ChatMessageError & { body: { traceId: string } } => {
+  if (typeof error?.body?.traceId !== 'string') return false;
+  if (isGoogleBlockedProviderError(error)) return false;
+
+  const errorType = error.type;
+  if (errorType === undefined || errorType === null) return true;
+  if (typeof errorType === 'number') return false;
+
+  const spec = getErrorCodeSpec(String(errorType));
+  if (spec?.isFallback) return true;
+
+  return !hasLocalizedErrorMessage(errorType);
+};
 
 const isHeterogeneousAgentStatusGuideError = (
   value: unknown,
@@ -213,6 +285,34 @@ const ErrorMessageExtra = memo<ErrorExtraProps>(({ error: alertError, data, onRe
   if (enableBusinessFeatures && businessChatErrorMessageExtra) return businessChatErrorMessageExtra;
 
   switch (error?.type) {
+    // Lightweight fallbacks for cloud billing errors, used in builds without a
+    // business override (e.g. desktop). The business hook above takes
+    // precedence when installed.
+    case ChatErrorType.FreePlanLimit:
+    case ChatErrorType.SubscriptionPlanLimit:
+    case ChatErrorType.InsufficientBudgetForModel: {
+      if (enableBusinessFeatures)
+        return (
+          <PlanLimitCard
+            errorBody={error?.body}
+            errorType={error?.type}
+            onRetry={handleRetryAgentMessage}
+          />
+        );
+      break;
+    }
+
+    case ChatErrorType.LobeHubModelDeprecated: {
+      if (enableBusinessFeatures)
+        return <DeprecatedModelError requestedModel={error?.body?.requestedModel} />;
+      break;
+    }
+
+    case AgentRuntimeErrorType.QuotaLimitReached: {
+      if (enableBusinessFeatures) return <QuotaLimitError id={data.id} />;
+      break;
+    }
+
     case AgentRuntimeErrorType.OllamaServiceUnavailable: {
       return <OllamaSetupGuide id={data.id} />;
     }
@@ -234,6 +334,12 @@ const ErrorMessageExtra = memo<ErrorExtraProps>(({ error: alertError, data, onRe
 
   if (error?.type?.toString().includes('Invalid')) {
     return <ChatInvalidAPIKey id={data.id} provider={data.error?.body?.provider} />;
+  }
+
+  // Show a report action for unknown or fallback-bucket traceable errors.
+  // Specific known error types keep their dedicated localized message below.
+  if (enableBusinessFeatures && shouldShowTraceIdError(error)) {
+    return <TraceIdError id={data.id} traceId={error.body.traceId} />;
   }
 
   return (

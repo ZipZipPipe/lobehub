@@ -22,6 +22,7 @@ export interface DocumentHistoryListItem {
   isCurrent: boolean;
   savedAt: Date;
   saveSource: DocumentHistorySaveSource;
+  userId: string;
 }
 
 export interface DocumentHistoryItemResult {
@@ -54,6 +55,7 @@ export interface ListDocumentHistoryResult {
 export type DatabaseLike = LobeChatDatabase | Transaction;
 
 export interface UpdateDocumentParams {
+  breakAutosaveWindow?: boolean;
   content?: string;
   editorData?: Record<string, any>;
   fileType?: string;
