@@ -1,3 +1,4 @@
+import { checkAuth } from '@/app/(backend)/middleware/auth';
 import { createSpeechResponse } from '@/server/utils/createSpeechResponse';
 
 const ELEVENLABS_BASE = 'https://api.elevenlabs.io/v1/text-to-speech';
@@ -8,7 +9,7 @@ interface ElevenLabsTTSPayload {
   voice: string;
 }
 
-export const POST = async (req: Request) => {
+export const POST = checkAuth(async (req: Request) => {
   const payload = (await req.json()) as ElevenLabsTTSPayload;
 
   // Resolve API key: env var first, then the provider-specific header.
@@ -75,4 +76,4 @@ export const POST = async (req: Request) => {
       },
     },
   );
-};
+});

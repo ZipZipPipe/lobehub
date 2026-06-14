@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { POST } from './route';
 
+vi.mock('@/app/(backend)/middleware/auth', () => ({
+  checkAuth: (handler: (req: Request) => Promise<Response>) => handler,
+}));
+
+const routeOptions = { params: Promise.resolve({}) };
+
 const createRequest = (model = 'eleven_v3') =>
   new Request('https://test.com/webapi/tts/elevenlabs', {
     body: JSON.stringify({
@@ -26,7 +32,7 @@ describe('ElevenLabs TTS route', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await POST(createRequest());
+    const response = await POST(createRequest(), routeOptions);
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({
@@ -46,7 +52,7 @@ describe('ElevenLabs TTS route', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await POST(createRequest());
+    const response = await POST(createRequest(), routeOptions);
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('audio/mpeg');
