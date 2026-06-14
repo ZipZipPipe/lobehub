@@ -103,18 +103,35 @@ describe('AgentSettings Content', () => {
     mocks.serverState.featureFlags.enableAgentSelfIteration = true;
   });
 
-  it('should select self iteration when inbox hides opening settings', () => {
+  it('should select voice service when inbox hides opening settings', () => {
     render(<Content />);
 
     expect(screen.queryByRole('button', { name: 'agentTab.opening' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'agentTab.tts' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'agentTab.selfIteration' })).toBeInTheDocument();
     expect(screen.getByTestId('agent-settings-menu')).toHaveAttribute(
       'data-selected',
-      ChatSettingsTabs.SelfIteration,
+      ChatSettingsTabs.TTS,
     );
     expect(screen.getByTestId('agent-settings-content')).toHaveAttribute(
       'data-tab',
-      ChatSettingsTabs.SelfIteration,
+      ChatSettingsTabs.TTS,
+    );
+  });
+
+  it('opens voice service settings from the menu', () => {
+    mocks.agentState.isInbox = false;
+    render(<Content />);
+
+    screen.getByRole('button', { name: 'agentTab.tts' }).click();
+
+    expect(screen.getByTestId('agent-settings-menu')).toHaveAttribute(
+      'data-selected',
+      ChatSettingsTabs.TTS,
+    );
+    expect(screen.getByTestId('agent-settings-content')).toHaveAttribute(
+      'data-tab',
+      ChatSettingsTabs.TTS,
     );
   });
 });

@@ -4,7 +4,7 @@ import { Avatar, Block, Flexbox, Icon, Text } from '@lobehub/ui';
 import { type ItemType } from 'antd/es/menu/interface';
 import { useTheme } from 'antd-style';
 import isEqual from 'fast-deep-equal';
-import { ActivityIcon, MessageSquareHeartIcon } from 'lucide-react';
+import { ActivityIcon, AudioLinesIcon, MessageSquareHeartIcon } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { shallow } from 'zustand/shallow';
@@ -35,6 +35,7 @@ const Content = memo(() => {
     () =>
       [
         !isInbox ? ChatSettingsTabs.Opening : null,
+        ChatSettingsTabs.TTS,
         enableAgentSelfIteration ? ChatSettingsTabs.SelfIteration : null,
       ].filter(Boolean) as ChatSettingsTabs[],
     [isInbox, enableAgentSelfIteration],
@@ -75,6 +76,13 @@ const Content = memo(() => {
                 icon: <Icon icon={ActivityIcon} />,
                 key: ChatSettingsTabs.SelfIteration,
                 label: t('agentTab.selfIteration'),
+              };
+            }
+            case ChatSettingsTabs.TTS: {
+              return {
+                icon: <Icon icon={AudioLinesIcon} />,
+                key: ChatSettingsTabs.TTS,
+                label: t('agentTab.tts'),
               };
             }
             default: {

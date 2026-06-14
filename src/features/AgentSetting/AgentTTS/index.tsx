@@ -16,6 +16,7 @@ import { globalGeneralSelectors } from '@/store/global/selectors';
 import { selectors, useStore } from '../store';
 import { ttsOptions } from './options';
 import SelectWithTTSPreview from './SelectWithTTSPreview';
+
 const elevenLabsVoiceOptions = [
   { label: 'Custom (OEyxkK9dZ)', value: 'OEyxkK9dZHAF59ZRc5c2' },
   { label: 'Rachel', value: '21m00Tcm4TlvDq8ikWAM' },
@@ -28,7 +29,6 @@ const elevenLabsVoiceOptions = [
   { label: 'Adam', value: 'pNInz6obpgDQGcFmaJgB' },
   { label: 'Sam', value: 'yoZ06aMxZJJ28mfd3POQ' },
 ];
-
 
 const TTS_SETTING_KEY = 'tts';
 const { openaiVoiceOptions, localeOptions } = VoiceList;
@@ -91,10 +91,7 @@ const AgentTTS = memo(() => {
       },
       {
         children: (
-          <SelectWithTTSPreview
-            options={elevenLabsVoiceOptions}
-            server={'elevenlabs'}
-          />
+          <SelectWithTTSPreview options={elevenLabsVoiceOptions} server={'elevenlabs'} />
         ),
         desc: t('settingTTS.voice.desc'),
         divider: false,

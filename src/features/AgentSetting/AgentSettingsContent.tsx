@@ -9,6 +9,7 @@ import { featureFlagsSelectors, useServerConfigStore } from '@/store/serverConfi
 import AgentConnectors from './AgentConnectors';
 import AgentOpening from './AgentOpening';
 import AgentSelfIteration from './AgentSelfIteration';
+import AgentTTS from './AgentTTS';
 
 export interface AgentSettingsContentProps {
   loadingSkeleton: ReactNode;
@@ -24,6 +25,7 @@ const AgentSettingsContent = memo<AgentSettingsContentProps>(({ tab, loadingSkel
   return (
     <>
       {tab === ChatSettingsTabs.Opening && <AgentOpening />}
+      {tab === ChatSettingsTabs.TTS && <AgentTTS />}
       {enableAgentSelfIteration && tab === ChatSettingsTabs.SelfIteration && <AgentSelfIteration />}
       {tab === ChatSettingsTabs.Connector && <AgentConnectors />}
     </>
