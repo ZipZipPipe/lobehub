@@ -17,6 +17,7 @@ import { selectors, useStore } from '../store';
 import { ttsOptions } from './options';
 import SelectWithTTSPreview from './SelectWithTTSPreview';
 const elevenLabsVoiceOptions = [
+  { label: 'Custom (OEyxkK9dZ)', value: 'OEyxkK9dZHAF59ZRc5c2' },
   { label: 'Rachel', value: '21m00Tcm4TlvDq8ikWAM' },
   { label: 'Domi', value: 'AZnzlk1XvdvUeBnXlLWX' },
   { label: 'Bella', value: 'EXAVITQu4vr4xnSDxMaL' },

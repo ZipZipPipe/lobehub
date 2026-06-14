@@ -35,7 +35,7 @@ export const POST = async (req: Request) => {
     'tts-1-hd': 'eleven_multilingual_v2',
     'gpt-4o-mini-tts': 'eleven_multilingual_v2',
   };
-  const modelId = modelIdMap[payload.model] || 'eleven_multilingual_v2';
+  const modelId = modelIdMap[payload.model] || 'eleven_v3';
 
   const elevenLabsBody = {
     model_id: modelId,

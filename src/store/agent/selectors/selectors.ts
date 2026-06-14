@@ -173,7 +173,7 @@ const currentAgentTTSVoice =
         break;
       }
       case 'elevenlabs': {
-        currentVoice = voice.elevenlabs || '21m00Tcm4TlvDq8ikWAM';
+        currentVoice = voice.elevenlabs || 'OEyxkK9dZHAF59ZRc5c2';
         break;
       }
     }
