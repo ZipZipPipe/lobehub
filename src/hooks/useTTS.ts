@@ -76,6 +76,22 @@ export const useTTS = (content: string, config?: TTSConfig) => {
       } as MicrosoftSpeechOptions;
       break;
     }
+    case 'elevenlabs': {
+      useSelectedTTS = useOpenAITTS;
+      options = {
+        api: {
+          headers: {
+            ...createHeaderWithOpenAI(),
+          },
+          serviceUrl: API_ENDPOINTS.tts('elevenlabs'),
+        },
+        options: {
+          model: ttsSettings.openAI.ttsModel,
+          voice: config?.voice || voice,
+        },
+      } as OpenAITTSOptions;
+      break;
+    }
   }
 
   return useSelectedTTS(content, {

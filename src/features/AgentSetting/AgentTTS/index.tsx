@@ -16,6 +16,18 @@ import { globalGeneralSelectors } from '@/store/global/selectors';
 import { selectors, useStore } from '../store';
 import { ttsOptions } from './options';
 import SelectWithTTSPreview from './SelectWithTTSPreview';
+const elevenLabsVoiceOptions = [
+  { label: 'Rachel', value: '21m00Tcm4TlvDq8ikWAM' },
+  { label: 'Domi', value: 'AZnzlk1XvdvUeBnXlLWX' },
+  { label: 'Bella', value: 'EXAVITQu4vr4xnSDxMaL' },
+  { label: 'Antoni', value: 'ErXwobaYiN019PkySvjV' },
+  { label: 'Elli', value: 'MF3mGyEYCl7XYWbV9V6O' },
+  { label: 'Josh', value: 'TxGEqnHWrfWFTfGW9XjX' },
+  { label: 'Arnold', value: 'VR6AewLTigWN4FDYWX9J' },
+  { label: 'Adam', value: 'pNInz6obpgDQGcFmaJgB' },
+  { label: 'Sam', value: 'yoZ06aMxZJJ28mfd3POQ' },
+];
+
 
 const TTS_SETTING_KEY = 'tts';
 const { openaiVoiceOptions, localeOptions } = VoiceList;
@@ -75,6 +87,19 @@ const AgentTTS = memo(() => {
         hidden: config.ttsService !== 'microsoft',
         label: t('settingTTS.voice.title'),
         name: [TTS_SETTING_KEY, 'voice', 'microsoft'],
+      },
+      {
+        children: (
+          <SelectWithTTSPreview
+            options={elevenLabsVoiceOptions}
+            server={'elevenlabs'}
+          />
+        ),
+        desc: t('settingTTS.voice.desc'),
+        divider: false,
+        hidden: config.ttsService !== 'elevenlabs',
+        label: t('settingTTS.voice.title'),
+        name: [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
       },
       {
         children: (

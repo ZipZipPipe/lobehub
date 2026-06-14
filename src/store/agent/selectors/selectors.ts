@@ -172,6 +172,10 @@ const currentAgentTTSVoice =
         currentVoice = voice.microsoft || (voiceList.microsoftVoiceOptions?.[0].value as string);
         break;
       }
+      case 'elevenlabs': {
+        currentVoice = voice.elevenlabs || '21m00Tcm4TlvDq8ikWAM';
+        break;
+      }
     }
     return currentVoice || 'alloy';
   };
