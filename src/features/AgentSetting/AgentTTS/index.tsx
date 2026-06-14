@@ -6,7 +6,7 @@ import { Form, Select } from '@lobehub/ui';
 import { Switch } from 'antd';
 import isEqual from 'fast-deep-equal';
 import { Mic } from 'lucide-react';
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FORM_STYLE } from '@/const/layoutTokens';
@@ -17,8 +17,10 @@ import { selectors, useStore } from '../store';
 import { ttsOptions } from './options';
 import SelectWithTTSPreview from './SelectWithTTSPreview';
 
+const DEFAULT_ELEVENLABS_VOICE = 'OEyxkK9dZHAF59ZRc5c2';
+
 const elevenLabsVoiceOptions = [
-  { label: 'Custom (OEyxkK9dZ)', value: 'OEyxkK9dZHAF59ZRc5c2' },
+  { label: 'Custom (OEyxkK9dZ)', value: DEFAULT_ELEVENLABS_VOICE },
   { label: 'Rachel', value: '21m00Tcm4TlvDq8ikWAM' },
   { label: 'Domi', value: 'AZnzlk1XvdvUeBnXlLWX' },
   { label: 'Bella', value: 'EXAVITQu4vr4xnSDxMaL' },
@@ -42,11 +44,32 @@ const AgentTTS = memo(() => {
   });
   const config = useStore(selectors.currentTtsConfig, isEqual);
   const [disabled, updateConfig] = useStore((s) => [s.disabled, s.setAgentConfig]);
+  const selectedTTSService =
+    Form.useWatch([TTS_SETTING_KEY, 'ttsService'], form) ?? config.ttsService;
+  const showAllLocaleVoice =
+    Form.useWatch([TTS_SETTING_KEY, 'showAllLocaleVoice'], form) ?? config.showAllLocaleVoice;
+  const selectedElevenLabsVoice = Form.useWatch(
+    [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
+    form,
+  );
 
   const { edgeVoiceOptions, microsoftVoiceOptions } = useMemo(
-    () => voiceList(config.showAllLocaleVoice),
-    [config.showAllLocaleVoice],
+    () => voiceList(showAllLocaleVoice),
+    [showAllLocaleVoice],
   );
+
+  useEffect(() => {
+    form.setFieldsValue({ [TTS_SETTING_KEY]: config });
+  }, [config, form]);
+
+  useEffect(() => {
+    if (selectedTTSService !== 'elevenlabs' || selectedElevenLabsVoice) return;
+
+    form.setFieldValue(
+      [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
+      DEFAULT_ELEVENLABS_VOICE,
+    );
+  }, [form, selectedElevenLabsVoice, selectedTTSService]);
 
   const tts: FormGroupItemType = {
     children: [
@@ -59,7 +82,7 @@ const AgentTTS = memo(() => {
       {
         children: <Switch />,
         desc: t('settingTTS.showAllLocaleVoice.desc'),
-        hidden: config.ttsService === 'openai',
+        hidden: selectedTTSService === 'openai' || selectedTTSService === 'elevenlabs',
         label: t('settingTTS.showAllLocaleVoice.title'),
         layout: 'horizontal',
         minWidth: undefined,
@@ -69,7 +92,7 @@ const AgentTTS = memo(() => {
       {
         children: <SelectWithTTSPreview options={openaiVoiceOptions} server={'openai'} />,
         desc: t('settingTTS.voice.desc'),
-        hidden: config.ttsService !== 'openai',
+        hidden: selectedTTSService !== 'openai',
         label: t('settingTTS.voice.title'),
         name: [TTS_SETTING_KEY, 'voice', 'openai'],
       },
@@ -77,7 +100,7 @@ const AgentTTS = memo(() => {
         children: <SelectWithTTSPreview options={edgeVoiceOptions} server={'edge'} />,
         desc: t('settingTTS.voice.desc'),
         divider: false,
-        hidden: config.ttsService !== 'edge',
+        hidden: selectedTTSService !== 'edge',
         label: t('settingTTS.voice.title'),
         name: [TTS_SETTING_KEY, 'voice', 'edge'],
       },
@@ -85,7 +108,7 @@ const AgentTTS = memo(() => {
         children: <SelectWithTTSPreview options={microsoftVoiceOptions} server={'microsoft'} />,
         desc: t('settingTTS.voice.desc'),
         divider: false,
-        hidden: config.ttsService !== 'microsoft',
+        hidden: selectedTTSService !== 'microsoft',
         label: t('settingTTS.voice.title'),
         name: [TTS_SETTING_KEY, 'voice', 'microsoft'],
       },
@@ -95,7 +118,7 @@ const AgentTTS = memo(() => {
         ),
         desc: t('settingTTS.voice.desc'),
         divider: false,
-        hidden: config.ttsService !== 'elevenlabs',
+        hidden: selectedTTSService !== 'elevenlabs',
         label: t('settingTTS.voice.title'),
         name: [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
       },

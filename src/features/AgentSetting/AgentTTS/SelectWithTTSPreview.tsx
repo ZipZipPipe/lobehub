@@ -5,7 +5,7 @@ import { type SelectProps } from '@lobehub/ui';
 import { Alert, Button, Flexbox, Highlighter, Select } from '@lobehub/ui';
 import { type RefSelectProps } from 'antd';
 import { cssVar } from 'antd-style';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useTTS } from '@/hooks/useTTS';
@@ -27,6 +27,10 @@ const SelectWithTTSPreview = ({
   const [voice, setVoice] = useState<string>(value);
   const { t } = useTranslation('welcome');
   const PREVIEW_TEXT = ['Lobe Chat', t('slogan.title'), t('slogan.desc1')].join('. ');
+
+  useEffect(() => {
+    setVoice(value as string);
+  }, [value]);
 
   const setDefaultError = useCallback(
     (err?: any) => {
