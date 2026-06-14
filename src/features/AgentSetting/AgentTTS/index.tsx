@@ -3,7 +3,7 @@
 import { VoiceList } from '@lobehub/tts';
 import { type FormGroupItemType } from '@lobehub/ui';
 import { Form, Select } from '@lobehub/ui';
-import { Switch } from 'antd';
+import { Form as AntdForm, Switch } from 'antd';
 import isEqual from 'fast-deep-equal';
 import { Mic } from 'lucide-react';
 import { memo, useEffect, useMemo } from 'react';
@@ -45,10 +45,10 @@ const AgentTTS = memo(() => {
   const config = useStore(selectors.currentTtsConfig, isEqual);
   const [disabled, updateConfig] = useStore((s) => [s.disabled, s.setAgentConfig]);
   const selectedTTSService =
-    Form.useWatch([TTS_SETTING_KEY, 'ttsService'], form) ?? config.ttsService;
+    AntdForm.useWatch([TTS_SETTING_KEY, 'ttsService'], form) ?? config.ttsService;
   const showAllLocaleVoice =
-    Form.useWatch([TTS_SETTING_KEY, 'showAllLocaleVoice'], form) ?? config.showAllLocaleVoice;
-  const selectedElevenLabsVoice = Form.useWatch(
+    AntdForm.useWatch([TTS_SETTING_KEY, 'showAllLocaleVoice'], form) ?? config.showAllLocaleVoice;
+  const selectedElevenLabsVoice = AntdForm.useWatch(
     [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
     form,
   );
