@@ -80,13 +80,10 @@ export const useTTS = (content: string, config?: TTSConfig) => {
       useSelectedTTS = useOpenAITTS;
       options = {
         api: {
-          headers: {
-            ...createHeaderWithOpenAI(),
-          },
           serviceUrl: API_ENDPOINTS.tts('elevenlabs'),
         },
         options: {
-          model: ttsSettings.openAI.ttsModel,
+          model: 'eleven_v3',
           voice: config?.voice || voice,
         },
       } as OpenAITTSOptions;

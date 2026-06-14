@@ -11,12 +11,9 @@ interface ElevenLabsTTSPayload {
 export const POST = async (req: Request) => {
   const payload = (await req.json()) as ElevenLabsTTSPayload;
 
-  // Resolve API key: env var first, then header passthrough
+  // Resolve API key: env var first, then the provider-specific header.
   const apiKey =
-    process.env.ELEVENLABS_API_KEY ||
-    req.headers.get('x-elevenlabs-api-key') ||
-    req.headers.get('x-openai-api-key') as string ||
-    '';
+    process.env.ELEVENLABS_API_KEY || req.headers.get('x-elevenlabs-api-key') || '';
 
   if (!apiKey) {
     return new Response(
@@ -68,8 +65,7 @@ export const POST = async (req: Request) => {
         throw new Error(`ElevenLabs API error ${response.status}: ${errText}`);
       }
 
-      // Return the ArrayBuffer so createSpeechResponse can stream it
-      return await response.arrayBuffer();
+      return response;
     },
     {
       logTag: 'webapi/tts/elevenlabs',
