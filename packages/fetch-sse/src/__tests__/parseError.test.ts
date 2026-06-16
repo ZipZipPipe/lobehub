@@ -88,4 +88,43 @@ describe('getMessageError', () => {
       type: 504,
     });
   });
+
+  it('should surface wrapped upstream error message', async () => {
+    const mockResponse = createMockResponse(
+      {
+        body: { message: 'minimax TTS error: login fail' },
+        errorType: 500,
+      },
+      false,
+      500,
+    );
+
+    const error = await getMessageError(mockResponse as any);
+
+    expect(error).toEqual({
+      body: { message: 'minimax TTS error: login fail' },
+      message: 'minimax TTS error: login fail',
+      type: 500,
+    });
+  });
+
+  it('should surface nonstandard upstream error message', async () => {
+    const mockResponse = createMockResponse(
+      {
+        error: { message: 'upstream provider rejected the request' },
+      },
+      false,
+      400,
+    );
+
+    const error = await getMessageError(mockResponse as any);
+
+    expect(error).toEqual({
+      body: {
+        error: { message: 'upstream provider rejected the request' },
+      },
+      message: 'upstream provider rejected the request',
+      type: 400,
+    });
+  });
 });

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useTTS } from '@/hooks/useTTS';
 import { useFileStore } from '@/store/file';
+import { extractErrorMessage, normalizeErrorBody } from '@/utils/extractErrorMessage';
 
 import { useConversationStore } from '../../../../store';
 import Player from './Player';
@@ -26,7 +27,12 @@ const InitPlayer = memo<TTSProps>(({ id, content, contentMd5, file }) => {
 
   const setDefaultError = useCallback(
     (err?: any) => {
-      setError({ body: err, message: t('tts.responseError', { ns: 'error' }), type: 500 });
+      const fallbackMessage = t('tts.responseError', { ns: 'error' });
+      setError({
+        body: normalizeErrorBody(err),
+        message: extractErrorMessage(err) || fallbackMessage,
+        type: 500,
+      });
     },
     [t],
   );

@@ -6,6 +6,8 @@ import { TrashIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { extractErrorMessage } from '@/utils/extractErrorMessage';
+
 interface PlayerProps extends AudioPlayerProps {
   error?: ChatMessageError;
   onDelete: () => void;
@@ -14,6 +16,8 @@ interface PlayerProps extends AudioPlayerProps {
 
 const Player = memo<PlayerProps>(({ onRetry, error, onDelete, audio, isLoading, onInitPlay }) => {
   const { t } = useTranslation('chat');
+  const errorMessage =
+    error?.message || extractErrorMessage(error?.body) || t('tts.responseError', { ns: 'error' });
 
   return (
     <Flexbox horizontal align={'center'} style={{ minWidth: 200, width: '100%' }}>
@@ -21,7 +25,7 @@ const Player = memo<PlayerProps>(({ onRetry, error, onDelete, audio, isLoading, 
         <Alert
           closable
           style={{ alignItems: 'center', width: '100%' }}
-          title={error.message}
+          title={errorMessage}
           type="error"
           action={
             <Button size={'small'} type={'primary'} onClick={onRetry}>

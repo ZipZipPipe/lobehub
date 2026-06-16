@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useTTS } from '@/hooks/useTTS';
 import { type TTSServer } from '@/types/agent';
+import { extractErrorMessage, normalizeErrorBody } from '@/utils/extractErrorMessage';
 
 interface SelectWithTTSPreviewProps extends SelectProps {
   server: TTSServer;
@@ -34,7 +35,12 @@ const SelectWithTTSPreview = ({
 
   const setDefaultError = useCallback(
     (err?: any) => {
-      setError({ body: err, message: t('tts.responseError', { ns: 'error' }), type: 500 });
+      const fallbackMessage = t('tts.responseError', { ns: 'error' });
+      setError({
+        body: normalizeErrorBody(err),
+        message: extractErrorMessage(err) || fallbackMessage,
+        type: 500,
+      });
     },
     [t],
   );
@@ -80,6 +86,9 @@ const SelectWithTTSPreview = ({
     setText([PREVIEW_TEXT, option?.label].join(' - '));
     onSelect?.(value, option);
   };
+  const errorMessage =
+    error?.message || extractErrorMessage(error?.body) || t('tts.responseError', { ns: 'error' });
+
   return (
     <Flexbox gap={8}>
       <Flexbox horizontal align={'center'} gap={8} style={{ width: '100%' }}>
@@ -107,7 +116,7 @@ const SelectWithTTSPreview = ({
         <Alert
           closable
           style={{ alignItems: 'center', width: '100%' }}
-          title={error.message}
+          title={errorMessage}
           type="error"
           action={
             <Button size={'small'} type={'primary'} onClick={handleRetry}>
