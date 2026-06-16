@@ -87,7 +87,14 @@ import { AgentRuntimeService } from '@/server/services/agentRuntime';
 import { getAbortError, isAbortError, throwIfAborted } from '@/server/services/agentRuntime/abort';
 import { hookDispatcher } from '@/server/services/agentRuntime/hooks';
 import type { AgentHook } from '@/server/services/agentRuntime/hooks/types';
-import type { StepLifecycleCallbacks } from '@/server/services/agentRuntime/types';
+import type {
+  ExecGroupMemberParams,
+  ExecGroupMemberResult,
+  GroupActionMemberBridgeParams,
+  GroupActionMemberMode,
+  GroupActionOnComplete,
+  StepLifecycleCallbacks,
+} from '@/server/services/agentRuntime/types';
 import { enqueueAgentSignalSourceEvent } from '@/server/services/agentSignal';
 import {
   isAgentSignalEnabledForUser,
@@ -95,16 +102,13 @@ import {
   resolveAgentSelfIterationCapability,
 } from '@/server/services/agentSignal/featureGate';
 import { shouldSuppressSignal } from '@/server/services/agentSignal/suppressSignal';
+import { ComposioService } from '@/server/services/composio';
 import { deviceGateway } from '@/server/services/deviceGateway';
 import { DocumentService } from '@/server/services/document';
 import { FileService } from '@/server/services/file';
-import {
-  resolveAttachmentMetadata,
-  resolveAttachmentsByFileIds,
-} from '@/server/services/file/resolveAttachments';
+import { resolveAttachmentsByFileIds } from '@/server/services/file/resolveAttachments';
 import { HeterogeneousAgentService } from '@/server/services/heterogeneousAgent';
 import type { ConversationHistoryEntry } from '@/server/services/heterogeneousAgent/cloudHeteroContext';
-import { KlavisService } from '@/server/services/klavis';
 import { MarketService } from '@/server/services/market';
 import { markdownToTxt } from '@/utils/markdownToTxt';
 
@@ -190,6 +194,14 @@ interface InternalExecAgentParams extends ExecAgentParams {
   disableTools?: boolean;
   /** Discord context for injecting channel/guild info into agent system message */
   discordContext?: any;
+  /**
+   * Inject a user-role message into the LLM context for this turn WITHOUT
+   * persisting it (no DB row, no Agent Signal). Used for ephemeral orchestration
+   * instructions — e.g. a group supervisor's `<speaker>` instruction to a member —
+   * so it drives the member's response without polluting the group conversation.
+   * Requires `suppressUserMessage` (the turn runs off existing history).
+   */
+  ephemeralUserMessage?: string;
   /** Eval context for injecting environment prompts into system message */
   evalContext?: EvalContext;
   /** External files to upload to S3 and attach to the user message */
@@ -287,7 +299,7 @@ export class AiAgentService {
   private readonly topicModel: TopicModel;
   private readonly agentRuntimeService: AgentRuntimeService;
   private readonly marketService: MarketService;
-  private readonly klavisService: KlavisService;
+  private readonly composioService: ComposioService;
 
   private readonly workspaceId?: string;
 
@@ -323,11 +335,12 @@ export class AiAgentService {
       delegate: {
         execSubAgent: this.execSubAgent,
         execVirtualSubAgent: this.execVirtualSubAgent,
+        execGroupMember: this.execGroupMember,
       },
       workspaceId: wsId,
     });
     this.marketService = new MarketService({ userInfo: { userId } });
-    this.klavisService = new KlavisService({ db, userId, workspaceId: wsId });
+    this.composioService = new ComposioService({ db, userId });
   }
 
   private async resolveOperationTaskId(
@@ -440,6 +453,181 @@ export class AiAgentService {
   }
 
   /**
+   * Resolve a run's attachments into the lists the message + context layers
+   * consume. This is the single standard ingestion path shared by BOTH branches
+   * of {@link execAgent} — the heterogeneous-agent branch (which returns early)
+   * and the normal agent branch — so neither hand-rolls its own upload.
+   *
+   * Two sources are merged:
+   * - `files`: raw buffers / URLs delivered by bot/IM channels (Slack, Telegram,
+   *   …). These have never touched our storage, so they're uploaded to S3 here.
+   * - `attachedFileIds`: already-uploaded ids (the SPA gateway path). Resolved to
+   *   signed URLs and classified via {@link resolveAttachmentsByFileIds}.
+   *
+   * Per-file ingestion failures are collected into `warnings` and never thrown,
+   * so a single bad attachment can't block the run (the text prompt still works).
+   */
+  private async resolveRunAttachments({
+    attachedFileIds,
+    files,
+    throwIfAborted,
+  }: {
+    attachedFileIds?: string[];
+    files?: InternalExecAgentParams['files'];
+    throwIfAborted: (stage: string) => Promise<void>;
+  }): Promise<{
+    fileIds?: string[];
+    fileList?: ChatFileItem[];
+    imageList?: Array<{ alt: string; id: string; url: string }>;
+    videoList?: ChatVideoItem[];
+    warnings: string[];
+  }> {
+    const warnings: string[] = [];
+    let fileIds: string[] | undefined;
+    let imageList: Array<{ alt: string; id: string; url: string }> | undefined;
+    let videoList: ChatVideoItem[] | undefined;
+    let fileList: ChatFileItem[] | undefined;
+
+    // Upload raw bot/IM files to S3 and classify them (image / video / document).
+    if (files && files.length > 0) {
+      fileIds = [];
+      imageList = [];
+      videoList = [];
+      fileList = [];
+      const fileService = new FileService(this.db, this.userId, this.workspaceId);
+      const documentService = new DocumentService(this.db, this.userId, this.workspaceId);
+
+      for (const file of files) {
+        await throwIfAborted('file upload');
+
+        try {
+          const result = await ingestAttachment(file, fileService, this.userId);
+          fileIds.push(result.fileId);
+
+          if (result.isImage) {
+            imageList.push({
+              alt: file.name || 'image',
+              id: result.fileId,
+              url: result.resolvedUrl,
+            });
+            continue;
+          }
+
+          if (result.isVideo) {
+            videoList.push({
+              alt: file.name || 'video',
+              id: result.fileId,
+              url: result.resolvedUrl,
+            });
+            continue;
+          }
+
+          // Non-image / non-video: parse file content into the documents table so
+          // the MessageContentProcessor can inject it via filesPrompts(). Mirrors
+          // what the web upload path does, ensuring bot-uploaded PDFs / text /
+          // JSON / .skill files are actually visible to the LLM (instead of
+          // being silently uploaded but never read).
+          let content: string | undefined;
+          try {
+            const document = await documentService.parseFile(result.fileId);
+            content = document.content ?? undefined;
+          } catch (parseError) {
+            log(
+              'execAgent: parseFile failed for %s (fileId=%s): %O',
+              file.name,
+              result.fileId,
+              parseError,
+            );
+            warnings.push(
+              `File "${file.name || 'unknown'}" was uploaded but its contents could not be extracted.`,
+            );
+          }
+
+          fileList.push({
+            content,
+            fileType: file.mimeType ?? 'application/octet-stream',
+            id: result.fileId,
+            name: file.name ?? 'file',
+            size: file.size ?? 0,
+            url: result.resolvedUrl || '',
+          });
+        } catch (error) {
+          log('execAgent: failed to ingest file %s: %O', file.name || file.url, error);
+          warnings.push(`File "${file.name || 'unknown'}" could not be uploaded and was skipped.`);
+        }
+      }
+
+      if (fileIds.length > 0) {
+        log(
+          'execAgent: uploaded %d files to S3 (%d images, %d videos, %d documents)',
+          fileIds.length,
+          imageList.length,
+          videoList.length,
+          fileList.length,
+        );
+      }
+      if (imageList.length === 0) imageList = undefined;
+      if (videoList.length === 0) videoList = undefined;
+      if (fileList.length === 0) fileList = undefined;
+    }
+
+    // Attach already-uploaded files referenced by fileIds (e.g. SPA Gateway mode).
+    // These files are already in the `files` table; resolve URLs + classify, and
+    // merge into the imageList/videoList/fileList passed to the LLM and stored
+    // as message relations via messagesFiles.
+    if (attachedFileIds && attachedFileIds.length > 0) {
+      await throwIfAborted('file resolution');
+
+      try {
+        const resolved = await resolveAttachmentsByFileIds({
+          db: this.db,
+          fileIds: attachedFileIds,
+          userId: this.userId,
+          workspaceId: this.workspaceId,
+        });
+
+        warnings.push(...resolved.warnings);
+
+        if (resolved.orderedFileIds.length > 0) {
+          fileIds = [...(fileIds ?? []), ...resolved.orderedFileIds];
+
+          if (resolved.imageList.length > 0) {
+            imageList = [...(imageList ?? []), ...resolved.imageList];
+          }
+          if (resolved.videoList.length > 0) {
+            videoList = [...(videoList ?? []), ...resolved.videoList];
+          }
+          if (resolved.fileList.length > 0) {
+            fileList = [...(fileList ?? []), ...resolved.fileList];
+          }
+        }
+      } catch (err) {
+        // Non-fatal: a resolver hiccup (S3 / DB blip) must not block the run —
+        // the text prompt still works. Persist the file→message relation anyway
+        // so the attachment isn't lost; only its preview / parsed content is.
+        log('execAgent: attachment resolution failed, continuing without previews: %O', err);
+        fileIds = Array.from(new Set([...(fileIds ?? []), ...attachedFileIds]));
+      }
+    }
+
+    // Normalize an empty (all-failed) upload to undefined so callers don't attach
+    // an empty messagesFiles relation.
+    if (fileIds && fileIds.length === 0) fileIds = undefined;
+
+    return { fileIds, fileList, imageList, videoList, warnings };
+  }
+
+  /**
+   * Group-action member completion bridge entry point — driven by the QStash
+   * `group-member-callback` webhook (queue mode). Forwards to the workspace-scoped
+   * runtime so the member-anchor backfill + K=N barrier + resume/finish read the
+   * same workspace rows. See `AgentRuntimeService.completeGroupActionMember`.
+   */
+  completeGroupActionMember(params: GroupActionMemberBridgeParams): Promise<boolean> {
+    return this.agentRuntimeService.completeGroupActionMember(params);
+  }
+
+  /**
    * Execute agent with just a prompt
    *
    * This is a simplified API that requires agent identifier (id or slug) and prompt.
@@ -490,6 +678,7 @@ export class AiAgentService {
       resume,
       resumeApproval,
       suppressUserMessage,
+      ephemeralUserMessage,
     } = params;
 
     // Validate that either agentId or slug is provided
@@ -874,55 +1063,106 @@ export class AiAgentService {
     const HETERO_AGENT_MODELS = new Set<string>(['claude-code', 'codex']);
     const heteroProviderType = agentConfig.agencyConfig?.heterogeneousProvider?.type;
     const isHeteroAgent = !!heteroProviderType || HETERO_AGENT_MODELS.has(model);
-    if (isHeteroAgent) {
-      const heteroType = (heteroProviderType ?? model) as
-        | 'claude-code'
-        | 'codex'
-        | 'hermes'
-        | 'openclaw';
-      const isRemoteHetero = isRemoteHeterogeneousType(heteroType);
-      const operationId = nanoid();
+    const heteroType = (heteroProviderType ?? model) as
+      | 'claude-code'
+      | 'codex'
+      | 'hermes'
+      | 'openclaw';
 
-      // Create user message so the conversation is visible in the UI immediately.
-      // Attach already-uploaded files (`fileIds` from the SPA gateway path) the
-      // same way `sendMessageInServer` does on the local-mode path — without
-      // the messagesFiles relation the attachment disappears as soon as the
-      // optimistic client message is replaced by the server snapshot.
-      const userMsg = runFromHistory
-        ? undefined
-        : await this.messageModel.create({
+    // ── Shared turn setup (runs for BOTH hetero and normal agents) ──────────
+    // Everything up to and including persisting the turn is identical for both
+    // execution modes, so it lives here, before the fork, and both branches
+    // consume the same records. Keeping it in one place is what guarantees the
+    // hetero path can't drift from the standard path again (the bot-image bug
+    // came from the hetero branch re-implementing — and skipping — this step).
+    const requestTriggerMetadata =
+      trigger && Object.values(RequestTrigger).includes(trigger as RequestTrigger)
+        ? { trigger: trigger as RequestTrigger }
+        : undefined;
+
+    // Attachment ingestion: raw bot/IM `files` → S3, pre-uploaded
+    // `attachedFileIds` → signed URLs + classification.
+    const runAttachments = await this.resolveRunAttachments({
+      attachedFileIds,
+      files,
+      throwIfAborted: throwIfExecutionAborted,
+    });
+
+    await throwIfExecutionAborted('message creation');
+
+    // Persist the user turn. `selfMessageIds` lets the normal-path history loader
+    // exclude this freshly-created turn — history must be the PRIOR turns only,
+    // otherwise the new prompt is double-counted in the LLM context.
+    const selfMessageIds = new Set<string>();
+    const userMessageRecord = runFromHistory
+      ? undefined
+      : await this.messageModel.create({
+          agentId: persistAgentId,
+          content: prompt,
+          files: runAttachments.fileIds,
+          metadata: requestTriggerMetadata,
+          role: 'user',
+          threadId: appContext?.threadId ?? undefined,
+          topicId,
+        });
+    if (userMessageRecord) {
+      selfMessageIds.add(userMessageRecord.id);
+      log('execAgent: created user message %s', userMessageRecord.id);
+    }
+
+    // Assistant placeholder (shows the spinner in the UI). A hetero run seeds
+    // ONLY the provider — the CLI reports the real model later via `stream_start`
+    // / `turn_metadata` (backfilled by HeterogeneousPersistenceHandler), and
+    // seeding the agent's chat model would leak it into the model tag. A normal
+    // run seeds model + provider as usual.
+    const assistantMessageRecord = await this.messageModel.create({
+      agentId: persistAgentId,
+      content: LOADING_FLAT,
+      model: isHeteroAgent ? undefined : model,
+      parentId: parentMessageId ?? userMessageRecord?.id,
+      provider: isHeteroAgent ? heteroType : provider,
+      role: 'assistant',
+      threadId: appContext?.threadId ?? undefined,
+      topicId,
+    });
+    selfMessageIds.add(assistantMessageRecord.id);
+    assistantMessageRef.current = assistantMessageRecord.id;
+    log('execAgent: created assistant message %s', assistantMessageRecord.id);
+
+    // Agent Signal is a governance side-channel (feedback / self-iteration). It
+    // only applies to the server-side LLM pipeline, so it is intentionally NOT
+    // enqueued for hetero runs (which hand off to an external CLI). Skip when this
+    // invocation is itself an Agent Signal background run to avoid recursion.
+    if (
+      userMessageRecord &&
+      !isHeteroAgent &&
+      !shouldSuppressSignal({ appContext, slug: agentSlug ?? undefined })
+    ) {
+      void enqueueAgentSignalSourceEvent(
+        {
+          payload: {
             agentId: resolvedAgentId,
-            content: prompt,
-            files:
-              attachedFileIds && attachedFileIds.length > 0
-                ? Array.from(new Set(attachedFileIds))
-                : undefined,
-            role: 'user',
+            message: prompt,
+            messageId: userMessageRecord.id,
             threadId: appContext?.threadId ?? undefined,
             topicId,
-          });
-
-      // Create an assistant message placeholder (shows spinner in the UI).
-      // Use the hetero type as the provider so the frontend can identify the
-      // platform and render the correct name in the model tag — for ALL hetero
-      // agents, not just remote ones. The agent's configured chat model/provider
-      // (e.g. deepseek) is meaningless for a CLI run: the real model is reported
-      // by the CLI via `stream_start` / `turn_metadata` and backfilled by
-      // `HeterogeneousPersistenceHandler`. Seeding the placeholder with the agent
-      // model leaked it into the model tag (and got re-applied at terminal) on
-      // the device / sandbox path; mirror the client (`conversationLifecycle`),
-      // which sets only the provider and leaves the model empty until the CLI
-      // reports it.
-      const assistantMsg = await this.messageModel.create({
-        agentId: resolvedAgentId,
-        content: LOADING_FLAT,
-        parentId: parentMessageId ?? userMsg?.id,
-        provider: heteroType,
-        role: 'assistant',
-        threadId: appContext?.threadId ?? undefined,
-        topicId,
+            trigger,
+          },
+          sourceId: userMessageRecord.id,
+          sourceType: 'agent.user.message',
+        },
+        {
+          agentId: resolvedAgentId,
+          userId: this.userId,
+        },
+      ).catch((error) => {
+        log('execAgent: failed to enqueue user message Agent Signal source event: %O', error);
       });
-      assistantMessageRef.current = assistantMsg.id;
+    }
+
+    if (isHeteroAgent) {
+      const isRemoteHetero = isRemoteHeterogeneousType(heteroType);
+      const operationId = nanoid();
 
       // Read resume session id for next-turn continuity.
       const heteroService = new HeterogeneousAgentService(this.db, this.userId, {
@@ -1000,32 +1240,18 @@ export class AiAgentService {
         repos: topicRepos,
       });
 
-      // Resolve image attachments into signed URLs for the dispatched CLI —
+      // Feed the resolved images (signed URLs) to the dispatched CLI for vision —
       // mirrors the local-mode path, where the client feeds the persisted
-      // message's imageList into `sendPrompt` for vision. Metadata-only
-      // (no document parsing) and non-fatal: a resolution failure must not
-      // block the run, the text prompt still works without the images.
-      let heteroImageList: Array<{ id: string; url: string }> | undefined;
-      if (attachedFileIds && attachedFileIds.length > 0) {
-        try {
-          const attachmentMeta = await resolveAttachmentMetadata({
-            db: this.db,
-            fileIds: attachedFileIds,
-            userId: this.userId,
-            workspaceId: this.workspaceId,
-          });
-          const images = attachmentMeta
-            .filter((file) => (file.fileType || '').startsWith('image'))
-            .map((file) => ({ id: file.id, url: file.url }));
-          if (images.length > 0) heteroImageList = images;
-        } catch (err) {
-          log('execAgent: failed to resolve hetero image attachments: %O', err);
-        }
-      }
+      // message's imageList into `sendPrompt`. Reuses the shared resolution above
+      // so bot/IM and SPA gateway attachments are handled identically.
+      const heteroImageList =
+        runAttachments.imageList && runAttachments.imageList.length > 0
+          ? runAttachments.imageList.map((image) => ({ id: image.id, url: image.url }))
+          : undefined;
 
       const heteroParams = {
         agentType: heteroType,
-        assistantMessageId: assistantMsg.id,
+        assistantMessageId: assistantMessageRecord.id,
         githubToken,
         imageList: heteroImageList,
         jwt: operationJwt,
@@ -1046,7 +1272,7 @@ export class AiAgentService {
       // endpoint even though the hetero path bypasses the normal hook registration flow.
       await this.topicModel.updateMetadata(topicId, {
         runningOperation: {
-          assistantMessageId: assistantMsg.id,
+          assistantMessageId: assistantMessageRecord.id,
           completionWebhook: hooks?.find((h) => h.type === 'onComplete')?.webhook,
           // Store deviceId + heteroType so interruptTask can cancel remote processes
           ...(isRemoteHetero && remoteDeviceId
@@ -1072,7 +1298,7 @@ export class AiAgentService {
             'execAgent: device access denied for remote hetero dispatch (reason=%s)',
             deviceAccessReason,
           );
-          await this.messageModel.update(assistantMsg.id, {
+          await this.messageModel.update(assistantMessageRecord.id, {
             content: '',
             error: {
               body: { detail: 'This sender is not allowed to run agents on a bound device.' },
@@ -1082,7 +1308,7 @@ export class AiAgentService {
           });
           return {
             agentId: resolvedAgentId,
-            assistantMessageId: assistantMsg.id,
+            assistantMessageId: assistantMessageRecord.id,
             autoStarted: false,
             createdAt: new Date().toISOString(),
             error: 'Device access denied',
@@ -1092,12 +1318,12 @@ export class AiAgentService {
             success: false,
             timestamp: new Date().toISOString(),
             topicId,
-            userMessageId: userMsg?.id ?? parentMessageId ?? '',
+            userMessageId: userMessageRecord?.id ?? parentMessageId ?? '',
           };
         }
         if (!remoteDeviceId) {
           log('execAgent: openclaw/hermes requires a bound device (boundDeviceId not set)');
-          await this.messageModel.update(assistantMsg.id, {
+          await this.messageModel.update(assistantMessageRecord.id, {
             content: '',
             error: {
               body: { detail: 'No device bound to this agent. Configure boundDeviceId.' },
@@ -1107,7 +1333,7 @@ export class AiAgentService {
           });
           return {
             agentId: resolvedAgentId,
-            assistantMessageId: assistantMsg.id,
+            assistantMessageId: assistantMessageRecord.id,
             autoStarted: false,
             createdAt: new Date().toISOString(),
             error: 'No bound device',
@@ -1117,7 +1343,7 @@ export class AiAgentService {
             success: false,
             timestamp: new Date().toISOString(),
             topicId,
-            userMessageId: userMsg?.id ?? parentMessageId ?? '',
+            userMessageId: userMessageRecord?.id ?? parentMessageId ?? '',
           };
         }
 
@@ -1128,7 +1354,7 @@ export class AiAgentService {
         await streamManager
           .publishAgentRuntimeInit(operationId, {
             agentId: resolvedAgentId,
-            assistantMessageId: assistantMsg.id,
+            assistantMessageId: assistantMessageRecord.id,
             heteroType,
             topicId,
             userId: this.userId,
@@ -1165,7 +1391,7 @@ export class AiAgentService {
               stepIndex: 0,
             })
             .catch(() => {});
-          await this.messageModel.update(assistantMsg.id, {
+          await this.messageModel.update(assistantMessageRecord.id, {
             content: '',
             error: {
               body: { detail: result.error },
@@ -1175,7 +1401,7 @@ export class AiAgentService {
           });
           return {
             agentId: resolvedAgentId,
-            assistantMessageId: assistantMsg.id,
+            assistantMessageId: assistantMessageRecord.id,
             autoStarted: false,
             createdAt: new Date().toISOString(),
             error: result.error,
@@ -1185,7 +1411,7 @@ export class AiAgentService {
             success: false,
             timestamp: new Date().toISOString(),
             topicId,
-            userMessageId: userMsg?.id ?? parentMessageId ?? '',
+            userMessageId: userMessageRecord?.id ?? parentMessageId ?? '',
           };
         }
       } else {
@@ -1215,7 +1441,7 @@ export class AiAgentService {
           const dispatchDeviceId = heteroPlan.kind === 'device' ? heteroPlan.deviceId : undefined;
           if (!dispatchDeviceId) {
             log('execAgent: hetero executionTarget=device but no boundDeviceId set');
-            await this.messageModel.update(assistantMsg.id, {
+            await this.messageModel.update(assistantMessageRecord.id, {
               content: '',
               error: {
                 body: {
@@ -1228,7 +1454,7 @@ export class AiAgentService {
             });
             return {
               agentId: resolvedAgentId,
-              assistantMessageId: assistantMsg.id,
+              assistantMessageId: assistantMessageRecord.id,
               autoStarted: false,
               createdAt: new Date().toISOString(),
               error: 'No bound device',
@@ -1238,7 +1464,7 @@ export class AiAgentService {
               success: false,
               timestamp: new Date().toISOString(),
               topicId,
-              userMessageId: userMsg?.id ?? parentMessageId ?? '',
+              userMessageId: userMessageRecord?.id ?? parentMessageId ?? '',
             };
           }
           // Resolve the working directory for the run: a topic-level override
@@ -1286,7 +1512,7 @@ export class AiAgentService {
           });
           if (!result.success) {
             log('execAgent: hetero device dispatch failed: %s', result.error);
-            await this.messageModel.update(assistantMsg.id, {
+            await this.messageModel.update(assistantMessageRecord.id, {
               content: '',
               error: {
                 body: { detail: result.error },
@@ -1296,7 +1522,7 @@ export class AiAgentService {
             });
             return {
               agentId: resolvedAgentId,
-              assistantMessageId: assistantMsg.id,
+              assistantMessageId: assistantMessageRecord.id,
               autoStarted: false,
               createdAt: new Date().toISOString(),
               error: result.error,
@@ -1306,7 +1532,7 @@ export class AiAgentService {
               success: false,
               timestamp: new Date().toISOString(),
               topicId,
-              userMessageId: userMsg?.id ?? parentMessageId ?? '',
+              userMessageId: userMessageRecord?.id ?? parentMessageId ?? '',
             };
           }
         } else {
@@ -1333,7 +1559,7 @@ export class AiAgentService {
 
       return {
         agentId: resolvedAgentId,
-        assistantMessageId: assistantMsg.id,
+        assistantMessageId: assistantMessageRecord.id,
         autoStarted: true,
         createdAt: new Date().toISOString(),
         message: 'Hetero agent dispatched successfully',
@@ -1343,7 +1569,7 @@ export class AiAgentService {
         timestamp: new Date().toISOString(),
         token: gatewayToken,
         topicId,
-        userMessageId: userMsg?.id ?? parentMessageId ?? '',
+        userMessageId: userMessageRecord?.id ?? parentMessageId ?? '',
       };
     }
 
@@ -1393,7 +1619,7 @@ export class AiAgentService {
 
     // These are needed outside the tools block (for agent management context, skill engine, etc.)
     let lobehubSkillManifests: LobeToolManifest[] = [];
-    let klavisManifests: LobeToolManifest[] = [];
+    let composioManifests: LobeToolManifest[] = [];
     let connectorManifests: ReturnType<typeof buildConnectorManifests> = [];
     let agentPlugins: string[] = [...(agentConfig?.plugins ?? []), ...(additionalPluginIds || [])];
 
@@ -1421,7 +1647,10 @@ export class AiAgentService {
         historyMessagesCache = messages.filter((msg) => idSet.has(msg.id));
       } else if (appContext?.topicId) {
         // Follow-up message in existing topic: load all history for context.
-        historyMessagesCache = await this.messageModel.query(
+        // Exclude the turn we just persisted above (`selfMessageIds`) — history
+        // must be the PRIOR turns only; the current prompt is appended separately
+        // as the in-memory `userMessage`, so leaving it in would double-count it.
+        const messages = await this.messageModel.query(
           {
             sessionId: appContext?.sessionId,
             threadId: appContext?.threadId,
@@ -1429,6 +1658,7 @@ export class AiAgentService {
           },
           { postProcessUrl },
         );
+        historyMessagesCache = messages.filter((msg) => !selfMessageIds.has(msg.id));
       } else {
         historyMessagesCache = [];
       }
@@ -1458,7 +1688,7 @@ export class AiAgentService {
           : [];
 
       // Only connectors WITH a real MCP endpoint (mcpServerUrl or stdio) can replace plugins in the
-      // manifest. Connectors WITHOUT an endpoint (e.g. Lobehub/Klavis OAuth skills synced via
+      // manifest. Connectors WITHOUT an endpoint (e.g. Lobehub/Composio OAuth skills synced via
       // syncToolsFromClient) must continue using their original plugin executor path — otherwise
       // after humanIntervention approval the runtime tries to call mcpServerUrl='' and returns empty.
       const connectorsMcp = connectors.filter(
@@ -1503,24 +1733,24 @@ export class AiAgentService {
       }
       log('execAgent: got %d lobehub skill manifests', lobehubSkillManifests.length);
 
-      // 5d. Fetch Klavis tool manifests from database
+      // 5d. Fetch Composio tool manifests from database
       try {
-        klavisManifests = await this.klavisService.getKlavisManifests();
+        composioManifests = await this.composioService.getComposioManifests();
       } catch (error) {
-        log('execAgent: failed to fetch klavis manifests: %O', error);
+        log('execAgent: failed to fetch composio manifests: %O', error);
       }
-      log('execAgent: got %d klavis manifests', klavisManifests.length);
+      log('execAgent: got %d composio manifests', composioManifests.length);
 
-      // 5d-1. Patch Lobehub/Klavis manifests AND community-MCP plugin manifests
+      // 5d-1. Patch Lobehub/Composio manifests AND community-MCP plugin manifests
       // with connector tool permissions. This enables needs_approval (→
       // humanIntervention: 'required') and disabled (→ blocking description) for
       // any tool managed via the connector system but executed through a
-      // non-connector path (Lobehub/Klavis skills, community MCP plugins).
+      // non-connector path (Lobehub/Composio skills, community MCP plugins).
       // The 'disabled' hard-block is already enforced universally in
       // ToolExecutionService; this surfaces the permission to the model too.
       if (
         lobehubSkillManifests.length > 0 ||
-        klavisManifests.length > 0 ||
+        composioManifests.length > 0 ||
         pluginsWithoutConnectors.length > 0
       ) {
         try {
@@ -1529,7 +1759,7 @@ export class AiAgentService {
           const { ConnectorToolModel } = await import('@/database/models/connectorTool');
           const allIdentifiers = [
             ...lobehubSkillManifests.map((m) => m.identifier),
-            ...klavisManifests.map((m) => m.identifier),
+            ...composioManifests.map((m) => m.identifier),
             ...pluginsWithoutConnectors.map((p) => p.identifier),
           ];
           const connectorEntries =
@@ -1555,7 +1785,7 @@ export class AiAgentService {
                 : m;
             });
 
-            klavisManifests = klavisManifests.map((m) => {
+            composioManifests = composioManifests.map((m) => {
               const perms = connectorToolsMap.get(m.identifier);
               return perms && perms.size > 0
                 ? (patchManifestWithPermissions(m as any, perms as any) as any)
@@ -1687,7 +1917,11 @@ export class AiAgentService {
       );
 
       const toolsEngine = createServerAgentToolsEngine(toolsContext, {
-        additionalManifests: [...lobehubSkillManifests, ...klavisManifests, ...connectorManifests],
+        additionalManifests: [
+          ...lobehubSkillManifests,
+          ...composioManifests,
+          ...connectorManifests,
+        ],
         agentConfig: {
           chatConfig: agentConfig.chatConfig ?? undefined,
           plugins: agentPlugins,
@@ -1717,9 +1951,9 @@ export class AiAgentService {
           ...agentPlugins,
           ...(disableLocalSystem ? [] : [LocalSystemManifest.identifier]),
           RemoteDeviceManifest.identifier,
-          // Include LobeHub Skills and Klavis tools so they are passed to generateToolsDetailed
+          // Include LobeHub Skills and Composio tools so they are passed to generateToolsDetailed
           ...lobehubSkillManifests.map((m) => m.identifier),
-          ...klavisManifests.map((m) => m.identifier),
+          ...composioManifests.map((m) => m.identifier),
           // Connector manifests are also injected as additionalManifests
           ...connectorManifests.map((m) => m.identifier),
         ]),
@@ -1740,7 +1974,7 @@ export class AiAgentService {
 
       // Single guard for every `toolManifestMap[id] = ...` ingest below.
       // Mirrors the post-merge filter in `createServerToolsEngine`: an
-      // installed plugin, a LobeHub Skill, or a Klavis manifest declaring
+      // installed plugin, a LobeHub Skill, or a Composio manifest declaring
       // `identifier: 'lobe-remote-device'` would otherwise reach the
       // activator-discovery map and let an external bot sender enable it
       // (). Centralising the check at the ingest layer means
@@ -1814,14 +2048,14 @@ export class AiAgentService {
         toolManifestMap[LocalSystemManifest.identifier] = LocalSystemManifest as LobeToolManifest;
       }
 
-      // Include lobehub skill and klavis manifests for activator discovery
+      // Include lobehub skill and composio manifests for activator discovery
       for (const manifest of lobehubSkillManifests) {
         if (!isManifestIngestAllowed(manifest.identifier)) continue;
         if (!toolManifestMap[manifest.identifier]) {
           toolManifestMap[manifest.identifier] = manifest;
         }
       }
-      for (const manifest of klavisManifests) {
+      for (const manifest of composioManifests) {
         if (!isManifestIngestAllowed(manifest.identifier)) continue;
         if (!toolManifestMap[manifest.identifier]) {
           toolManifestMap[manifest.identifier] = manifest;
@@ -1832,9 +2066,9 @@ export class AiAgentService {
         if (!isManifestIngestAllowed(manifest.identifier)) continue;
         toolSourceMap[manifest.identifier] = 'lobehubSkill';
       }
-      for (const manifest of klavisManifests) {
+      for (const manifest of composioManifests) {
         if (!isManifestIngestAllowed(manifest.identifier)) continue;
-        toolSourceMap[manifest.identifier] = 'klavis';
+        toolSourceMap[manifest.identifier] = 'composio';
       }
 
       // Mark tools that must run on the user's machine (local-system, stdio
@@ -1866,10 +2100,10 @@ export class AiAgentService {
       }
 
       log(
-        'execAgent: generated %d tools, %d lobehub skills, %d klavis tools',
+        'execAgent: generated %d tools, %d lobehub skills, %d composio tools',
         tools?.length ?? 0,
         lobehubSkillManifests.length,
-        klavisManifests.length,
+        composioManifests.length,
       );
 
       const agentSelfIterationEnabled = agentConfig.chatConfig?.selfIteration?.enabled === true;
@@ -2095,12 +2329,12 @@ export class AiAgentService {
           name: manifest.meta?.title || manifest.identifier,
           type: 'lobehub-skill' as const,
         })),
-        // Klavis tools
-        ...klavisManifests.map((manifest) => ({
+        // Composio tools
+        ...composioManifests.map((manifest) => ({
           description: manifest.meta?.description,
           identifier: manifest.identifier,
           name: manifest.meta?.title || manifest.identifier,
-          type: 'klavis' as const,
+          type: 'composio' as const,
         })),
         // Custom connectors (user-added MCP servers)
         ...connectorManifests.map((manifest) => ({
@@ -2169,220 +2403,34 @@ export class AiAgentService {
 
     await throwIfExecutionAborted('message history loading');
 
-    // 12. Collect Phase 2 warnings (ingestion/parsing errors) alongside Phase 1 warnings
-    // Phase 1 warnings (e.g. file too large) are already in botPlatformContext.warnings
-    const warnings: string[] = [];
-
-    // 13. Upload external files to S3 and collect file IDs
-    let fileIds: string[] | undefined;
-    let imageList: Array<{ alt: string; id: string; url: string }> | undefined;
-    let videoList: ChatVideoItem[] | undefined;
-    let fileList: ChatFileItem[] | undefined;
-
-    if (files && files.length > 0) {
-      fileIds = [];
-      imageList = [];
-      videoList = [];
-      fileList = [];
-      const documentService = new DocumentService(this.db, this.userId, this.workspaceId);
-
-      for (const file of files) {
-        await throwIfExecutionAborted('file upload');
-
-        try {
-          const result = await ingestAttachment(file, fileService, this.userId);
-          fileIds.push(result.fileId);
-
-          if (result.isImage) {
-            imageList.push({
-              alt: file.name || 'image',
-              id: result.fileId,
-              url: result.resolvedUrl,
-            });
-            continue;
-          }
-
-          if (result.isVideo) {
-            videoList.push({
-              alt: file.name || 'video',
-              id: result.fileId,
-              url: result.resolvedUrl,
-            });
-            continue;
-          }
-
-          // Non-image / non-video: parse file content into the documents table so
-          // the MessageContentProcessor can inject it via filesPrompts(). Mirrors
-          // what the web upload path does, ensuring bot-uploaded PDFs / text /
-          // JSON / .skill files are actually visible to the LLM (instead of
-          // being silently uploaded but never read).
-          let content: string | undefined;
-          try {
-            const document = await documentService.parseFile(result.fileId);
-            content = document.content ?? undefined;
-          } catch (parseError) {
-            log(
-              'execAgent: parseFile failed for %s (fileId=%s): %O',
-              file.name,
-              result.fileId,
-              parseError,
-            );
-            warnings.push(
-              `File "${file.name || 'unknown'}" was uploaded but its contents could not be extracted.`,
-            );
-          }
-
-          fileList.push({
-            content,
-            fileType: file.mimeType ?? 'application/octet-stream',
-            id: result.fileId,
-            name: file.name ?? 'file',
-            size: file.size ?? 0,
-            url: result.resolvedUrl || '',
-          });
-        } catch (error) {
-          log('execAgent: failed to ingest file %s: %O', file.name || file.url, error);
-          warnings.push(`File "${file.name || 'unknown'}" could not be uploaded and was skipped.`);
-        }
-      }
-
-      if (fileIds.length > 0) {
-        log(
-          'execAgent: uploaded %d files to S3 (%d images, %d videos, %d documents)',
-          fileIds.length,
-          imageList.length,
-          videoList.length,
-          fileList.length,
-        );
-      }
-      if (imageList.length === 0) imageList = undefined;
-      if (videoList.length === 0) videoList = undefined;
-      if (fileList.length === 0) fileList = undefined;
-    }
-
-    // 13b. Attach already-uploaded files referenced by fileIds (e.g. SPA Gateway mode).
-    // These files are already in the `files` table; resolve URLs + classify, and
-    // merge into the imageList/videoList/fileList passed to the LLM and stored
-    // as message relations via messagesFiles.
-    if (attachedFileIds && attachedFileIds.length > 0) {
-      await throwIfExecutionAborted('file resolution');
-
-      const resolved = await resolveAttachmentsByFileIds({
-        db: this.db,
-        fileIds: attachedFileIds,
-        userId: this.userId,
-        workspaceId: this.workspaceId,
-      });
-
-      warnings.push(...resolved.warnings);
-
-      if (resolved.orderedFileIds.length > 0) {
-        fileIds = [...(fileIds ?? []), ...resolved.orderedFileIds];
-
-        if (resolved.imageList.length > 0) {
-          imageList = [...(imageList ?? []), ...resolved.imageList];
-        }
-        if (resolved.videoList.length > 0) {
-          videoList = [...(videoList ?? []), ...resolved.videoList];
-        }
-        if (resolved.fileList.length > 0) {
-          fileList = [...(fileList ?? []), ...resolved.fileList];
-        }
-      }
-    }
-
-    await throwIfExecutionAborted('message creation');
-
-    const requestTriggerMetadata =
-      trigger && Object.values(RequestTrigger).includes(trigger as RequestTrigger)
-        ? { trigger: trigger as RequestTrigger }
-        : undefined;
-
-    // 13. Create user message in database
-    // Include threadId if provided (for isolated agent execution)
-    const userMessageRecord = runFromHistory
-      ? undefined
-      : await this.messageModel.create({
-          agentId: persistAgentId,
-          content: prompt,
-          files: fileIds,
-          metadata: requestTriggerMetadata,
-          role: 'user',
-          threadId: appContext?.threadId ?? undefined,
-          topicId,
-        });
-    if (userMessageRecord) {
-      log('execAgent: created user message %s', userMessageRecord.id);
-      // Agent Signal is a governance side-channel for feedback and self-iteration.
-      // It must not block the primary agent execution path; local Workflow/QStash
-      // stalls would otherwise leave the conversation with only the user message
-      // persisted and no assistant placeholder or operation row.
-      //
-      // Skip when this execAgent invocation is itself an Agent Signal background run
-      // (e.g. memory writer, self-iteration reviewer). Otherwise the analyzeIntent
-      // policy would re-analyze the synthesised user prompt and recursively trigger
-      // another Agent Signal pass.
-      if (!shouldSuppressSignal({ appContext, slug: agentSlug ?? undefined })) {
-        void enqueueAgentSignalSourceEvent(
-          {
-            payload: {
-              agentId: resolvedAgentId,
-              message: prompt,
-              threadId: appContext?.threadId ?? undefined,
-              topicId,
-              trigger,
-              messageId: userMessageRecord.id,
-            },
-            sourceId: userMessageRecord.id,
-            sourceType: 'agent.user.message',
-          },
-          {
-            agentId: resolvedAgentId,
-            userId: this.userId,
-          },
-        ).catch((error) => {
-          log('execAgent: failed to enqueue user message Agent Signal source event: %O', error);
-        });
-      }
-    }
-
-    // 14. Create assistant message placeholder in database
-    // Include threadId if provided (for isolated agent execution)
-    const assistantMessageRecord = await this.messageModel.create({
-      agentId: persistAgentId,
-      content: LOADING_FLAT,
-      model,
-      parentId: parentMessageId ?? userMessageRecord?.id,
-      provider,
-      role: 'assistant',
-      threadId: appContext?.threadId ?? undefined,
-      topicId,
-    });
-    log('execAgent: created assistant message %s', assistantMessageRecord.id);
-    assistantMessageRef.current = assistantMessageRecord.id;
-
-    // Append Phase 2 warnings (ingestion/parsing errors) to botPlatformContext
-    // so the context engine can inject them alongside Phase 1 warnings
-    if (warnings.length > 0 && botPlatformContext) {
+    // 12. Surface Phase 2 warnings (attachment ingestion/parsing errors) from the
+    // shared turn-setup block to the context engine, alongside Phase 1 warnings
+    // already on botPlatformContext. The DB user/assistant rows + Agent Signal
+    // enqueue all happened in that shared block, before the hetero fork.
+    if (runAttachments.warnings.length > 0 && botPlatformContext) {
       const existing = (botPlatformContext as any).warnings as string[] | undefined;
-      (botPlatformContext as any).warnings = [...(existing ?? []), ...warnings];
+      (botPlatformContext as any).warnings = [...(existing ?? []), ...runAttachments.warnings];
     }
 
-    // Create user message object for processing.
+    // Build the in-memory user message for the LLM context (separate from the DB
+    // row created above).
     // - imageList: vision models render these as image_url parts
     // - videoList: video-capable models render these as video parts
     // - fileList: MessageContentProcessor injects content via filesPrompts() XML
     const userMessage = {
-      content: prompt,
-      fileList,
+      content: ephemeralUserMessage ?? prompt,
+      fileList: runAttachments.fileList,
       id: userMessageRecord?.id,
-      imageList,
+      imageList: runAttachments.imageList,
       role: 'user' as const,
-      videoList,
+      videoList: runAttachments.videoList,
     };
 
-    // Combine history messages with user message
-    const allMessages = runFromHistory ? historyMessages : [...historyMessages, userMessage];
+    // Combine history messages with the user message. An ephemeral message is
+    // injected into the LLM context even under runFromHistory (suppressUserMessage)
+    // — it drives this turn but was never persisted (id is undefined).
+    const allMessages =
+      runFromHistory && !ephemeralUserMessage ? historyMessages : [...historyMessages, userMessage];
 
     log('execAgent: prepared evalContext for executor');
 
@@ -2398,7 +2446,10 @@ export class AiAgentService {
         // Pass assistant message ID so agent runtime knows which message to update
         assistantMessageId: assistantMessageRecord.id,
         isFirstMessage: true,
-        message: runFromHistory ? [{ content: '' }] : [{ content: prompt }],
+        message:
+          runFromHistory && !ephemeralUserMessage
+            ? [{ content: '' }]
+            : [{ content: ephemeralUserMessage ?? prompt }],
         // Pass user message ID as parentMessageId for reference
         parentMessageId: parentMessageId ?? userMessageRecord?.id ?? '',
         // Include tools for initial LLM call
@@ -2662,6 +2713,13 @@ export class AiAgentService {
           // context (state.metadata.agentId) targets the reviewed agent; ordinary
           // runs (no marker) fall back to the resolved executing agent.
           agentId: appContext?.agentSignal?.agentId ?? resolvedAgentId,
+          // When scope === 'agent_builder', agentId stays as the builder builtin so
+          // message ownership and queryUiMessages remain correct. editingAgentId
+          // carries the actual editing target separately; only the AgentBuilder server
+          // runtime reads it, keeping the rest of the pipeline unaffected.
+          ...(appContext?.scope === 'agent_builder' && appContext?.editingAgentId
+            ? { editingAgentId: appContext.editingAgentId }
+            : {}),
           // Run-scoped Agent Signal marker for background self-iteration / memory
           // runs — lands in state.metadata.agentSignal so the completion path can
           // project receipts/briefs. Undefined for ordinary chat runs.
@@ -2885,9 +2943,195 @@ export class AiAgentService {
       resumeParentOnComplete: true,
     });
 
+  /**
+   * Fork a single group member ("call agent member") under a `lobe-group-management`
+   * tool call. Dispatches to the in-group (non-isolated, shared group session)
+   * or isolated (own thread) path, installing the group-action member completion
+   * bridge. Invoked once per member by the runtime's `agentMember` runner.
+   *
+   * Arrow field (not a method) so it stays bound when handed to the runtime
+   * delegate.
+   */
+  execGroupMember = async (params: ExecGroupMemberParams): Promise<ExecGroupMemberResult> => {
+    if (params.mode === 'isolated') {
+      // Isolated members reuse the sub-agent isolation-thread machinery, swapping
+      // in the group-action member bridge (K=N barrier + resume/finish).
+      const result = await this.execAgentThreadRun(
+        {
+          agentId: params.agentId,
+          groupId: params.groupId,
+          instruction: params.instruction ?? 'Please complete the assigned task.',
+          parentMessageId: params.anchorMessageId,
+          parentOperationId: params.parentOperationId,
+          timeout: params.timeout,
+          title: params.instruction?.slice(0, 50),
+          topicId: params.topicId,
+        },
+        {
+          bridgeHookFactory: (threadId) =>
+            this.createGroupActionMemberBridgeHook({
+              anchorMessageId: params.anchorMessageId,
+              expectedMembers: params.expectedMembers,
+              groupToolMessageId: params.groupToolMessageId,
+              mode: 'isolated',
+              onComplete: params.onComplete,
+              parentOperationId: params.parentOperationId,
+              threadId,
+            }),
+          isSubAgent: true,
+          logScope: 'execVirtualSubAgent',
+          resumeParentOnComplete: true,
+        },
+      );
+
+      // Enforce the requested timeout: if the member op is still running when the
+      // deadline passes, the watchdog interrupts it and bridges a `timeout`
+      // completion so the supervisor doesn't stay parked indefinitely.
+      if (result.success && result.operationId && params.timeout && params.timeout > 0) {
+        await this.agentRuntimeService.scheduleGroupMemberTimeout(
+          {
+            anchorMessageId: params.anchorMessageId,
+            expectedMembers: params.expectedMembers,
+            groupToolMessageId: params.groupToolMessageId,
+            memberOperationId: result.operationId,
+            mode: 'isolated',
+            onComplete: params.onComplete,
+            parentOperationId: params.parentOperationId,
+          },
+          params.timeout,
+        );
+      }
+
+      return {
+        error: result.error,
+        operationId: result.operationId,
+        started: result.success ?? false,
+        threadId: result.threadId,
+      };
+    }
+
+    return this.execAgentMember(params);
+  };
+
+  /**
+   * Run a group member in the shared group session (non-isolated). The member's
+   * turns land directly in the group conversation; the supervisor's instruction
+   * is injected as a `<speaker name="Supervisor" />`-tagged prompt. Registers the
+   * group-action member bridge that backfills the member anchor and
+   * resumes/finishes the parked supervisor once the K=N member barrier passes.
+   */
+  private async execAgentMember(params: ExecGroupMemberParams): Promise<ExecGroupMemberResult> {
+    const {
+      agentId,
+      anchorMessageId,
+      disableTools,
+      expectedMembers,
+      groupId,
+      groupToolMessageId,
+      instruction,
+      onComplete,
+      parentOperationId,
+      topicId,
+    } = params;
+
+    log(
+      'execAgentMember: agentId=%s, groupId=%s, topicId=%s, instruction=%s',
+      agentId,
+      groupId,
+      topicId,
+      (instruction ?? '').slice(0, 50),
+    );
+
+    // Dispatch beforeCallAgent hook on the supervisor operation.
+    hookDispatcher
+      .dispatch(parentOperationId, 'beforeCallAgent', {
+        agentId,
+        instruction: (instruction ?? '').slice(0, 200),
+        operationId: parentOperationId,
+        userId: this.userId,
+      })
+      .catch(() => {});
+
+    // Inherit the supervisor op's trigger so member rows stay attributable.
+    let inheritedTrigger: string | undefined;
+    try {
+      const parentOp = await new AgentOperationModel(
+        this.db,
+        this.userId,
+        this.workspaceId,
+      ).findById(parentOperationId);
+      inheritedTrigger = parentOp?.trigger ?? undefined;
+    } catch (error) {
+      log('execAgentMember: failed to read parent operation trigger: %O', error);
+    }
+
+    const speakerInstruction = instruction
+      ? `<speaker name="Supervisor" />\n${instruction}`
+      : 'Please respond to the group conversation based on the current context.';
+
+    const appContext: NonNullable<InternalExecAgentParams['appContext']> = {
+      groupId,
+      scope: 'group',
+      topicId,
+    };
+
+    // The member runs as a child op of the supervisor and lands its turns in the
+    // shared group conversation (no isolation thread). The bridge backfills the
+    // member anchor (a short receipt) and resumes/finishes the supervisor.
+    //
+    // The supervisor instruction is injected as an EPHEMERAL user message
+    // (`suppressUserMessage` + `ephemeralUserMessage`): it drives the member's
+    // response but is NOT persisted as a `role: 'user'` row, mirroring the
+    // client orchestration where the supervisor instruction is virtual. Without
+    // this, every server-side speak/broadcast/delegate would leak the
+    // orchestration prompt into the group conversation as a real message.
+    const result = await this.execAgent({
+      agentId,
+      appContext,
+      autoStart: true,
+      disableTools,
+      ephemeralUserMessage: speakerInstruction,
+      hooks: [
+        this.createGroupActionMemberBridgeHook({
+          anchorMessageId,
+          expectedMembers,
+          groupToolMessageId,
+          mode: 'in_group',
+          onComplete,
+          parentOperationId,
+        }),
+      ],
+      parentMessageId: anchorMessageId,
+      parentOperationId,
+      prompt: speakerInstruction,
+      suppressUserMessage: true,
+      trigger: inheritedTrigger,
+      userInterventionConfig: { approvalMode: 'headless' },
+    });
+
+    log(
+      'execAgentMember: delegated to execAgent, operationId=%s, success=%s',
+      result.operationId,
+      result.success,
+    );
+
+    return {
+      error: result.error,
+      operationId: result.operationId,
+      started: result.success ?? false,
+    };
+  }
+
   private async execAgentThreadRun(
     params: ExecSubAgentParams | ExecVirtualSubAgentParams,
     options: {
+      /**
+       * Override the default sub-agent completion bridge with a custom hook
+       * (e.g. the group-action member bridge for isolated executeAgentTask(s)).
+       * Receives the freshly-created isolation thread id. Only used when
+       * `resumeParentOnComplete` is set.
+       */
+      bridgeHookFactory?: (threadId: string) => AgentHook;
       isSubAgent: boolean;
       logScope: 'execSubAgent' | 'execVirtualSubAgent';
       resumeParentOnComplete?: boolean;
@@ -2955,7 +3199,9 @@ export class AiAgentService {
       options.resumeParentOnComplete && parentOperationId
         ? [
             ...threadHooks,
-            this.createSubAgentBridgeHook(parentOperationId, parentMessageId, thread.id),
+            options.bridgeHookFactory
+              ? options.bridgeHookFactory(thread.id)
+              : this.createSubAgentBridgeHook(parentOperationId, parentMessageId, thread.id),
           ]
         : threadHooks;
 
@@ -3366,6 +3612,76 @@ export class AiAgentService {
         // publish failure as a silently-dropped 401, stranding the parent.
         fallback: 'none' as const,
         url: '/api/agent/webhooks/subagent-callback',
+      },
+    };
+  }
+
+  /**
+   * Completion bridge for the group orchestration "call agent member" path.
+   *
+   * Fires on a member op's completion and delegates to
+   * `AgentRuntimeService.completeGroupActionMember`: backfill the member anchor,
+   * enforce the K=N member barrier, then resume/finish the parked supervisor.
+   * Transport mirrors {@link createSubAgentBridgeHook} — in-process in local
+   * mode, QStash → `/api/agent/webhooks/group-member-callback` in queue mode.
+   */
+  private createGroupActionMemberBridgeHook(params: {
+    anchorMessageId: string;
+    expectedMembers: number;
+    groupToolMessageId: string;
+    mode: GroupActionMemberMode;
+    onComplete: GroupActionOnComplete;
+    parentOperationId: string;
+    threadId?: string;
+  }): AgentHook {
+    const {
+      anchorMessageId,
+      expectedMembers,
+      groupToolMessageId,
+      mode,
+      onComplete,
+      parentOperationId,
+      threadId,
+    } = params;
+    return {
+      handler: async (event) => {
+        try {
+          await this.agentRuntimeService.completeGroupActionMember({
+            anchorMessageId,
+            expectedMembers,
+            finalState: event.finalState,
+            groupToolMessageId,
+            mode,
+            onComplete,
+            operationId: event.operationId,
+            parentOperationId,
+            reason: event.reason ?? 'done',
+            threadId,
+          });
+        } catch (error) {
+          console.error(
+            'Group-member bridge: failed to complete bridge for parent %s: %O',
+            parentOperationId,
+            error,
+          );
+        }
+      },
+      id: 'group-member-bridge',
+      type: 'onComplete' as const,
+      webhook: {
+        body: {
+          anchorMessageId,
+          expectedMembers,
+          groupToolMessageId,
+          mode,
+          onComplete,
+          parentOperationId,
+          threadId,
+        },
+        delivery: 'qstash' as const,
+        eventFields: ['operationId', 'reason', 'status'],
+        fallback: 'none' as const,
+        url: '/api/agent/webhooks/group-member-callback',
       },
     };
   }

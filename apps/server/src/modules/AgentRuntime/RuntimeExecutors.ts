@@ -14,14 +14,14 @@ import {
 } from '@lobechat/agent-runtime';
 import { LobeActivatorIdentifier } from '@lobechat/builtin-tool-activator';
 import {
+  type ComposioServiceSummary,
   type CredSummary,
+  generateComposioServicesList,
   generateCredsList,
-  generateKlavisServicesList,
-  type KlavisServiceSummary,
 } from '@lobechat/builtin-tool-creds';
 import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { BRANDING_PROVIDER } from '@lobechat/business-const';
-import { KLAVIS_SERVER_TYPES } from '@lobechat/const';
+import { COMPOSIO_APP_TYPES } from '@lobechat/const';
 import {
   type AgentContextDocument,
   type AgentGroupConfig,
@@ -38,7 +38,12 @@ import {
   ToolResolver,
 } from '@lobechat/context-engine';
 import { parse } from '@lobechat/conversation-flow';
-import { consumeStreamUntilDone } from '@lobechat/model-runtime';
+import {
+  applyModelExtendParams,
+  type ChatStreamPayload,
+  consumeStreamUntilDone,
+  type ModelExtendParams,
+} from '@lobechat/model-runtime';
 import {
   context as otelContext,
   SpanKind,
@@ -67,8 +72,9 @@ import {
 } from '@lobechat/types';
 import { sanitizeToolCallArguments, serializePartsForStorage } from '@lobechat/utils';
 import debug from 'debug';
+import type { ExtendParamsType } from 'model-bank';
 
-import { klavisEnv } from '@/config/klavis';
+import { composioEnv } from '@/config/composio';
 import { type MessageModel, MessageModel as MessageModelClass } from '@/database/models/message';
 import { TopicModel } from '@/database/models/topic';
 import { UserModel } from '@/database/models/user';
@@ -80,6 +86,10 @@ import { type EvalContext } from '@/server/modules/Mecha/ContextEngineering/type
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { AgentDocumentsService } from '@/server/services/agentDocuments';
 import type { HookDispatcher } from '@/server/services/agentRuntime/hooks/HookDispatcher';
+import type {
+  ExecGroupMemberParams,
+  ExecGroupMemberResult,
+} from '@/server/services/agentRuntime/types';
 import {
   type DeviceAccessReason,
   isDeviceToolIdentifier,
@@ -89,6 +99,7 @@ import { FileService } from '@/server/services/file';
 import { MessageService } from '@/server/services/message';
 import { OnboardingService } from '@/server/services/onboarding';
 import {
+  type ServerAgentMemberRunner,
   type ServerSubAgentRunner,
   type ToolExecutionResultResponse,
   type ToolExecutionService,
@@ -405,6 +416,147 @@ const buildServerVirtualSubAgentRunner = (
   };
 };
 
+/**
+ * Build the per-tool "call agent member" runner for the group orchestration
+ * server tool (`lobe-group-management`). Mirrors {@link buildServerVirtualSubAgentRunner}
+ * but for group members: it owns the group tool message (the parked tool call)
+ * and the per-member anchors that drive the K=N member barrier.
+ *
+ * For each `agentMember.run(...)` it:
+ *   1. creates the group tool placeholder (`tool_call_id` = the group-management
+ *      call id) stamped with the barrier target + finish disposition;
+ *   2. for a single member uses that placeholder as the member anchor; for
+ *      multiple members creates one child anchor per member under it;
+ *   3. forks each member via `ctx.execGroupMember` (in-group or isolated);
+ *   4. backfills anchors for members that failed to start so the barrier can
+ *      still complete, and tears everything down when none started.
+ *
+ * Returns `undefined` when group-member execution is unavailable (no
+ * `execGroupMember` callback, or missing agent/topic/group context).
+ */
+const buildServerAgentMemberRunner = (
+  ctx: RuntimeExecutorContext,
+  state: AgentState,
+  chatToolPayload: ChatToolPayload,
+  parentMessageId: string,
+): ServerAgentMemberRunner | undefined => {
+  const execGroupMember = ctx.execGroupMember;
+  if (!execGroupMember) return undefined;
+
+  const agentId = state.metadata?.agentId;
+  const topicId = ctx.topicId ?? state.metadata?.topicId;
+  const groupId = state.metadata?.groupId ?? undefined;
+  if (!agentId || !topicId || !groupId) return undefined;
+
+  return {
+    run: async ({ members, mode, onComplete, disableTools, timeout }) => {
+      const expectedMembers = members.length;
+      if (expectedMembers === 0) return { started: false, startedCount: 0 };
+
+      // 1. Group tool placeholder — the parked tool call the supervisor op waits
+      //    on. Stamped with the barrier target + finish disposition so the resume
+      //    path (and verify watchdog) resolve resume-vs-finish on their own.
+      const groupTool = await ctx.messageModel.create({
+        agentId,
+        content: '',
+        parentId: parentMessageId,
+        plugin: chatToolPayload as any,
+        pluginState: { expectedMembers, onComplete, status: 'pending' },
+        role: 'tool',
+        threadId: state.metadata?.threadId,
+        tool_call_id: chatToolPayload.id,
+        topicId,
+      });
+
+      // 2. Per-member anchors. A single member collapses onto the group tool
+      //    message; multiple members each get a child anchor under it.
+      const anchorIds: string[] = [];
+      if (expectedMembers === 1) {
+        anchorIds.push(groupTool.id);
+      } else {
+        for (let i = 0; i < expectedMembers; i += 1) {
+          const memberToolCallId = `${chatToolPayload.id}::m${i}`;
+          const anchor = await ctx.messageModel.create({
+            agentId,
+            content: '',
+            parentId: groupTool.id,
+            plugin: { ...(chatToolPayload as any), id: memberToolCallId },
+            pluginState: { status: 'pending' },
+            role: 'tool',
+            threadId: state.metadata?.threadId,
+            tool_call_id: memberToolCallId,
+            topicId,
+          });
+          anchorIds.push(anchor.id);
+        }
+      }
+
+      // 3. Fork members.
+      let startedCount = 0;
+      await Promise.all(
+        members.map(async (member, i) => {
+          const anchorMessageId = anchorIds[i];
+          try {
+            const result = await execGroupMember({
+              agentId: member.agentId,
+              anchorMessageId,
+              disableTools,
+              expectedMembers,
+              groupId,
+              groupToolMessageId: groupTool.id,
+              instruction: member.instruction,
+              mode,
+              onComplete,
+              parentOperationId: ctx.operationId,
+              timeout,
+              topicId,
+            });
+            if (result?.started) {
+              startedCount += 1;
+              return;
+            }
+          } catch (error) {
+            log(
+              'buildServerAgentMemberRunner: member %s failed to start: %O',
+              member.agentId,
+              error,
+            );
+          }
+          // Member failed to start — its completion bridge will never fire, so
+          // backfill the anchor as errored to keep the K=N barrier reachable.
+          try {
+            await ctx.messageModel.updateToolMessage(anchorMessageId, {
+              content: `Agent member "${member.agentId}" failed to start.`,
+              pluginState: { status: 'error' },
+            });
+          } catch (error) {
+            log(
+              'buildServerAgentMemberRunner: failed to mark anchor %s as errored: %O',
+              anchorMessageId,
+              error,
+            );
+          }
+        }),
+      );
+
+      // None started — no bridge will ever fire, so tear down the placeholders
+      // and let the caller surface an inline tool error instead of parking.
+      if (startedCount === 0) {
+        for (const id of new Set([...anchorIds, groupTool.id])) {
+          try {
+            await ctx.messageModel.deleteMessage(id);
+          } catch (error) {
+            log('buildServerAgentMemberRunner: cleanup failed for %s: %O', id, error);
+          }
+        }
+        return { started: false, startedCount: 0 };
+      }
+
+      return { started: true, startedCount };
+    },
+  };
+};
+
 const shouldRetryLLM = (kind: LLMErrorKind, attempt: number, maxRetries: number) =>
   kind === 'retry' && attempt <= maxRetries;
 
@@ -522,6 +674,12 @@ export interface RuntimeExecutorContext {
   botPlatformContext?: BotPlatformContext;
   discordContext?: any;
   evalContext?: EvalContext;
+  /**
+   * Callback to fork a group member ("call agent member") under a
+   * `lobe-group-management` tool call. Injected by AiAgentService; powers the
+   * per-tool `agentMember` runner (in-group + isolated members, K=N barrier).
+   */
+  execGroupMember?: (params: ExecGroupMemberParams) => Promise<ExecGroupMemberResult>;
   /**
    * Callback to run a legacy agent invocation server-side.
    * Injected by AiAgentService so exec_sub_agent / exec_sub_agents executors
@@ -721,6 +879,7 @@ export const createRuntimeExecutors = (
       type ContentPart = { text: string; type: 'text' } | { image: string; type: 'image' };
       let shouldReplayAssistantReasoning = false;
       let preserveThinkingForPayload: boolean | undefined;
+      let resolvedExtendParams: ModelExtendParams | undefined;
 
       // Process messages through serverMessagesEngine to inject system role, knowledge, etc.
       // Rebuild params from agentConfig at execution time (capabilities built dynamically)
@@ -736,19 +895,36 @@ export const createRuntimeExecutors = (
             : undefined;
         const preserveThinkingRequested = preserveThinkingConfigured === true;
 
+        const readExtendParams = (
+          card: (typeof builtinModels)[number] | undefined,
+        ): string[] | undefined =>
+          card &&
+          'settings' in card &&
+          card.settings &&
+          typeof card.settings === 'object' &&
+          'extendParams' in card.settings
+            ? (card.settings as { extendParams?: string[] }).extendParams
+            : undefined;
+
         const modelCard = builtinModels.find(
           (item) =>
             item.providerId === provider &&
             (item.id === model || item.config?.deploymentName === model),
         );
-        const modelExtendParams =
-          modelCard &&
-          'settings' in modelCard &&
-          modelCard.settings &&
-          typeof modelCard.settings === 'object' &&
-          'extendParams' in modelCard.settings
-            ? (modelCard.settings as { extendParams?: string[] }).extendParams
-            : undefined;
+
+        let modelExtendParams = readExtendParams(modelCard);
+
+        // Aggregation providers (e.g. `lobehub`) may serve a model without copying
+        // its origin `settings.extendParams`. Fall back to the canonical model card
+        // (matched by id across any provider) so reasoning/thinking params like
+        // `thinkingLevel` still reach the model. Mirrors the client-side
+        // `transformToAiModelList` re-namespacing behavior.
+        if (!modelExtendParams || modelExtendParams.length === 0) {
+          const canonicalCard = builtinModels.find(
+            (item) => item.id === model || item.config?.deploymentName === model,
+          );
+          modelExtendParams = readExtendParams(canonicalCard);
+        }
 
         const modelSupportsPreserveThinkingFromCard =
           Array.isArray(modelExtendParams) && modelExtendParams.includes('preserveThinking');
@@ -763,6 +939,19 @@ export const createRuntimeExecutors = (
           modelSupportsPreserveThinking && typeof preserveThinkingConfigured === 'boolean'
             ? preserveThinkingConfigured
             : undefined;
+
+        // Resolve model extend params (thinkingLevel, reasoning effort, urlContext, …)
+        // from the agent chat config so the server-side agent runtime forwards the same
+        // runtime params the client chat service does. Without this, e.g. Gemini 3 Pro's
+        // `thinkingLevel` never reaches the request and thought summaries come back empty.
+        if (agentConfig.chatConfig) {
+          resolvedExtendParams = applyModelExtendParams({
+            chatConfig: agentConfig.chatConfig,
+            extendParams: modelExtendParams as ExtendParamsType[] | undefined,
+            model,
+          });
+        }
+
         const messagesForContext = shouldReplayAssistantReasoning
           ? (llmPayload.messages as UIChatMessage[])
           : stripAssistantReasoningForReplay(llmPayload.messages as UIChatMessage[]);
@@ -999,39 +1188,38 @@ export const createRuntimeExecutors = (
           }
         }
 
-        // {{KLAVIS_SERVICES_LIST}} — used by lobe-creds system role (Klavis integrations section).
-        // Mirrors client-side: klavisStoreSelectors.getServers() filtered by connection status.
-        let klavisServicesListStr = '';
-        if (ctx.serverDB && ctx.userId && !!klavisEnv.KLAVIS_API_KEY) {
+        // {{COMPOSIO_SERVICES_LIST}} — used by lobe-creds system role (Composio integrations section).
+        let composioServicesListStr = '';
+        if (ctx.serverDB && ctx.userId && !!composioEnv.COMPOSIO_API_KEY) {
           try {
             const { PluginModel } = await import('@/database/models/plugin');
             const pluginModel = new PluginModel(ctx.serverDB, ctx.userId, ctx.workspaceId);
             const allPlugins = await pluginModel.query();
-            const validKlavisIds = new Set(KLAVIS_SERVER_TYPES.map((t) => t.identifier));
+            const validComposioIds = new Set(COMPOSIO_APP_TYPES.map((t) => t.identifier));
             const connectedIds = new Set(
               allPlugins
                 .filter(
                   (p) =>
-                    validKlavisIds.has(p.identifier) &&
-                    (p.customParams as any)?.klavis?.isAuthenticated === true,
+                    validComposioIds.has(p.identifier) &&
+                    (p.customParams as any)?.composio?.status === 'ACTIVE',
                 )
                 .map((p) => p.identifier),
             );
-            const connected: KlavisServiceSummary[] = KLAVIS_SERVER_TYPES.filter((t) =>
+            const connected: ComposioServiceSummary[] = COMPOSIO_APP_TYPES.filter((t) =>
               connectedIds.has(t.identifier),
             ).map((t) => ({ identifier: t.identifier, name: t.label }));
-            const available: KlavisServiceSummary[] = KLAVIS_SERVER_TYPES.filter(
+            const available: ComposioServiceSummary[] = COMPOSIO_APP_TYPES.filter(
               (t) => !connectedIds.has(t.identifier),
             ).map((t) => ({ identifier: t.identifier, name: t.label }));
-            klavisServicesListStr = generateKlavisServicesList(connected, available);
+            composioServicesListStr = generateComposioServicesList(connected, available);
             log(
-              'Fetched Klavis services for {{KLAVIS_SERVICES_LIST}}: connected=%d, available=%d',
+              'Fetched Composio services for {{COMPOSIO_SERVICES_LIST}}: connected=%d, available=%d',
               connected.length,
               available.length,
             );
           } catch (error) {
             log(
-              'Failed to fetch Klavis services for {{KLAVIS_SERVICES_LIST}} substitution: %O',
+              'Failed to fetch Composio services for {{COMPOSIO_SERVICES_LIST}} substitution: %O',
               error,
             );
           }
@@ -1055,7 +1243,7 @@ export const createRuntimeExecutors = (
             sandbox_enabled: sandboxEnabled,
             sandbox_uploaded_files: sandboxUploadedFiles,
             CREDS_LIST: credsListStr,
-            KLAVIS_SERVICES_LIST: klavisServicesListStr,
+            COMPOSIO_SERVICES_LIST: composioServicesListStr,
             // Memory tool variables
             memory_effort: memoryEffort,
           },
@@ -1205,6 +1393,9 @@ export const createRuntimeExecutors = (
         model,
         stream,
         tools,
+        // ModelExtendParams keeps provider-specific effort/thinking values as loose
+        // strings (e.g. hy3's 'no_think'); the runtime payload narrows them, so cast.
+        ...(resolvedExtendParams as Partial<ChatStreamPayload>),
         ...(typeof preserveThinkingForPayload === 'boolean' && {
           preserveThinking: preserveThinkingForPayload,
         }),
@@ -2446,7 +2637,7 @@ export const createRuntimeExecutors = (
           execution = { attempts: 1, result: dispatchResult };
         } else {
           // Inject source from sourceMap so BuiltinToolsExecutor can route
-          // lobehubSkill / klavis tools correctly (LLM responses don't carry source)
+          // lobehubSkill / composio tools correctly (LLM responses don't carry source)
           if (toolSource && !chatToolPayload.source) {
             chatToolPayload.source = toolSource;
           }
@@ -2463,7 +2654,14 @@ export const createRuntimeExecutors = (
               toolExecutionService.executeTool(chatToolPayload, {
                 activeDeviceId: state.metadata?.activeDeviceId,
                 agentId: state.metadata?.agentId,
+                agentMember: buildServerAgentMemberRunner(
+                  ctx,
+                  state,
+                  chatToolPayload,
+                  payload.parentMessageId,
+                ),
                 documentId: state.metadata?.documentId,
+                editingAgentId: state.metadata?.editingAgentId,
                 execSubAgent: ctx.execSubAgent,
                 executionTimeoutMs: timeoutMs,
                 groupId: state.metadata?.groupId,
@@ -3026,7 +3224,7 @@ export const createRuntimeExecutors = (
               execution = { attempts: 1, result: dispatchResult };
             } else {
               // Inject source from sourceMap so BuiltinToolsExecutor can route
-              // lobehubSkill / klavis tools correctly (LLM responses don't carry source)
+              // lobehubSkill / composio tools correctly (LLM responses don't carry source)
               const batchToolSource =
                 state.operationToolSet?.sourceMap?.[chatToolPayload.identifier] ??
                 state.toolSourceMap?.[chatToolPayload.identifier];
@@ -3045,6 +3243,12 @@ export const createRuntimeExecutors = (
                   toolExecutionService.executeTool(chatToolPayload, {
                     activeDeviceId: state.metadata?.activeDeviceId,
                     agentId: state.metadata?.agentId,
+                    agentMember: buildServerAgentMemberRunner(
+                      ctx,
+                      state,
+                      chatToolPayload,
+                      payload.parentMessageId,
+                    ),
                     documentId: state.metadata?.documentId,
                     execSubAgent: ctx.execSubAgent,
                     executionTimeoutMs: timeoutMs,

@@ -20,6 +20,7 @@ import {
   trace as otelTrace,
 } from '@lobechat/observability-otel/api';
 import {
+  asyncToolResumeCounter,
   buildInvokeAgentAttributes,
   buildInvokeAgentResultAttributes,
   invokeAgentSpanName,
@@ -61,10 +62,16 @@ import { CompletionLifecycle } from './CompletionLifecycle';
 import { hookDispatcher } from './hooks';
 import { HumanInterventionHandler } from './HumanInterventionHandler';
 import { OperationTraceRecorder } from './OperationTraceRecorder';
+import { createDefaultSnapshotStore } from './snapshotStore';
 import { buildStepPresentation, formatTokenCount } from './stepPresentation';
 import {
   type AgentExecutionParams,
   type AgentExecutionResult,
+  type ExecGroupMemberParams,
+  type ExecGroupMemberResult,
+  type GroupActionMemberBridgeParams,
+  type GroupActionOnComplete,
+  type GroupMemberTimeoutParams,
   type OperationCreationParams,
   type OperationCreationResult,
   type OperationStatusResult,
@@ -83,12 +90,36 @@ if (process.env.VERCEL) {
 const log = debug('lobe-server:agent-runtime-service');
 
 /**
- * Delay before a one-shot `verifyAsyncToolBarrier` re-check fires after a
+ * Base delay before the first `verifyAsyncToolBarrier` re-check fires after a
  * sub-agent completion found the parent not yet resumable. Long enough for
  * the parent's parking step to finish persisting, short enough that a lost
- * resume is recovered promptly.
+ * resume is recovered promptly. Subsequent attempts back off exponentially —
+ * see {@link asyncToolVerifyDelayMs}.
  */
 const ASYNC_TOOL_VERIFY_DELAY_MS = 15_000;
+
+/**
+ * Maximum number of bounded watchdog re-checks armed per parked parent. The
+ * watchdog re-arms after each unsatisfied check (instead of the old single
+ * shot) so a transient miss — a read-replica lag, a sibling dying between
+ * backfill and resume — is retried rather than leaving the parent stuck in
+ * `waiting_for_async_tool` forever. With exponential backoff from a 15s base,
+ * 5 attempts span ~15s → ~7.75min total before giving up. See LOBE-10385.
+ */
+const ASYNC_TOOL_VERIFY_MAX_ATTEMPTS = 5;
+
+/** Hard ceiling on a single backoff delay so late attempts don't overshoot. */
+const ASYNC_TOOL_VERIFY_MAX_DELAY_MS = 240_000;
+
+/**
+ * Exponential backoff delay for the Nth (1-based) watchdog re-check:
+ * 15s, 30s, 60s, 120s, 240s, capped at {@link ASYNC_TOOL_VERIFY_MAX_DELAY_MS}.
+ */
+const asyncToolVerifyDelayMs = (attempt: number): number =>
+  Math.min(
+    ASYNC_TOOL_VERIFY_DELAY_MS * 2 ** (Math.max(1, attempt) - 1),
+    ASYNC_TOOL_VERIFY_MAX_DELAY_MS,
+  );
 
 /**
  * Format error for storage in message pluginError metadata.
@@ -130,6 +161,13 @@ const toAgentSignalSnapshotEvents = (
  * top-level option. One named home for the whole upward-call surface.
  */
 export interface AgentRuntimeDelegate {
+  /**
+   * Fork a group member ("call agent member") under a `lobe-group-management`
+   * tool call. Handles both in-group (non-isolated, shared group session) and
+   * isolated members, installing the group-action member completion bridge that
+   * enforces the K=N member barrier before resuming/finishing the supervisor.
+   */
+  execGroupMember?: (params: ExecGroupMemberParams) => Promise<ExecGroupMemberResult>;
   /**
    * Run a legacy agent invocation through the full high-level pipeline
    * (AiAgentService.execSubAgent → execAgent: agent-config resolution, tool
@@ -256,7 +294,7 @@ export class AgentRuntimeService {
     this.queueService =
       options?.queueService === null ? null : (options?.queueService ?? new QueueService());
     this.traceRecorder = new OperationTraceRecorder(
-      options?.snapshotStore ?? this.createDefaultSnapshotStore(),
+      options?.snapshotStore ?? createDefaultSnapshotStore(),
     );
     this.agentFactory = options?.agentFactory;
     this.delegate = options?.delegate ?? {};
@@ -587,17 +625,39 @@ export class AgentRuntimeService {
       rejectionReason,
       rejectAndContinue,
       resumeAsyncTool,
+      finishAfterAsyncTool,
+      groupMemberTimeout,
       toolMessageId,
       verifyAsyncToolBarrier,
+      asyncToolVerifyAttempt,
       externalRetryCount = 0,
     } = params;
+
+    // Group member timeout watchdog: enforce a member's deadline without claiming
+    // the step lock. No-op if the member already finished; otherwise interrupt it
+    // and bridge a `timeout` completion so the parked supervisor resumes/finishes.
+    if (groupMemberTimeout) {
+      return this.handleGroupMemberTimeout(groupMemberTimeout);
+    }
 
     // Watchdog re-check for a parked async-tool wait: re-run the barrier + CAS
     // without claiming the step lock or executing anything. Idempotent — the
     // CAS guarantees at most one real resume regardless of how many checks run.
+    // Opt back into `scheduleVerifyOnHold` with the next attempt so an
+    // unsatisfied barrier re-arms (bounded backoff) instead of giving up after
+    // a single shot — the core LOBE-10385 fix.
     if (verifyAsyncToolBarrier) {
-      log('[%s][%d] Running async-tool barrier verify', operationId, stepIndex);
-      const resumed = await this.tryResumeParentFromAsyncTool({ parentOperationId: operationId });
+      const attempt = asyncToolVerifyAttempt ?? 1;
+      log(
+        '[%s][%d] Running async-tool barrier verify (attempt %d)',
+        operationId,
+        stepIndex,
+        attempt,
+      );
+      const resumed = await this.tryResumeParentFromAsyncTool(
+        { parentOperationId: operationId },
+        { scheduleVerifyOnHold: true, verifyAttempt: attempt + 1 },
+      );
       return {
         nextStepScheduled: resumed,
         state: {},
@@ -848,6 +908,29 @@ export class AgentRuntimeService {
           );
         }
 
+        // Finish a parked supervisor op WITHOUT another LLM turn (group
+        // orchestration skipCallSupervisor / delegate). Refresh messages so the
+        // final group conversation is captured, transition straight to `done`,
+        // and let the standard `!shouldContinue` finalization below record
+        // completion + dispatch hooks. Skips runtime.step entirely.
+        let forcedFinishState: AgentState | undefined;
+        if (finishAfterAsyncTool && currentState.status === 'waiting_for_async_tool') {
+          const refreshed = await this.refreshMessagesFromDB(currentState);
+          currentState = structuredClone(currentState);
+          currentState.messages = refreshed;
+          currentState.pendingToolsCalling = [];
+          currentState.status = 'done';
+          currentState.interruption = undefined;
+          currentState.lastModified = new Date().toISOString();
+          forcedFinishState = currentState;
+          log(
+            '[%s][%d] Finishing parked supervisor op after async tool (%d messages)',
+            operationId,
+            stepIndex,
+            refreshed.length,
+          );
+        }
+
         // Pre-step computation: extract device context from DB messages
         // Follows front-end computeStepContext pattern — computed at step boundary, not inside executors
         if (!currentState.metadata?.activeDeviceId) {
@@ -865,9 +948,11 @@ export class AgentRuntimeService {
           }
         }
 
-        // Execute step
+        // Execute step (skipped when force-finishing a parked supervisor op).
         const startAt = Date.now();
-        const stepResult = await runtime.step(currentState, currentContext);
+        const stepResult = forcedFinishState
+          ? { events: [], newState: forcedFinishState, nextContext: undefined }
+          : await runtime.step(currentState, currentContext);
 
         // Inner runtime.step() catches model-runtime exceptions and stuffs the
         // raw error into newState.error without re-throwing — so the outer
@@ -1626,12 +1711,35 @@ export class AgentRuntimeService {
    */
   async tryResumeParentFromAsyncTool(
     params: { parentOperationId: string },
-    options?: { scheduleVerifyOnHold?: boolean },
+    options?: {
+      /**
+       * Message id of a tool placeholder the caller just backfilled to a
+       * terminal state. Trusted by the barrier as fulfilled without re-reading
+       * `message_plugins` — closes the read-your-writes gap where the barrier
+       * query hits a read replica that hasn't seen the just-committed write.
+       */
+      knownFulfilledMessageId?: string;
+      /**
+       * Group orchestration disposition (skipCallSupervisor / delegate → finish).
+       * When omitted, resolved from the parked tool message's pluginState.
+       */
+      onComplete?: GroupActionOnComplete;
+      scheduleVerifyOnHold?: boolean;
+      /** 1-based watchdog attempt to arm when the parent isn't resumable yet. */
+      verifyAttempt?: number;
+    },
   ): Promise<boolean> {
     const { parentOperationId } = params;
 
     const state = await this.coordinator.loadAgentState(parentOperationId);
-    if (!state) return false;
+    if (!state) {
+      // State expired (Redis TTL) or never persisted — nothing left to resume.
+      // Surface it: a missing state at completion time is how a parent silently
+      // strands. There is no stepCount/status to arm a verify against.
+      log('[%s] async-tool resume: parent state missing/expired, cannot resume', parentOperationId);
+      asyncToolResumeCounter.add(1, { outcome: 'no_state' });
+      return false;
+    }
 
     if (state.status !== 'waiting_for_async_tool') {
       // Not parked (yet). Either the op already resumed/finished — nothing to
@@ -1642,15 +1750,39 @@ export class AgentRuntimeService {
     }
 
     const pending = (state.pendingToolsCalling ?? []) as ChatToolPayload[];
-    if (pending.length === 0) return false;
-
-    // Barrier: every pending tool must have a fulfilled tool_result message.
-    const allFulfilled = await this.allPendingToolsFulfilled(pending);
-    if (!allFulfilled) {
-      log('[%s] async-tool barrier not yet satisfied, holding', parentOperationId);
+    if (pending.length === 0) {
+      // Parked but no pending tools recorded — usually the parked snapshot's
+      // `pendingToolsCalling` hasn't finished persisting yet. Warn, report, and
+      // arm a fallback re-check rather than returning silently (the old bug).
+      log(
+        '[%s] async-tool resume: parked op has no pending tools, arming fallback',
+        parentOperationId,
+      );
+      asyncToolResumeCounter.add(1, { outcome: 'no_pending' });
       await this.maybeScheduleAsyncToolVerify(parentOperationId, state, options);
       return false;
     }
+
+    // Barrier: every pending tool must have a fulfilled tool_result message.
+    const allFulfilled = await this.allPendingToolsFulfilled(
+      pending,
+      options?.knownFulfilledMessageId,
+    );
+    if (!allFulfilled) {
+      log('[%s] async-tool barrier not yet satisfied, holding', parentOperationId);
+      asyncToolResumeCounter.add(1, { outcome: 'barrier_held' });
+      await this.maybeScheduleAsyncToolVerify(parentOperationId, state, options);
+      return false;
+    }
+
+    // Group orchestration's skipCallSupervisor / delegate ends the supervisor
+    // op without another LLM turn: the same CAS gate flips the parked op, but
+    // the scheduled step finishes it (`finishAfterAsyncTool`) instead of
+    // re-entering the LLM (`resumeAsyncTool`). Self-describing so the generic
+    // verify watchdog resolves it correctly: the option (if any) wins, else the
+    // hint persisted on the parked tool message's pluginState, else resume.
+    const onComplete: GroupActionOnComplete =
+      options?.onComplete ?? (await this.resolveAsyncToolOnComplete(pending));
 
     // Single-fire guard: only one concurrent completion flips the op.
     const won = await new AgentOperationModel(this.serverDB, this.userId).tryResumeFromAsyncTool(
@@ -1658,10 +1790,18 @@ export class AgentRuntimeService {
     );
     if (!won) {
       log('[%s] lost async-tool resume CAS, no-op', parentOperationId);
+      asyncToolResumeCounter.add(1, { outcome: 'lost_cas' });
       return false;
     }
 
-    log('[%s] won async-tool resume CAS, scheduling step %d', parentOperationId, state.stepCount);
+    asyncToolResumeCounter.add(1, { outcome: 'resumed' });
+
+    log(
+      '[%s] won async-tool resume CAS, scheduling step %d (onComplete: %s)',
+      parentOperationId,
+      state.stepCount,
+      onComplete,
+    );
 
     if (this.queueService) {
       await this.queueService.scheduleMessage({
@@ -1669,7 +1809,8 @@ export class AgentRuntimeService {
         delay: 100,
         endpoint: `${this.baseURL}/run`,
         operationId: parentOperationId,
-        payload: { resumeAsyncTool: true },
+        payload:
+          onComplete === 'finish' ? { finishAfterAsyncTool: true } : { resumeAsyncTool: true },
         priority: 'high',
         stepIndex: state.stepCount,
       });
@@ -1681,36 +1822,60 @@ export class AgentRuntimeService {
   }
 
   /**
-   * Arm a one-shot delayed `verifyAsyncToolBarrier` re-check for a parent op
-   * whose resume attempt found it not yet resumable. Skipped for terminal
-   * states (nothing left to resume) and when the caller didn't opt in — the
-   * verify execution itself never re-arms, keeping retries bounded to one
-   * per completion event.
+   * Arm the next bounded `verifyAsyncToolBarrier` re-check for a parent op whose
+   * resume attempt found it not yet resumable. Skipped for terminal states
+   * (nothing left to resume) and when the caller didn't opt in.
+   *
+   * Unlike the original single shot, the watchdog re-arms after each unsatisfied
+   * check: the verify handler re-enters here with `verifyAttempt + 1`, backing
+   * off exponentially up to {@link ASYNC_TOOL_VERIFY_MAX_ATTEMPTS}. A transient
+   * miss (read-replica lag, a sibling dying between backfill and resume) is thus
+   * retried instead of permanently stranding the parent. Once attempts are
+   * exhausted the chain stops and the `verify_exhausted` metric fires so the
+   * orphan is observable. See LOBE-10385.
    */
   private async maybeScheduleAsyncToolVerify(
     parentOperationId: string,
     state: AgentState,
-    options?: { scheduleVerifyOnHold?: boolean },
+    options?: { scheduleVerifyOnHold?: boolean; verifyAttempt?: number },
   ): Promise<void> {
     if (!options?.scheduleVerifyOnHold || !this.queueService) return;
 
     const status = state.status as string;
     if (status === 'done' || status === 'error' || status === 'interrupted') return;
 
+    const attempt = options.verifyAttempt ?? 1;
+    if (attempt > ASYNC_TOOL_VERIFY_MAX_ATTEMPTS) {
+      // Bounded retries spent and the parent is still not resumable — give up
+      // re-arming and report so the stuck wait can be detected, not silently
+      // accumulated.
+      log(
+        '[%s] async-tool barrier verify exhausted after %d attempts, giving up (status: %s)',
+        parentOperationId,
+        ASYNC_TOOL_VERIFY_MAX_ATTEMPTS,
+        status,
+      );
+      asyncToolResumeCounter.add(1, { outcome: 'verify_exhausted' });
+      return;
+    }
+
+    const delay = asyncToolVerifyDelayMs(attempt);
     log(
-      '[%s] scheduling async-tool barrier verify in %dms (status: %s)',
+      '[%s] scheduling async-tool barrier verify attempt %d/%d in %dms (status: %s)',
       parentOperationId,
-      ASYNC_TOOL_VERIFY_DELAY_MS,
+      attempt,
+      ASYNC_TOOL_VERIFY_MAX_ATTEMPTS,
+      delay,
       status,
     );
 
     try {
       await this.queueService.scheduleMessage({
         context: undefined,
-        delay: ASYNC_TOOL_VERIFY_DELAY_MS,
+        delay,
         endpoint: `${this.baseURL}/run`,
         operationId: parentOperationId,
-        payload: { verifyAsyncToolBarrier: true },
+        payload: { asyncToolVerifyAttempt: attempt, verifyAsyncToolBarrier: true },
         priority: 'high',
         stepIndex: state.stepCount,
       });
@@ -1791,21 +1956,39 @@ export class AgentRuntimeService {
       );
     }
 
-    // 2. Barrier + CAS + resume the parent op (infra errors propagate too)
-    return this.tryResumeParentFromAsyncTool({ parentOperationId }, { scheduleVerifyOnHold: true });
+    // 2. Barrier + CAS + resume the parent op (infra errors propagate too).
+    // Pass the just-backfilled message id so the barrier trusts this write
+    // instead of re-reading a possibly-stale replica.
+    return this.tryResumeParentFromAsyncTool(
+      { parentOperationId },
+      { knownFulfilledMessageId: toolMessageId, scheduleVerifyOnHold: true },
+    );
   }
 
   /**
    * Whether every pending tool call has a fulfilled tool_result message — i.e.
    * a tool message exists for its `tool_call_id` with non-empty content or a
    * terminal pluginState. Looks up by `tool_call_id` (plugin id === message id).
+   *
+   * `knownFulfilledMessageId` short-circuits the per-tool content/state read for
+   * a placeholder the caller just backfilled in the same request: its terminal
+   * write is a local fact, so re-reading it (possibly from a lagging read
+   * replica) would only risk a false negative that strands the parent. The
+   * plugin row itself predates the park, so the `tool_call_id → plugin.id`
+   * lookup still resolves; only the freshly written content/state is trusted.
    */
-  private async allPendingToolsFulfilled(pending: ChatToolPayload[]): Promise<boolean> {
+  private async allPendingToolsFulfilled(
+    pending: ChatToolPayload[],
+    knownFulfilledMessageId?: string,
+  ): Promise<boolean> {
     for (const tc of pending) {
       const plugin = await this.serverDB.query.messagePlugins.findFirst({
         where: (mp, { eq }) => eq(mp.toolCallId, tc.id),
       });
       if (!plugin) return false;
+
+      // Trust the caller's own just-committed backfill (read-your-writes).
+      if (knownFulfilledMessageId && plugin.id === knownFulfilledMessageId) continue;
 
       const message = await this.messageModel.findById(plugin.id);
       const pluginState = plugin.state as { status?: string } | null;
@@ -1816,6 +1999,252 @@ export class AgentRuntimeService {
       if (!fulfilled) return false;
     }
     return true;
+  }
+
+  /**
+   * Resolve the resume disposition for a parked op from the disposition hint
+   * persisted on its first pending tool message's pluginState. Group
+   * orchestration stamps `onComplete: 'finish'` there for skipCallSupervisor /
+   * delegate; everything else (sub-agents, client tools) resolves to `resume`.
+   * Self-describing so the generic verify watchdog finishes the right ops.
+   */
+  private async resolveAsyncToolOnComplete(
+    pending: ChatToolPayload[],
+  ): Promise<GroupActionOnComplete> {
+    // A batched turn can park multiple deferred/client tools. If ANY of them is
+    // a group action requesting finish (skipCallSupervisor / delegate), the
+    // orchestration must finish — reading only pending[0] would miss a group
+    // finish call that isn't the first pending tool and wrongly resume.
+    for (const tool of pending) {
+      const plugin = await this.serverDB.query.messagePlugins.findFirst({
+        where: (mp, { eq }) => eq(mp.toolCallId, tool.id),
+      });
+      const pluginState = plugin?.state as { onComplete?: string } | null;
+      if (pluginState?.onComplete === 'finish') return 'finish';
+    }
+    return 'resume';
+  }
+
+  /**
+   * Count fulfilled member anchors under a group-management tool call — child
+   * `role: 'tool'` messages whose content is non-empty or whose pluginState is
+   * terminal. The K=N member barrier for broadcast / executeAgentTasks: the
+   * group tool message is only backfilled (satisfying the parked op's
+   * single-tool barrier) once this reaches the expected member count.
+   */
+  private async countFulfilledMemberAnchors(groupToolMessageId: string): Promise<number> {
+    const children = await this.serverDB.query.messages.findMany({
+      where: (m, { and, eq }) => and(eq(m.parentId, groupToolMessageId), eq(m.role, 'tool')),
+    });
+    let fulfilled = 0;
+    for (const child of children) {
+      if (child.content && child.content.length > 0) {
+        fulfilled += 1;
+        continue;
+      }
+      const plugin = await this.serverDB.query.messagePlugins.findFirst({
+        where: (mp, { eq }) => eq(mp.id, child.id),
+      });
+      const pluginState = plugin?.state as { status?: string } | null;
+      if (pluginState?.status === 'completed' || pluginState?.status === 'error') fulfilled += 1;
+    }
+    return fulfilled;
+  }
+
+  /**
+   * Completion bridge for the group orchestration "call agent member" path
+   * (`lobe-group-management`: speak / broadcast / delegate / executeAgentTask(s)).
+   * Mirrors {@link completeSubAgentBridge} but enforces a K=N member barrier:
+   *
+   *   1. Backfill this member's anchor tool message (in_group → a short receipt,
+   *      since the member already spoke in the shared group conversation;
+   *      isolated → the member's final answer from its hidden thread).
+   *   2. Multi-member actions: hold until every member anchor is fulfilled, then
+   *      backfill the supervisor's group tool message so the parked op's
+   *      single-tool barrier passes. Single-member actions collapse the anchor
+   *      onto the group tool call, so step 1 already satisfies the barrier.
+   *   3. Barrier-check + CAS resume/finish the parked supervisor via
+   *      `tryResumeParentFromAsyncTool` (finish disposition read from the group
+   *      tool message's pluginState).
+   *
+   * THROWS on infra failure of any backfill so the queue-mode callback returns
+   * non-2xx and QStash redelivers — backfills are idempotent and the resume is
+   * CAS-guarded, so redelivery is safe.
+   */
+  async completeGroupActionMember(params: GroupActionMemberBridgeParams): Promise<boolean> {
+    const {
+      anchorMessageId,
+      expectedMembers,
+      groupToolMessageId,
+      mode,
+      operationId,
+      parentOperationId,
+      reason,
+      threadId,
+    } = params;
+    const failed = reason === 'error' || reason === 'interrupted' || reason === 'timeout';
+
+    const finalState =
+      params.finalState ?? (await this.coordinator.loadAgentState(operationId)) ?? undefined;
+
+    log(
+      '[%s] group-member bridge → parent %s (mode: %s, reason: %s, %d members)',
+      operationId,
+      parentOperationId,
+      mode,
+      reason,
+      expectedMembers,
+    );
+
+    // 1. Backfill this member's anchor.
+    const messages = Array.isArray(finalState?.messages) ? finalState.messages : [];
+    const lastAssistant = [...messages]
+      .reverse()
+      .find((m: { role?: string }) => m?.role === 'assistant');
+    const agentLabel = (finalState?.metadata?.agentId as string | undefined) ?? 'member';
+    const anchorContent = failed
+      ? `Agent member did not complete (${reason}).`
+      : mode === 'in_group'
+        ? `Agent ${agentLabel} responded in the group.`
+        : (lastAssistant?.content as string | undefined) ||
+          'Agent member completed without a textual answer.';
+
+    const anchorBackfill = await this.messageModel.updateToolMessage(anchorMessageId, {
+      content: anchorContent,
+      pluginError: failed ? formatErrorForMetadata(finalState?.error) : undefined,
+      pluginState: {
+        model: finalState?.modelRuntimeConfig?.model,
+        status: failed ? 'error' : 'completed',
+        threadId,
+        totalToolCalls: finalState?.usage?.tools?.totalCalls,
+        totalTokens: finalState?.usage?.llm?.tokens?.total,
+      },
+    });
+    if (!anchorBackfill.success) {
+      throw new Error(
+        `Group-member bridge: failed to backfill anchor ${anchorMessageId} for parent ${parentOperationId}`,
+      );
+    }
+
+    // 2. K=N member barrier (multi-member actions only — single-member actions
+    //    use the group tool call itself as the anchor, already backfilled above).
+    if (expectedMembers > 1 && anchorMessageId !== groupToolMessageId) {
+      const fulfilled = await this.countFulfilledMemberAnchors(groupToolMessageId);
+      if (fulfilled < expectedMembers) {
+        log(
+          '[%s] group-member barrier %d/%d, holding parent %s',
+          operationId,
+          fulfilled,
+          expectedMembers,
+          parentOperationId,
+        );
+        const parentState = await this.coordinator.loadAgentState(parentOperationId);
+        if (parentState) {
+          await this.maybeScheduleAsyncToolVerify(parentOperationId, parentState, {
+            scheduleVerifyOnHold: true,
+          });
+        }
+        return false;
+      }
+
+      // All members done — backfill the group tool call so the parked op's
+      // single-tool barrier ([groupTool]) passes. Idempotent across racing
+      // last-committers; the resume/finish CAS guarantees one transition.
+      const groupBackfill = await this.messageModel.updateToolMessage(groupToolMessageId, {
+        content: `All ${expectedMembers} agent members completed.`,
+        pluginState: { expectedMembers, status: 'completed' },
+      });
+      if (!groupBackfill.success) {
+        throw new Error(
+          `Group-member bridge: failed to backfill group tool ${groupToolMessageId} for parent ${parentOperationId}`,
+        );
+      }
+    }
+
+    // 3. Barrier + CAS + resume/finish the parked supervisor op.
+    return this.tryResumeParentFromAsyncTool({ parentOperationId }, { scheduleVerifyOnHold: true });
+  }
+
+  /**
+   * Schedule the group-member timeout watchdog. Fired `delayMs` after the member
+   * op is forked; if the member hasn't finished by then, the watchdog interrupts
+   * it and bridges a `timeout` completion so the parked supervisor doesn't wait
+   * forever. No-op when the queue is disabled or the timeout is non-positive.
+   */
+  async scheduleGroupMemberTimeout(
+    params: GroupMemberTimeoutParams,
+    delayMs: number,
+  ): Promise<void> {
+    if (!this.queueService || !(delayMs > 0)) return;
+    try {
+      await this.queueService.scheduleMessage({
+        context: undefined,
+        delay: delayMs,
+        endpoint: `${this.baseURL}/run`,
+        // Keyed on the member op so the /run worker can resolve userId from its
+        // metadata, same trust chain as every other scheduled step.
+        operationId: params.memberOperationId,
+        payload: { groupMemberTimeout: params },
+        priority: 'normal',
+        stepIndex: 0,
+      });
+      log(
+        '[%s] scheduled group-member timeout in %dms (parent %s)',
+        params.memberOperationId,
+        delayMs,
+        params.parentOperationId,
+      );
+    } catch (error) {
+      log(
+        '[%s] failed to schedule group-member timeout (non-fatal): %O',
+        params.memberOperationId,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Enforce a group member's timeout. No-op if the member already reached a
+   * terminal state (its own completion bridge handles that). Otherwise interrupt
+   * the member and bridge a `timeout` completion — backfilling its anchor and
+   * resuming/finishing the parked supervisor via the K=N barrier. The member's
+   * own interrupt bridge may also fire; both are idempotent (anchor rewrite +
+   * CAS-guarded resume).
+   */
+  private async handleGroupMemberTimeout(
+    params: GroupMemberTimeoutParams,
+  ): Promise<AgentExecutionResult> {
+    const state = await this.coordinator.loadAgentState(params.memberOperationId);
+    const status = state?.status as string | undefined;
+    if (!state || status === 'done' || status === 'error' || status === 'interrupted') {
+      log(
+        '[%s] group-member timeout: member already terminal (%s), no-op',
+        params.memberOperationId,
+        status,
+      );
+      return { nextStepScheduled: false, state: {}, success: true };
+    }
+
+    log(
+      '[%s] group-member timeout fired, interrupting + bridging timeout to parent %s',
+      params.memberOperationId,
+      params.parentOperationId,
+    );
+    await this.interruptOperation(params.memberOperationId);
+
+    const resumed = await this.completeGroupActionMember({
+      anchorMessageId: params.anchorMessageId,
+      expectedMembers: params.expectedMembers,
+      finalState: state,
+      groupToolMessageId: params.groupToolMessageId,
+      mode: params.mode,
+      onComplete: params.onComplete,
+      operationId: params.memberOperationId,
+      parentOperationId: params.parentOperationId,
+      reason: 'timeout',
+    });
+
+    return { nextStepScheduled: resumed, state: {}, success: true };
   }
 
   /**
@@ -1951,6 +2380,7 @@ export class AgentRuntimeService {
       evalContext: metadata?.evalContext,
       execSubAgent: this.delegate.execSubAgent,
       execVirtualSubAgent: this.delegate.execVirtualSubAgent,
+      execGroupMember: this.delegate.execGroupMember,
       hookDispatcher,
       loadAgentState: this.coordinator.loadAgentState.bind(this.coordinator),
       messageModel: this.messageModel,
@@ -1972,34 +2402,6 @@ export class AgentRuntimeService {
     });
 
     return { agent, runtime };
-  }
-
-  /**
-   * Create default snapshot store based on environment.
-   * - ENABLE_AGENT_S3_TRACING=1 → S3SnapshotStore
-   * - NODE_ENV=development → FileSnapshotStore
-   * - Otherwise → null (no tracing)
-   */
-  private createDefaultSnapshotStore(): ISnapshotStore | null {
-    if (process.env.ENABLE_AGENT_S3_TRACING === '1') {
-      try {
-        const { S3SnapshotStore } = require('@/server/modules/AgentTracing');
-        return new S3SnapshotStore();
-      } catch {
-        // S3SnapshotStore not available
-      }
-    }
-
-    if (process.env.NODE_ENV === 'development') {
-      try {
-        const { FileSnapshotStore } = require('@lobechat/agent-tracing');
-        return new FileSnapshotStore();
-      } catch {
-        // agent-tracing not available
-      }
-    }
-
-    return null;
   }
 
   /**

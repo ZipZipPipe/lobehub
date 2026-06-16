@@ -152,7 +152,7 @@ export const agentBuilderRuntime: ServerRuntimeRegistration = {
         params: UpdateAgentConfigParams,
         ctx: ToolExecutionContext,
       ): Promise<ToolExecutionResult> => {
-        const agentId = ctx.agentId;
+        const agentId = ctx.editingAgentId ?? ctx.agentId;
 
         if (!agentId) {
           return {
@@ -240,7 +240,7 @@ export const agentBuilderRuntime: ServerRuntimeRegistration = {
         params: UpdatePromptParams,
         ctx: ToolExecutionContext,
       ): Promise<ToolExecutionResult> => {
-        const agentId = ctx.agentId;
+        const agentId = ctx.editingAgentId ?? ctx.agentId;
 
         if (!agentId) {
           return {
@@ -272,7 +272,7 @@ export const agentBuilderRuntime: ServerRuntimeRegistration = {
         params: InstallPluginParams,
         ctx: ToolExecutionContext,
       ): Promise<ToolExecutionResult> => {
-        const agentId = ctx.agentId;
+        const agentId = ctx.editingAgentId ?? ctx.agentId;
 
         if (!agentId) {
           return {
@@ -307,9 +307,9 @@ export const agentBuilderRuntime: ServerRuntimeRegistration = {
             }
           }
 
-          // OAuth-based tools (Klavis, LobehubSkill) cannot be installed in background context
+          // OAuth-based tools (Composio, LobehubSkill) cannot be installed in background context
           return {
-            content: `Installing official integrations that require OAuth (Klavis, LobehubSkill) is not supported in background execution. Please install "${identifier}" from the Agent Builder UI instead.`,
+            content: `Installing official integrations that require OAuth (Composio, LobehubSkill) is not supported in background execution. Please install "${identifier}" from the Agent Builder UI instead.`,
             error: { message: 'OAuth not available in background context', type: 'NotSupported' },
             success: false,
           };

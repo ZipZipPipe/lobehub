@@ -116,6 +116,14 @@ interface OperationState {
   operationId: string;
   processedKeys: Set<string>;
   /**
+   * The operation's seeded placeholder assistant (the row `execAgent` creates
+   * before the first ingest). Immutable for the run's lifetime. Used as the
+   * `createdAt` floor when anchoring the chain to the run's real last tool —
+   * a topic runs at most one operation at a time, so "tool messages on/after
+   * the seed" scopes to THIS run without a recursive parent walk.
+   */
+  seedAssistantMessageId: string;
+  /**
    * Run-global DB index for every tool message in the topic, keyed by
    * `tool_call_id`. Main and subagent reducers keep only their per-turn maps;
    * this map lets a `tool_result` land even when its `tools_calling` was
@@ -396,6 +404,7 @@ export class HeterogeneousPersistenceHandler {
       main: createMainAgentRunState(currentAssistantMessageId),
       operationId,
       processedKeys: new Set(),
+      seedAssistantMessageId: baseAssistantMessageId,
       toolMsgIdByCallId: new Map(),
       topicId,
     };
@@ -502,6 +511,14 @@ export class HeterogeneousPersistenceHandler {
     const currentMsg = await this.deps.messageModel.findById(state.main.currentAssistantId);
     const snapshot = this.toAssistantSnapshot(currentMsg);
 
+    // Recover the in-flight turn's CC message.id so a replayed `newStep` (cold
+    // replica retry) is recognized as the SAME turn — no duplicate assistant,
+    // no usage-only empty shell. Mirrors the subagent path's recovery of
+    // `currentSubagentMessageId` from `metadata.subagentMessageId`.
+    if (typeof snapshot.metadata.mainMessageId === 'string') {
+      state.main.currentMainMessageId = snapshot.metadata.mainMessageId;
+    }
+
     if (snapshot.textSnapshotSeq > state.main.lastTextSnapshotSeq) {
       state.main.accContent = snapshot.content;
       state.main.lastTextSnapshotSeq = snapshot.textSnapshotSeq;
@@ -536,11 +553,23 @@ export class HeterogeneousPersistenceHandler {
     if (snapshot.model) state.main.turnModel = snapshot.model;
     if (snapshot.provider) state.main.turnProvider = snapshot.provider;
 
-    // Prefer the authoritative child tool row over the assistant.tools[] JSONB
-    // mirror. During multi-tool batches, an earlier tool may already have
-    // result_msg_id backfilled while a later tool row exists but Phase 3 has not
-    // rewritten the JSONB payload yet; anchoring from the snapshot would pick
-    // the earlier tool and fork the main wire.
+    // Anchor the chain to the RUN's real latest main-thread tool message, read
+    // straight from the DB and independent of `currentAssistantId`. The latter
+    // can regress to the seeded placeholder on a cold / non-sticky replica
+    // (see the multi-replica caveat on the class) when `heteroCurrentMsgId` is
+    // not yet bound to this operation: anchoring off its child tools would then
+    // collapse onto the run's FIRST tool, and every later step opens off that
+    // same node — forking the wire into orphan siblings. Ordering by createdAt
+    // also sidesteps the multi-tool-batch hazard where an earlier tool's
+    // result_msg_id is backfilled before a later tool row's JSONB is rewritten.
+    const runLastToolId = await this.getLastRunToolMessageId(state);
+    if (runLastToolId) {
+      state.main.lastToolMsgIdEver = runLastToolId;
+      return;
+    }
+
+    // No tool persisted in this run yet — fall back to the per-assistant lookups
+    // so the very first turn still chains correctly before any tool exists.
     const currentTurnToolId =
       (await this.getLastChildToolMessageId(state.main.currentAssistantId)) ??
       this.getLastSnapshotToolMessageId(snapshot, state.toolMsgIdByCallId);
@@ -556,6 +585,20 @@ export class HeterogeneousPersistenceHandler {
   }
 
   /**
+   * Latest main-thread tool message created on/after the run's seed assistant.
+   * Scopes to the current operation via the seed's `createdAt` floor without a
+   * recursive walk, and stays correct even when `currentAssistantId` has
+   * regressed on a cold replica. Optional on the model so test mocks that don't
+   * implement it transparently fall back to the per-assistant anchors.
+   */
+  private async getLastRunToolMessageId(state: OperationState): Promise<string | undefined> {
+    return await this.deps.messageModel.getLastMainThreadToolMessageIdSince?.(
+      state.topicId,
+      state.seedAssistantMessageId,
+    );
+  }
+
+  /**
    * Rebuild the in-flight subagent runs (`state.main.subagents`) from DB.
    *
    * The shared reducer keys runs by `parentToolCallId` and only lazy-creates a
@@ -567,9 +610,16 @@ export class HeterogeneousPersistenceHandler {
    *
    * Merge semantics: only runs MISSING from the in-memory map are rehydrated, so
    * a warm replica's live per-turn accumulators (`accContent`, current
-   * `toolState`) are never clobbered by the DB projection. Finalized runs are
-   * excluded (their thread is `Active`, not `Processing`), so a completed spawn
-   * is never resurrected.
+   * `toolState`) are never clobbered by the DB projection.
+   *
+   * Finalized (`Active`) spawns are NOT rehydrated as live runs (a completed
+   * spawn is never resurrected — that would mint spurious empty assistants and
+   * re-finalize churn), but their `sourceToolCallId` IS recorded in
+   * `finalizedParents` so a REPLAYED first-event on a cold replica can't fork a
+   * duplicate thread for a spawn that already finished (the "一模一样的两个
+   * thread" bug). This mirrors #15838's main-turn idempotency for the subagent
+   * thread-create step: dedup keyed by the DB-homed `sourceToolCallId`,
+   * independent of in-memory state and of thread status.
    *
    * Best-effort: any DB hiccup (or a partial test mock without the query
    * methods) leaves `state.main.subagents` untouched rather than aborting the
@@ -580,12 +630,13 @@ export class HeterogeneousPersistenceHandler {
       const threads = await this.deps.threadModel.queryByTopicId(state.topicId);
       const existing = state.main.subagents.runs;
       const snapshots: SubagentRunSnapshot[] = [];
+      // Union with any parents finalized in-memory on a warm replica.
+      const finalizedParents = new Set(state.main.subagents.finalizedParents);
 
       for (const thread of threads ?? []) {
         if (thread.type !== ThreadType.Isolation) continue;
-        if (thread.status !== ThreadStatus.Processing) continue;
         const meta = thread.metadata as { operationId?: string; sourceToolCallId?: string } | null;
-        // Operation-scoped: only rehydrate threads THIS operation created.
+        // Operation-scoped: only attend to threads THIS operation created.
         // Topics are reused across turns, so a prior run that crashed / was
         // cancelled without an ingested terminal event can leave its subagent
         // thread stuck in `Processing`. Without this guard the next operation
@@ -597,6 +648,13 @@ export class HeterogeneousPersistenceHandler {
         const parentToolCallId = meta?.sourceToolCallId;
         if (!parentToolCallId || existing.has(parentToolCallId)) continue;
 
+        // Finalized spawn → remember the key (blocks duplicate create), don't
+        // rehydrate it as a live run.
+        if (thread.status !== ThreadStatus.Processing) {
+          finalizedParents.add(parentToolCallId);
+          continue;
+        }
+
         const messages = await this.deps.messageModel.query({
           threadId: thread.id,
           topicId: state.topicId,
@@ -605,11 +663,20 @@ export class HeterogeneousPersistenceHandler {
         if (snapshot) snapshots.push(snapshot);
       }
 
-      if (snapshots.length === 0) return;
+      // Nothing new to project: no rehydratable runs AND no finalized keys
+      // beyond what memory already tracked (the set started as a copy of it and
+      // only grows, so an unchanged size means no new Active threads were found).
+      if (
+        snapshots.length === 0 &&
+        finalizedParents.size === state.main.subagents.finalizedParents.size
+      ) {
+        return;
+      }
 
       // Union: rehydrated (missing) runs + the in-memory ones (which win, since
-      // they carry live accumulators the DB hasn't caught up to yet).
-      const merged = rehydrateSubagentRunsState(snapshots);
+      // they carry live accumulators the DB hasn't caught up to yet) + the
+      // finalized-parent guard set.
+      const merged = rehydrateSubagentRunsState(snapshots, [...finalizedParents]);
       for (const [parentToolCallId, run] of existing) merged.runs.set(parentToolCallId, run);
       state.main = { ...state.main, subagents: merged };
     } catch (err) {
@@ -740,11 +807,17 @@ export class HeterogeneousPersistenceHandler {
   private async applyMainIntent(state: OperationState, intent: MainAgentIntent) {
     switch (intent.kind) {
       case 'createAssistant': {
+        const createMetadata: Record<string, any> = {};
+        if (intent.signal) createMetadata.signal = intent.signal;
+        // Persist the turn's CC message.id so a cold replica can recover
+        // `currentMainMessageId` (via refreshMainStateFromDb) and dedupe a
+        // replayed `newStep` instead of forking a duplicate + empty shell.
+        if (intent.mainMessageId) createMetadata.mainMessageId = intent.mainMessageId;
         await this.deps.messageModel.create(
           {
             agentId: intent.agentId ?? undefined,
             content: '',
-            ...(intent.signal ? { metadata: { signal: intent.signal } } : {}),
+            ...(Object.keys(createMetadata).length > 0 ? { metadata: createMetadata } : {}),
             model: intent.model,
             parentId: intent.parentId,
             provider: intent.provider,

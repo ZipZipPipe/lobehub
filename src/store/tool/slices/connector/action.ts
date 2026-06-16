@@ -22,6 +22,15 @@ export class ConnectorActionImpl {
     this.#set({ connectors: data as any, isConnectorsInit: true }, false, 'fetchConnectors');
   };
 
+  /**
+   * Fetch the connector with its decrypted user-set credentials for the edit
+   * form. Does NOT update the store — caller uses the result directly.
+   * Machine-managed OAuth tokens are excluded server-side.
+   */
+  getConnectorForEdit = async (id: string) => {
+    return lambdaClient.connector.getForEdit.query({ id });
+  };
+
   createConnector = async (
     params: Parameters<typeof lambdaClient.connector.create.mutate>[0],
   ): Promise<string> => {
@@ -47,6 +56,27 @@ export class ConnectorActionImpl {
 
   deleteConnector = async (id: string): Promise<void> => {
     await lambdaClient.connector.delete.mutate({ id });
+    await this.fetchConnectors();
+  };
+
+  updateConnector = async (
+    id: string,
+    patch: {
+      credentials?:
+        | { token: string; type: 'bearer' }
+        | { headers: Record<string, string>; type: 'header' }
+        | null;
+      isEnabled?: boolean;
+      mcpServerUrl?: string;
+      name?: string;
+      oidcConfig?: {
+        clientId?: string;
+        clientSecret?: string;
+        scheme?: 'pre_registration' | 'dcr' | 'client_id_metadata_document';
+      };
+    },
+  ): Promise<void> => {
+    await lambdaClient.connector.update.mutate({ id, patch: patch as any });
     await this.fetchConnectors();
   };
 
@@ -85,7 +115,7 @@ export class ConnectorActionImpl {
   };
 
   /**
-   * Sync tools from a client-provided list (for Lobehub OAuth skills / Klavis
+   * Sync tools from a client-provided list (for Lobehub OAuth skills / Composio
    * that already have their tool list available on the client side).
    * Idempotent — safe to call whenever the detail panel opens.
    */

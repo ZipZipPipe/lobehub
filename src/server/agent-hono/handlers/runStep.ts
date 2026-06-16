@@ -40,8 +40,11 @@ export async function runStep(c: Context): Promise<Response> {
       rejectionReason,
       rejectAndContinue,
       resumeAsyncTool,
+      finishAfterAsyncTool,
+      groupMemberTimeout,
       toolMessageId,
       verifyAsyncToolBarrier,
+      asyncToolVerifyAttempt,
     } = { ...body, ...body.payload };
 
     if (!operationId) {
@@ -74,9 +77,12 @@ export async function runStep(c: Context): Promise<Response> {
 
     const result = await aiAgentService.executeStep({
       approvedToolCall,
+      asyncToolVerifyAttempt,
       context,
       externalRetryCount,
       humanInput,
+      finishAfterAsyncTool,
+      groupMemberTimeout,
       operationId,
       rejectAndContinue,
       rejectionReason,
