@@ -25,7 +25,7 @@ describe('applyModelExtendParams', () => {
     ).toEqual({});
   });
 
-  // LOBE-10442: Gemini 3 Pro via the agent path billed reasoning tokens but
+  // Gemini 3 Pro via the agent path (provider=lobehub) billed reasoning tokens but
   // returned empty thinking summaries because thinkingLevel never reached the
   // request. With the model's extendParams present, thinkingLevel must default
   // to 'high' even when the chat config does not set thinkingLevel3.
@@ -75,6 +75,16 @@ describe('applyModelExtendParams', () => {
         model: 'some-model',
       }).reasoning_effort,
     ).toBe('high');
+  });
+
+  it('resolves GLM-5.2 reasoning effort', () => {
+    const result = applyModelExtendParams({
+      chatConfig: chatConfig({ glm5_2ReasoningEffort: 'max' }),
+      extendParams: ['glm5_2ReasoningEffort'],
+      model: 'glm-5.2',
+    });
+
+    expect(result.reasoning_effort).toBe('max');
   });
 });
 
