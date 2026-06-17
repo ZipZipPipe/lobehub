@@ -44,6 +44,8 @@ export const gptImage2Schema: ModelParamsSchema = {
       '1152x2048',
       '2128x912',
       '912x2128',
+      '4256x1824',
+      '1824x4256',
       '3840x2160',
       '2160x3840',
     ],
