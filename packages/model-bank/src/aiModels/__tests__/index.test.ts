@@ -78,6 +78,14 @@ describe('xAI models', () => {
       }),
     );
   });
+
+  it('does not include the unsupported Grok Imagine Video 1.5 endpoint id', () => {
+    const model = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.providerId === ModelProvider.XAI && m.id === 'grok-imagine-video-1.5',
+    );
+
+    expect(model).toBeUndefined();
+  });
 });
 
 describe('knowledgeCutoff backfill', () => {

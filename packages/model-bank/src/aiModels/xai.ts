@@ -320,19 +320,11 @@ const grokImagineVideoPricing: AIVideoModelCard['pricing'] = {
 
 const xaiVideoModels: AIVideoModelCard[] = [
   {
-    description: 'Preview Grok Imagine 1.5 video generation model.',
+    description:
+      'Preview Grok Imagine 1.5 video generation model, routed through xAI video API alias.',
     displayName: 'Grok Imagine Video 1.5 Preview',
     enabled: true,
     id: 'grok-imagine-video-1.5-preview',
-    parameters: grokImagineVideoParameters,
-    pricing: grokImagineVideoPricing,
-    type: 'video',
-  },
-  {
-    description: 'Grok Imagine 1.5 video generation model.',
-    displayName: 'Grok Imagine Video 1.5',
-    enabled: true,
-    id: 'grok-imagine-video-1.5',
     parameters: grokImagineVideoParameters,
     pricing: grokImagineVideoPricing,
     type: 'video',
