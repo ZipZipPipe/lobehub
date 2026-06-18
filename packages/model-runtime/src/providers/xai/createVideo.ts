@@ -4,13 +4,6 @@ import type { CreateVideoOptions } from '../../core/openaiCompatibleFactory';
 import type { CreateVideoPayload, CreateVideoResponse } from '../../types/video';
 
 const log = createDebug('lobe-video:xai');
-const XAI_VIDEO_GENERATION_MODEL = 'grok-imagine-video';
-
-const normalizeXAIVideoModel = (model: string) => {
-  if (model.startsWith('grok-imagine-video-1.5')) return XAI_VIDEO_GENERATION_MODEL;
-
-  return model;
-};
 
 interface XAIVideoStatusResponse {
   error?:
@@ -145,14 +138,13 @@ export async function createXAIVideo(
 ): Promise<CreateVideoResponse> {
   const { model, params } = payload;
   const { prompt, imageUrl, aspectRatio, duration, resolution } = params;
-  const apiModel = normalizeXAIVideoModel(model);
 
-  log('Creating video with XAI API - model: %s, apiModel: %s, params: %O', model, apiModel, params);
+  log('Creating video with XAI API - model: %s, params: %O', model, params);
 
   const baseURL = options.baseURL || 'https://api.x.ai/v1';
 
   const body: Record<string, unknown> = {
-    model: apiModel,
+    model,
     prompt,
   };
 

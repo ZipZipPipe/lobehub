@@ -20,7 +20,7 @@ describe('createXAIVideo', () => {
     vi.clearAllMocks();
   });
 
-  it('should normalize preview model to xAI video API alias', async () => {
+  it('should send preview model id without aliasing', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ request_id: 'xai-request-123' }),
@@ -40,18 +40,18 @@ describe('createXAIVideo', () => {
       expect.any(Object),
     );
     const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
-    expect(body.model).toBe('grok-imagine-video');
+    expect(body.model).toBe('grok-imagine-video-1.5-preview');
     expect(result).toEqual({ inferenceId: 'xai-request-123' });
   });
 
-  it('should normalize stable 1.5 model to xAI video API alias', async () => {
+  it('should send base video model id without aliasing', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ request_id: 'xai-request-stable' }),
     });
 
     const payload: CreateVideoPayload = {
-      model: 'grok-imagine-video-1.5',
+      model: 'grok-imagine-video',
       params: {
         prompt: 'A cyberpunk city at night',
       },
