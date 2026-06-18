@@ -137,7 +137,7 @@ export async function createXAIVideo(
   options: CreateVideoOptions,
 ): Promise<CreateVideoResponse> {
   const { model, params } = payload;
-  const { prompt, imageUrl, aspectRatio, duration, resolution } = params;
+  const { prompt, imageUrl, imageUrls, aspectRatio, duration, resolution } = params;
 
   log('Creating video with XAI API - model: %s, params: %O', model, params);
 
@@ -148,7 +148,9 @@ export async function createXAIVideo(
     prompt,
   };
 
-  if (imageUrl) {
+  if (imageUrls && imageUrls.length > 0) {
+    body.reference_images = imageUrls.map((url) => ({ url }));
+  } else if (imageUrl) {
     body.image = { url: imageUrl };
   }
 

@@ -77,6 +77,22 @@ describe('xAI models', () => {
         type: 'video',
       }),
     );
+    expect((model?.parameters as any)?.imageUrls).toBeUndefined();
+  });
+
+  it('exposes multi-reference images for the supported xAI video model', () => {
+    const model = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.providerId === ModelProvider.XAI && m.id === 'grok-imagine-video',
+    );
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        parameters: expect.objectContaining({
+          imageUrls: expect.objectContaining({ maxCount: 7 }),
+        }),
+        type: 'video',
+      }),
+    );
   });
 
   it('does not include the unsupported Grok Imagine Video 1.5 endpoint id', () => {

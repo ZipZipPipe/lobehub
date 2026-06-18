@@ -83,6 +83,52 @@ describe('createXAIVideo', () => {
     expect(body.image).toEqual({ url: 'https://example.com/image.jpg' });
   });
 
+  it('should include imageUrls as reference_images', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ request_id: 'xai-reference-inputs' }),
+    });
+
+    const payload: CreateVideoPayload = {
+      model: 'grok-imagine-video',
+      params: {
+        prompt: 'Use these references',
+        imageUrls: ['https://example.com/ref-1.jpg', 'https://example.com/ref-2.jpg'],
+      },
+    };
+
+    await createXAIVideo(payload, mockOptions);
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.reference_images).toEqual([
+      { url: 'https://example.com/ref-1.jpg' },
+      { url: 'https://example.com/ref-2.jpg' },
+    ]);
+    expect(body.image).toBeUndefined();
+  });
+
+  it('should prefer reference_images over image when imageUrls are provided', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ request_id: 'xai-reference-over-image' }),
+    });
+
+    const payload: CreateVideoPayload = {
+      model: 'grok-imagine-video',
+      params: {
+        prompt: 'Use references',
+        imageUrl: 'https://example.com/first-frame.jpg',
+        imageUrls: ['https://example.com/ref-1.jpg'],
+      },
+    };
+
+    await createXAIVideo(payload, mockOptions);
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.reference_images).toEqual([{ url: 'https://example.com/ref-1.jpg' }]);
+    expect(body.image).toBeUndefined();
+  });
+
   it('should include aspect_ratio parameter', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,

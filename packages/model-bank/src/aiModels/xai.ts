@@ -314,6 +314,15 @@ const grokImagineVideoParameters: AIVideoModelCard['parameters'] = {
   },
 };
 
+const grokImagineVideoReferenceParameters: AIVideoModelCard['parameters'] = {
+  ...grokImagineVideoParameters,
+  imageUrls: {
+    default: [],
+    description: 'Reference images for multi-image reference-to-video generation.',
+    maxCount: 7,
+  },
+};
+
 const grokImagineVideoPricing: AIVideoModelCard['pricing'] = {
   units: [{ name: 'videoGeneration', rate: 0.05, strategy: 'fixed', unit: 'second' }],
 };
@@ -333,7 +342,7 @@ const xaiVideoModels: AIVideoModelCard[] = [
     displayName: 'Grok Imagine Video',
     enabled: true,
     id: 'grok-imagine-video',
-    parameters: grokImagineVideoParameters,
+    parameters: grokImagineVideoReferenceParameters,
     pricing: grokImagineVideoPricing,
     releasedAt: '2026-01-28',
     type: 'video',

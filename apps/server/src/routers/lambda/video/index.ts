@@ -66,6 +66,7 @@ const createVideoInputSchema = z.object({
       endImageUrl: z.string().nullable().optional(),
       generateAudio: z.boolean().optional(),
       imageUrl: z.string().nullable().optional(),
+      imageUrls: z.array(z.string()).optional(),
       prompt: z.string(),
       resolution: z.string().optional(),
       seed: z.number().nullable().optional(),
@@ -119,6 +120,22 @@ export const videoRouter = router({
         }
       }
 
+      // Process reference imageUrls
+      if (Array.isArray(params.imageUrls) && params.imageUrls.length > 0) {
+        try {
+          const imageKeys = await Promise.all(
+            params.imageUrls.map(async (url) => {
+              const key = await fileService.getKeyFromFullUrl(url);
+              return key || url;
+            }),
+          );
+
+          configForDatabase = { ...configForDatabase, imageUrls: imageKeys };
+        } catch (error) {
+          console.error('Error converting imageUrls to keys: %O', error);
+        }
+      }
+
       // Process last-frame endImageUrl
       if (typeof params.endImageUrl === 'string' && params.endImageUrl) {
         try {
@@ -162,6 +179,20 @@ export const videoRouter = router({
               fullUrl,
             );
             updates.endImageUrl = fullUrl;
+          }
+        }
+
+        if (Array.isArray(configForDatabase.imageUrls) && configForDatabase.imageUrls.length > 0) {
+          const fullUrls = await Promise.all(
+            (configForDatabase.imageUrls as string[]).map((url) =>
+              /^https?:\/\//.test(url) ? url : fileService.getFullFileUrl(url),
+            ),
+          );
+          const validFullUrls = fullUrls.filter(Boolean);
+
+          if (validFullUrls.length > 0) {
+            log('XAI: converted runtime video imageUrls to full URLs: %O', validFullUrls);
+            updates.imageUrls = validFullUrls;
           }
         }
 
