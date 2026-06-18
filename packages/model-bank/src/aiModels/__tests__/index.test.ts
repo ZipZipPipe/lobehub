@@ -60,6 +60,26 @@ describe('loadModels', () => {
   });
 });
 
+describe('xAI models', () => {
+  it('includes Grok Imagine Video 1.5 Preview as a video model', () => {
+    const model = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.providerId === ModelProvider.XAI && m.id === 'grok-imagine-video-1.5-preview',
+    );
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        parameters: expect.objectContaining({
+          duration: expect.objectContaining({ max: 15, min: 1 }),
+          resolution: expect.objectContaining({ enum: ['480p', '720p'] }),
+        }),
+        providerId: ModelProvider.XAI,
+        type: 'video',
+      }),
+    );
+  });
+});
+
 describe('knowledgeCutoff backfill', () => {
   it('fills knowledgeCutoff from the canonical map for builtin models', () => {
     const opus = LOBE_DEFAULT_MODEL_LIST.find(

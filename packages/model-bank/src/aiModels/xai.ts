@@ -298,30 +298,52 @@ const xaiImageModels: AIImageModelCard[] = [
   },
 ];
 
+const grokImagineVideoParameters: AIVideoModelCard['parameters'] = {
+  aspectRatio: {
+    default: '16:9',
+    enum: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'],
+  },
+  duration: { default: 8, max: 15, min: 1 },
+  imageUrl: {
+    default: null,
+  },
+  prompt: { default: '' },
+  resolution: {
+    default: '480p',
+    enum: ['480p', '720p'],
+  },
+};
+
+const grokImagineVideoPricing: AIVideoModelCard['pricing'] = {
+  units: [{ name: 'videoGeneration', rate: 0.05, strategy: 'fixed', unit: 'second' }],
+};
+
 const xaiVideoModels: AIVideoModelCard[] = [
+  {
+    description: 'Preview Grok Imagine 1.5 video generation model.',
+    displayName: 'Grok Imagine Video 1.5 Preview',
+    enabled: true,
+    id: 'grok-imagine-video-1.5-preview',
+    parameters: grokImagineVideoParameters,
+    pricing: grokImagineVideoPricing,
+    type: 'video',
+  },
+  {
+    description: 'Grok Imagine 1.5 video generation model.',
+    displayName: 'Grok Imagine Video 1.5',
+    enabled: true,
+    id: 'grok-imagine-video-1.5',
+    parameters: grokImagineVideoParameters,
+    pricing: grokImagineVideoPricing,
+    type: 'video',
+  },
   {
     description: 'State-of-the-art video generation across quality, cost, and latency.',
     displayName: 'Grok Imagine Video',
     enabled: true,
     id: 'grok-imagine-video',
-    parameters: {
-      aspectRatio: {
-        default: '16:9',
-        enum: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'],
-      },
-      duration: { default: 8, max: 15, min: 1 },
-      imageUrl: {
-        default: null,
-      },
-      prompt: { default: '' },
-      resolution: {
-        default: '480p',
-        enum: ['480p', '720p'],
-      },
-    },
-    pricing: {
-      units: [{ name: 'videoGeneration', rate: 0.05, strategy: 'fixed', unit: 'second' }],
-    },
+    parameters: grokImagineVideoParameters,
+    pricing: grokImagineVideoPricing,
     releasedAt: '2026-01-28',
     type: 'video',
   },

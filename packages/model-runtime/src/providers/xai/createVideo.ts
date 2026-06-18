@@ -11,7 +11,7 @@ interface XAIVideoStatusResponse {
     message?: string;
   };
   model?: string;
-  status: 'processing' | 'done' | 'failed';
+  status: 'pending' | 'processing' | 'done' | 'failed' | 'expired';
   video?: {
     duration?: number;
     respect_moderation?: boolean;
@@ -26,7 +26,8 @@ export async function queryXAIVideoStatus(
   requestId: string,
   options: { apiKey: string; baseURL: string },
 ): Promise<XAIVideoStatusResponse> {
-  const statusUrl = `${options.baseURL}/videos/${requestId}`;
+  const baseURL = options.baseURL || 'https://api.x.ai/v1';
+  const statusUrl = `${baseURL}/videos/${requestId}`;
 
   log('Querying video status for: %s', requestId);
 
@@ -72,6 +73,10 @@ export async function pollXAIVideoStatus(
 
   if (response.status === 'failed') {
     return { error: response.error?.message || 'Video generation failed', status: 'failed' };
+  }
+
+  if (response.status === 'expired') {
+    return { error: response.error?.message || 'Video generation expired', status: 'failed' };
   }
 
   return { status: 'pending' };
