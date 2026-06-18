@@ -13,10 +13,13 @@ const normalizeXAIVideoModel = (model: string) => {
 };
 
 interface XAIVideoStatusResponse {
-  error?: {
-    code?: string;
-    message?: string;
-  };
+  error?:
+    | string
+    | {
+        code?: string;
+        message?: string;
+        type?: string;
+      };
   model?: string;
   status: 'pending' | 'processing' | 'done' | 'failed' | 'expired';
   video?: {
@@ -25,6 +28,33 @@ interface XAIVideoStatusResponse {
     url?: string;
   };
 }
+
+const getXAIVideoErrorMessage = (
+  error: XAIVideoStatusResponse['error'],
+  fallback: string,
+): string => {
+  if (typeof error === 'string') return error;
+
+  return error?.message || fallback;
+};
+
+const readXAIVideoErrorMessage = async (response: Response): Promise<string> => {
+  const errorText = await response.text();
+
+  try {
+    const data = JSON.parse(errorText) as { error?: string | { message?: string } };
+
+    if (typeof data.error === 'string') return data.error;
+    if (data.error?.message) return data.error.message;
+  } catch {
+    // Fall back to the raw response text below.
+  }
+
+  return errorText || `XAI status API error: ${response.status}`;
+};
+
+const isFinalXAIVideoStatusError = (status: number) =>
+  status >= 400 && status < 500 && status !== 408 && status !== 429;
 
 /**
  * Query the status of a video generation task
@@ -47,8 +77,16 @@ export async function queryXAIVideoStatus(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`XAI status API error: ${response.status} ${errorText}`);
+    const errorMessage = await readXAIVideoErrorMessage(response);
+
+    if (isFinalXAIVideoStatusError(response.status)) {
+      return {
+        error: { message: errorMessage },
+        status: 'failed',
+      };
+    }
+
+    throw new Error(`XAI status API error: ${response.status} ${errorMessage}`);
   }
 
   const data = (await response.json()) as XAIVideoStatusResponse;
@@ -79,11 +117,17 @@ export async function pollXAIVideoStatus(
   }
 
   if (response.status === 'failed') {
-    return { error: response.error?.message || 'Video generation failed', status: 'failed' };
+    return {
+      error: getXAIVideoErrorMessage(response.error, 'Video generation failed'),
+      status: 'failed',
+    };
   }
 
   if (response.status === 'expired') {
-    return { error: response.error?.message || 'Video generation expired', status: 'failed' };
+    return {
+      error: getXAIVideoErrorMessage(response.error, 'Video generation expired'),
+      status: 'failed',
+    };
   }
 
   return { status: 'pending' };

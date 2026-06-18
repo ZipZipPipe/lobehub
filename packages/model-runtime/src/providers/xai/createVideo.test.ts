@@ -237,6 +237,39 @@ describe('pollXAIVideoStatus', () => {
     });
   });
 
+  it('should return failed when xAI rejects the completed task during status query', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () =>
+        JSON.stringify({ error: 'Generated video rejected by content moderation.' }),
+    });
+
+    const result = await pollXAIVideoStatus('request-123', options);
+
+    expect(result).toEqual({
+      status: 'failed',
+      error: 'Generated video rejected by content moderation.',
+    });
+  });
+
+  it('should return failed when status error is a string', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'failed',
+        error: 'Generated video rejected by content moderation.',
+      }),
+    });
+
+    const result = await pollXAIVideoStatus('request-123', options);
+
+    expect(result).toEqual({
+      status: 'failed',
+      error: 'Generated video rejected by content moderation.',
+    });
+  });
+
   it('should return pending when status is processing', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
@@ -322,18 +355,51 @@ describe('queryXAIVideoStatus', () => {
     expect(result).toEqual(mockResponse);
   });
 
-  it('should throw on HTTP error', async () => {
+  it('should return failed on HTTP client error', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: false,
       status: 404,
-      text: async () => 'Request not found',
+      text: async () => JSON.stringify({ error: { message: 'Request not found' } }),
+    });
+
+    const result = await queryXAIVideoStatus('invalid-request', {
+      apiKey: 'test-key',
+      baseURL: 'https://api.x.ai/v1',
+    });
+
+    expect(result).toEqual({
+      error: { message: 'Request not found' },
+      status: 'failed',
+    });
+  });
+
+  it('should throw on HTTP server error', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      text: async () => 'Service unavailable',
     });
 
     await expect(
-      queryXAIVideoStatus('invalid-request', {
+      queryXAIVideoStatus('request-123', {
         apiKey: 'test-key',
         baseURL: 'https://api.x.ai/v1',
       }),
-    ).rejects.toThrow('XAI status API error: 404 Request not found');
+    ).rejects.toThrow('XAI status API error: 503 Service unavailable');
+  });
+
+  it('should throw on rate limit so polling can retry', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      text: async () => 'Rate limited',
+    });
+
+    await expect(
+      queryXAIVideoStatus('request-123', {
+        apiKey: 'test-key',
+        baseURL: 'https://api.x.ai/v1',
+      }),
+    ).rejects.toThrow('XAI status API error: 429 Rate limited');
   });
 });
