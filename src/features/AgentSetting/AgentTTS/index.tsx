@@ -33,7 +33,7 @@ const elevenLabsVoiceOptions = [
 ];
 
 const TTS_SETTING_KEY = 'tts';
-const { openaiVoiceOptions, localeOptions } = VoiceList;
+const { openaiVoiceOptions } = VoiceList;
 
 const AgentTTS = memo(() => {
   const { t } = useTranslation('setting');
@@ -121,19 +121,6 @@ const AgentTTS = memo(() => {
         hidden: selectedTTSService !== 'elevenlabs',
         label: t('settingTTS.voice.title'),
         name: [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
-      },
-      {
-        children: (
-          <Select
-            options={[
-              { label: t('settingCommon.lang.autoMode'), value: 'auto' },
-              ...(localeOptions || []),
-            ]}
-          />
-        ),
-        desc: t('settingTTS.sttLocale.desc'),
-        label: t('settingTTS.sttLocale.title'),
-        name: [TTS_SETTING_KEY, 'sttLocale'],
       },
     ],
     icon: Mic,

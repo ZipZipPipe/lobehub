@@ -8,9 +8,16 @@ import type { ClientOptions } from 'openai';
 import OpenAI from 'openai';
 import type { Stream } from 'openai/streaming';
 
-import { isGPT5ProResponsesModel, responsesAPIModels } from '../../const/models';
 import { ErrorClassifier } from '../../errors';
+import {
+  isGPT5ProResponsesModel,
+  isResponsesAPIModel,
+  supportsGPT5ResponsesReasoningEffortNone,
+} from '../../providers/openai/openaiModelId';
 import type {
+  ASROptions,
+  ASRPayload,
+  ASRResponse,
   ChatCompletionErrorPayload,
   ChatCompletionTool,
   ChatMethodOptions,
@@ -92,7 +99,10 @@ export const CHAT_MODELS_BLOCK_LIST = [
   'dall-e',
 ];
 
-type ConstructorOptions<T extends Record<string, any> = any> = ClientOptions & T;
+// OpenAI SDK v6 widened `apiKey` to `string | ApiKeySetter`; lobehub only ever
+// passes a plain string, so narrow it back to keep `.trim()` / string assignments valid.
+type LobeClientOptions = Omit<ClientOptions, 'apiKey'> & { apiKey?: string };
+type ConstructorOptions<T extends Record<string, any> = any> = LobeClientOptions & T;
 type OpenAIExtraParams = { prompt_cache_key?: string; safety_identifier?: string };
 type ChatCompletionCreateParamsWithPromptCacheKey = Omit<
   OpenAI.ChatCompletionCreateParamsNonStreaming,
@@ -121,9 +131,6 @@ const getGenerateObjectReasoningParams = ({
   ...(reasoning_effort && thinking?.type !== 'disabled' ? { reasoning_effort } : {}),
 });
 
-const supportsResponsesReasoningEffortNone = (model: string): boolean =>
-  /(?:^|\/)gpt-5\.[1-9]\d*(?:-(?!pro(?:-|$))|$)/.test(model);
-
 const getGenerateObjectResponsesReasoningParams = ({
   model,
   reasoning_effort,
@@ -134,7 +141,7 @@ const getGenerateObjectResponsesReasoningParams = ({
   }
 
   if (thinking?.type === 'disabled') {
-    return supportsResponsesReasoningEffortNone(model) ? { reasoning: { effort: 'none' } } : {};
+    return supportsGPT5ResponsesReasoningEffortNone(model) ? { reasoning: { effort: 'none' } } : {};
   }
 
   return reasoning_effort && reasoning_effort !== 'max'
@@ -312,7 +319,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
     baseURL!: string;
     protected _options: ConstructorOptions<T>;
 
-    constructor(options: ClientOptions & Record<string, any> = {}) {
+    constructor(options: LobeClientOptions & Record<string, any> = {}) {
       const _options = {
         ...options,
         apiKey: options.apiKey?.trim() || DEFAULT_API_KEY,
@@ -368,10 +375,10 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
 
       const log = debug(`${this.logPrefix}:shouldUseResponsesAPI`);
 
-      // Priority 0: Check built-in responsesAPIModels FIRST (highest priority)
-      // These models MUST use Responses API regardless of user settings
-      if (model && responsesAPIModels.has(model)) {
-        log('using Responses API: model %s in built-in responsesAPIModels (forced)', model);
+      // Priority 0: Check built-in Responses API model rules FIRST (highest priority)
+      // These models MUST use Responses API regardless of user settings.
+      if (model && isResponsesAPIModel(model)) {
+        log('using Responses API: model %s matches built-in Responses API model rules', model);
         return true;
       }
 
@@ -853,7 +860,6 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
       options: GenerateObjectOptions | undefined,
       usagePayload: Parameters<typeof convertOpenAIUsage>[1],
     ) {
-      const log = debug(`${this.logPrefix}:generateObject`);
       const { messages, schema, model } = payload;
 
       // Apply schema transformation if configured
@@ -1112,6 +1118,39 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
       }
     }
 
+    async transcribe(payload: ASRPayload, options?: ASROptions): Promise<ASRResponse> {
+      const log = debug(`${this.logPrefix}:transcribe`);
+      const { file, fileName, model, language, prompt, responseFormat, temperature } = payload;
+      log('transcribe called with model: %s, audio size: %d bytes', model, file?.size || 0);
+
+      try {
+        // The OpenAI SDK only accepts `File` uploads; wrap bare blobs so the
+        // provider can infer the audio format from the file extension.
+        const uploadFile =
+          file instanceof File ? file : new File([file], fileName || 'audio', { type: file.type });
+
+        const transcription = await this.client.audio.transcriptions.create(
+          {
+            file: uploadFile,
+            language,
+            model,
+            prompt,
+            response_format: responseFormat,
+            temperature,
+          },
+          { headers: options?.headers, signal: options?.signal },
+        );
+
+        const text =
+          typeof transcription === 'string' ? transcription : ((transcription as any).text ?? '');
+        log('transcription completed, text length: %d', text.length);
+
+        return { text };
+      } catch (error) {
+        throw this.handleError(error);
+      }
+    }
+
     protected handleError(error: any): ChatCompletionErrorPayload {
       const log = debug(`${this.logPrefix}:error`);
       log('handling error: %O', error);
@@ -1250,7 +1289,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
         return AgentRuntimeError.chat({
           endpoint: desensitizedEndpoint,
           error: errorResult,
-          errorType: AgentRuntimeErrorType.QuotaLimitReached,
+          errorType: AgentRuntimeErrorType.RateLimitExceeded,
           message,
           provider: this.id,
         });
@@ -1505,10 +1544,14 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
       log('received %d tool calls from Chat Completions API', toolCalls?.length || 0);
 
       try {
-        const result = toolCalls.map((item) => ({
-          arguments: JSON.parse(item.function.arguments),
-          name: item.function.name,
-        }));
+        const result = toolCalls.map((item) => {
+          // OpenAI SDK v6 made tool calls a function|custom union; lobehub only emits function calls.
+          const { function: fn } = item as OpenAI.ChatCompletionMessageFunctionToolCall;
+          return {
+            arguments: JSON.parse(fn.arguments),
+            name: fn.name,
+          };
+        });
         log(
           'successfully parsed tool calls: %O',
           result.map((r) => r.name),

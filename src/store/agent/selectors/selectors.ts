@@ -315,9 +315,6 @@ const isCurrentAgentExternal = (s: AgentStoreState): boolean => !currentAgentDat
 const isCurrentAgentHeterogeneous = (s: AgentStoreState): boolean =>
   !!currentAgentConfig(s)?.agencyConfig?.heterogeneousProvider;
 
-const canCurrentAgentPublishToCommunity = (s: AgentStoreState): boolean =>
-  !!currentAgentData(s) && !isCurrentAgentHeterogeneous(s);
-
 const currentAgentHeterogeneousProviderType = (s: AgentStoreState) =>
   currentAgentConfig(s)?.agencyConfig?.heterogeneousProvider?.type;
 
@@ -328,7 +325,6 @@ const getAgentDocumentsById = (agentId: string) => (s: AgentStoreState) =>
   s.agentDocumentsMap[agentId];
 
 export const agentSelectors = {
-  canCurrentAgentPublishToCommunity,
   currentAgentExecutionTarget,
   currentAgentHeterogeneousProviderType,
   currentAgentAvatar,
