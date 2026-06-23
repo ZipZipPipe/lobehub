@@ -43,7 +43,7 @@ import type {
   UserInterventionConfig,
   WorkspaceInitResult,
 } from '@lobechat/types';
-import { RequestTrigger, ThreadStatus, ThreadType } from '@lobechat/types';
+import { buildHeteroExecArgs, RequestTrigger, ThreadStatus, ThreadType } from '@lobechat/types';
 import { nanoid } from '@lobechat/utils';
 import debug from 'debug';
 
@@ -72,6 +72,7 @@ import {
 import { shouldEnableBuiltinSkill } from '@/helpers/skillFilters';
 import { buildConnectorManifests } from '@/libs/mcp/buildConnectorManifests';
 import { signOperationJwt, signUserJWT } from '@/libs/trpc/utils/internalJwt';
+import { createStreamEventManager } from '@/server/modules/AgentRuntime/factory';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
 import type { EvalContext, ServerAgentToolsContext } from '@/server/modules/Mecha';
 import { createServerAgentToolsEngine } from '@/server/modules/Mecha';
@@ -86,7 +87,7 @@ import type {
 } from '@/server/services/agentRuntime';
 import { AgentRuntimeService } from '@/server/services/agentRuntime';
 import { getAbortError, isAbortError, throwIfAborted } from '@/server/services/agentRuntime/abort';
-import { hookDispatcher } from '@/server/services/agentRuntime/hooks';
+import { dispatchTerminalHooks, hookDispatcher } from '@/server/services/agentRuntime/hooks';
 import type { AgentHook } from '@/server/services/agentRuntime/hooks/types';
 import type {
   ExecGroupMemberParams,
@@ -372,6 +373,95 @@ export class AiAgentService {
   }
 
   /**
+   * If `deviceId` is a device enrolled into the caller's current workspace,
+   * return that workspaceId so device-gateway calls route to the
+   * `workspace:<id>` principal. Returns undefined for a personal device (or no
+   * workspace context), keeping the personal path byte-identical.
+   */
+  private async resolveDeviceWorkspaceId(
+    deviceId: string | undefined,
+  ): Promise<string | undefined> {
+    if (!deviceId || !this.workspaceId) return undefined;
+    const row = await new DeviceModel(
+      this.db,
+      this.userId,
+      this.workspaceId,
+    ).findWorkspaceDeviceById(deviceId);
+    return row ? this.workspaceId : undefined;
+  }
+
+  /**
+   * Finalize a hetero run that fails *synchronously at dispatch* — before the
+   * CLI/agent process ever starts (device offline → DEVICE_NOT_FOUND, no bound
+   * device, access denied, sandbox spawn rejected). These paths never produce a
+   * `heteroFinish` (CLI exit) or `agentNotify` done callback, so without this
+   * each one would strand the run: the assistant bubble would show an error but
+   * the UI stream would never close and a long-run task would hang in `running`.
+   *
+   * Routes through the SAME terminal funnel a normal exit uses — it fires the
+   * run's onComplete/onError hooks via `dispatchTerminalHooks`, so the task
+   * lifecycle (onTopicComplete → task failed) and any IM bot completion callback
+   * fire exactly as they would for a real failure — then closes the UI stream and
+   * clears the (never-started) running operation. The hooks were registered and
+   * serialized onto `runningOperation` at dispatch time.
+   *
+   * Stream-close / hook dispatch / metadata clear are best-effort: a failure
+   * there must not mask the original dispatch error the caller surfaces.
+   */
+  private async finalizeHeteroDispatchError(params: {
+    agentId?: string;
+    assistantMessageId: string;
+    detail: string;
+    message: string;
+    operationId: string;
+    topicId: string;
+  }): Promise<void> {
+    const { agentId, assistantMessageId, detail, message, operationId, topicId } = params;
+
+    // 1. Error bubble — written first so a stream subscriber reacting to the
+    //    end event below re-reads a message that already carries the error.
+    await this.messageModel.update(assistantMessageId, {
+      content: '',
+      error: { body: { detail }, message, type: 'ServerAgentRuntimeError' },
+    });
+
+    // 2. Close the UI stream.
+    try {
+      await createStreamEventManager().publishAgentRuntimeEnd({
+        finalState: { error: detail },
+        operationId,
+        reason: 'error',
+        reasonDetail: detail,
+        stepIndex: 0,
+      });
+    } catch (err) {
+      log('finalizeHeteroDispatchError: publishAgentRuntimeEnd failed (non-fatal): %O', err);
+    }
+
+    // 3. Fire onComplete/onError hooks (task lifecycle + bot callback). Hooks
+    //    were registered in-memory (local mode) and serialized onto
+    //    runningOperation (queue mode) at dispatch time.
+    await dispatchTerminalHooks({
+      agentId,
+      errorMessage: message,
+      errorType: 'ServerAgentRuntimeError',
+      operationId,
+      reason: 'error',
+      serializedHooks: hookDispatcher.getSerializedHooks(operationId),
+      topicId,
+      userId: this.userId,
+    });
+
+    // 4. The operation never started — drop the running marker so reconnect /
+    //    heteroIngest validation and the next turn don't see a stale operation.
+    try {
+      await this.topicModel.updateMetadata(topicId, { runningOperation: null });
+    } catch (err) {
+      log('finalizeHeteroDispatchError: clear runningOperation failed (non-fatal): %O', err);
+    }
+  }
+
+  /**
    * Resolve the "workspace init" scan (project skills + AGENTS.md) for a run
    * bound to a device's project directory. Reads the cache on
    * `devices.workingDirs[].workspace`, reusing it within {@link WORKSPACE_INIT_TTL_MS};
@@ -392,9 +482,23 @@ export class AiAgentService {
     if (!activeDeviceId) return { workspace: empty };
 
     try {
-      const deviceModel = new DeviceModel(this.db, this.userId);
-      const device = await deviceModel.findByDeviceId(activeDeviceId);
+      // The active device may be personal (userId-scoped) or workspace-owned
+      // (workspace-scoped) — look up both pools so the bound cwd, project
+      // skills, and AGENTS/CLAUDE instructions still resolve for a workspace
+      // device. Mirrors the dispatch-side lookup (see `deviceModelForCwd`).
+      const deviceModel = new DeviceModel(this.db, this.userId, this.workspaceId);
+      const personalDevice = await deviceModel.findByDeviceId(activeDeviceId);
+      const workspaceDevice = personalDevice
+        ? undefined
+        : await deviceModel.findWorkspaceDeviceById(activeDeviceId);
+      const device = personalDevice ?? workspaceDevice;
       if (!device) return { workspace: empty };
+
+      // For a workspace-owned device, route the gateway RPC to the
+      // `workspace:<id>` principal and persist the scan via the workspace
+      // update path — otherwise the scan goes through the personal pool
+      // (empty result) and the writeback misses the row.
+      const deviceWorkspaceId = workspaceDevice ? this.workspaceId : undefined;
 
       // The bound project root we scan — resolved via the shared precedence
       // helper so it cannot drift from hetero dispatch / topic backfill. Read
@@ -423,6 +527,7 @@ export class AiAgentService {
         deviceId: activeDeviceId,
         scope: boundCwd,
         userId: this.userId,
+        workspaceId: deviceWorkspaceId,
       });
       if (!scanned) {
         // Scan failed (offline mid-run / parse error). Fall back to a stale
@@ -435,9 +540,15 @@ export class AiAgentService {
       }
 
       // Persist the fresh scan back onto `workingDirs` (update in place or prepend
-      // a new MRU entry), keeping the JSONB payload bounded.
+      // a new MRU entry), keeping the JSONB payload bounded. Workspace devices
+      // are owned by the workspace, not a userId — use the workspace-scoped
+      // update path so the writeback actually lands.
       const updated = upsertWorkspaceScan(workingDirs, boundCwd, scanned, Date.now());
-      await deviceModel.update(activeDeviceId, { workingDirs: updated });
+      if (deviceWorkspaceId) {
+        await deviceModel.updateWorkspaceDevice(activeDeviceId, { workingDirs: updated });
+      } else {
+        await deviceModel.update(activeDeviceId, { workingDirs: updated });
+      }
       log('execAgent: scanned and cached workspace init for %s', boundCwd);
 
       return { boundCwd, workspace: scanned };
@@ -1286,6 +1397,14 @@ export class AiAgentService {
         runAttachments.imageList && runAttachments.imageList.length > 0
           ? runAttachments.imageList.map((image) => ({ id: image.id, url: image.url }))
           : undefined;
+      const heteroExecArgs =
+        heteroType === 'claude-code' || heteroType === 'codex'
+          ? buildHeteroExecArgs(
+              agentConfig.agencyConfig?.heterogeneousProvider?.type === heteroType
+                ? agentConfig.agencyConfig.heterogeneousProvider
+                : { type: heteroType },
+            )
+          : undefined;
 
       const heteroParams = {
         agentType: heteroType,
@@ -1305,13 +1424,24 @@ export class AiAgentService {
       const remoteDeviceId =
         requestedDeviceId || agentConfig.agencyConfig?.boundDeviceId || undefined;
 
-      // Seed topic.metadata.runningOperation so heteroIngest can validate the operation.
-      // completionWebhook is stored so heteroFinish can call back to the IM bot-callback
-      // endpoint even though the hetero path bypasses the normal hook registration flow.
+      // Register the run's lifecycle hooks so the hetero terminal path fires
+      // onComplete/onError through the same `hookDispatcher` the normal LLM
+      // runtime uses — driving the task lifecycle (onTopicComplete) and IM bot
+      // completion callbacks uniformly. The hetero block returns before
+      // AgentRuntimeService (which registers hooks for normal runs), so we do it
+      // here. Local mode dispatches these in-memory handlers; queue mode
+      // delivers the serialized webhooks persisted on runningOperation below.
+      if (hooks?.length) hookDispatcher.register(operationId, hooks);
+      const serializedHooks = hookDispatcher.getSerializedHooks(operationId);
+
+      // Seed topic.metadata.runningOperation so heteroIngest can validate the
+      // operation, and so every terminal site (heteroFinish, agentNotify done,
+      // dispatch failure) can re-fire the serialized hooks across a process
+      // boundary in queue mode.
       await this.topicModel.updateMetadata(topicId, {
         runningOperation: {
           assistantMessageId: assistantMessageRecord.id,
-          completionWebhook: hooks?.find((h) => h.type === 'onComplete')?.webhook,
+          hooks: serializedHooks,
           // Store deviceId + heteroType so interruptTask can cancel remote processes
           ...(isRemoteHetero && remoteDeviceId
             ? { deviceId: remoteDeviceId, heteroType }
@@ -1336,13 +1466,13 @@ export class AiAgentService {
             'execAgent: device access denied for remote hetero dispatch (reason=%s)',
             deviceAccessReason,
           );
-          await this.messageModel.update(assistantMessageRecord.id, {
-            content: '',
-            error: {
-              body: { detail: 'This sender is not allowed to run agents on a bound device.' },
-              message: 'Device access denied',
-              type: 'ServerAgentRuntimeError',
-            },
+          await this.finalizeHeteroDispatchError({
+            agentId: resolvedAgentId,
+            assistantMessageId: assistantMessageRecord.id,
+            detail: 'This sender is not allowed to run agents on a bound device.',
+            message: 'Device access denied',
+            operationId,
+            topicId,
           });
           return {
             agentId: resolvedAgentId,
@@ -1361,13 +1491,13 @@ export class AiAgentService {
         }
         if (!remoteDeviceId) {
           log('execAgent: openclaw/hermes requires a bound device (boundDeviceId not set)');
-          await this.messageModel.update(assistantMessageRecord.id, {
-            content: '',
-            error: {
-              body: { detail: 'No device bound to this agent. Configure boundDeviceId.' },
-              message: 'No bound device for remote hetero agent',
-              type: 'ServerAgentRuntimeError',
-            },
+          await this.finalizeHeteroDispatchError({
+            agentId: resolvedAgentId,
+            assistantMessageId: assistantMessageRecord.id,
+            detail: 'No device bound to this agent. Configure boundDeviceId.',
+            message: 'No bound device for remote hetero agent',
+            operationId,
+            topicId,
           });
           return {
             agentId: resolvedAgentId,
@@ -1387,7 +1517,6 @@ export class AiAgentService {
 
         // Open the stream channel so the gateway WS subscription can receive
         // notify_update events published by agentNotify.notify.
-        const { createStreamEventManager } = await import('@/server/modules/AgentRuntime/factory');
         const streamManager = createStreamEventManager();
         await streamManager
           .publishAgentRuntimeInit(operationId, {
@@ -1401,8 +1530,9 @@ export class AiAgentService {
 
         // lh connect only handles tool_call_request (not agent_run_request),
         // so we use executeToolCall with the runHeteroTask tool instead of dispatchAgentRun.
+        const remoteDeviceWorkspaceId = await this.resolveDeviceWorkspaceId(remoteDeviceId);
         const result = await deviceGateway.executeToolCall(
-          { deviceId: remoteDeviceId, userId: this.userId },
+          { deviceId: remoteDeviceId, userId: this.userId, workspaceId: remoteDeviceWorkspaceId },
           {
             apiName: 'runHeteroTask',
             arguments: JSON.stringify({
@@ -1413,6 +1543,11 @@ export class AiAgentService {
               prompt,
               taskId: operationId,
               topicId,
+              // Scope notify callbacks to the same workspace as the dispatched
+              // topic so agentNotify can resolve the workspace-owned topic.
+              // Without this the device's notify call falls back to personal
+              // mode and TopicModel.findById returns NOT_FOUND.
+              workspaceId: remoteDeviceWorkspaceId,
             }),
             identifier: 'runHeteroTask',
           },
@@ -1420,22 +1555,13 @@ export class AiAgentService {
         );
         if (!result.success) {
           log('execAgent: remote hetero dispatch failed: %s', result.error);
-          await streamManager
-            .publishAgentRuntimeEnd({
-              finalState: { error: result.error },
-              operationId,
-              reason: 'error',
-              reasonDetail: result.error,
-              stepIndex: 0,
-            })
-            .catch(() => {});
-          await this.messageModel.update(assistantMessageRecord.id, {
-            content: '',
-            error: {
-              body: { detail: result.error },
-              message: result.error ?? 'Device dispatch failed',
-              type: 'ServerAgentRuntimeError',
-            },
+          await this.finalizeHeteroDispatchError({
+            agentId: resolvedAgentId,
+            assistantMessageId: assistantMessageRecord.id,
+            detail: result.error ?? 'Device dispatch failed',
+            message: result.error ?? 'Device dispatch failed',
+            operationId,
+            topicId,
           });
           return {
             agentId: resolvedAgentId,
@@ -1480,16 +1606,14 @@ export class AiAgentService {
           const dispatchDeviceId = heteroPlan.kind === 'device' ? heteroPlan.deviceId : undefined;
           if (!dispatchDeviceId) {
             log('execAgent: hetero executionTarget=device but no boundDeviceId set');
-            await this.messageModel.update(assistantMessageRecord.id, {
-              content: '',
-              error: {
-                body: {
-                  detail:
-                    'No device bound. Pick a device in the Execution Device switcher, or switch to Cloud sandbox.',
-                },
-                message: 'No bound device for hetero agent',
-                type: 'ServerAgentRuntimeError',
-              },
+            await this.finalizeHeteroDispatchError({
+              agentId: resolvedAgentId,
+              assistantMessageId: assistantMessageRecord.id,
+              detail:
+                'No device bound. Pick a device in the Execution Device switcher, or switch to Cloud sandbox.',
+              message: 'No bound device for hetero agent',
+              operationId,
+              topicId,
             });
             return {
               agentId: resolvedAgentId,
@@ -1510,9 +1634,13 @@ export class AiAgentService {
           // wins, else the device's user-configured defaultCwd. The device row
           // lives in the DB (the gateway only knows live connections), so read
           // it directly rather than via deviceGateway.
-          const boundDevice = await new DeviceModel(this.db, this.userId).findByDeviceId(
-            dispatchDeviceId,
-          );
+          // The bound device may be personal (userId-scoped) or a workspace
+          // device (workspace-scoped) — look up both so its defaultCwd resolves.
+          const deviceModelForCwd = new DeviceModel(this.db, this.userId, this.workspaceId);
+          const boundDevice =
+            (await deviceModelForCwd.findByDeviceId(dispatchDeviceId)) ??
+            (await deviceModelForCwd.findWorkspaceDeviceById(dispatchDeviceId));
+          const dispatchWorkspaceId = await this.resolveDeviceWorkspaceId(dispatchDeviceId);
           // Resolve via the shared precedence helper so dispatch, workspace-init,
           // and the new-topic backfill below all agree on the cwd.
           const deviceCwd = resolveDeviceWorkingDirectory({
@@ -1548,16 +1676,19 @@ export class AiAgentService {
             cwd: deviceCwd,
             deviceId: dispatchDeviceId,
             systemContext: deviceSystemContext,
+            // Route to the workspace pool when this is a workspace device; the
+            // operation JWT stays member-scoped (the run belongs to the member).
+            workspaceId: dispatchWorkspaceId,
           });
           if (!result.success) {
             log('execAgent: hetero device dispatch failed: %s', result.error);
-            await this.messageModel.update(assistantMessageRecord.id, {
-              content: '',
-              error: {
-                body: { detail: result.error },
-                message: result.error ?? 'Device dispatch failed',
-                type: 'ServerAgentRuntimeError',
-              },
+            await this.finalizeHeteroDispatchError({
+              agentId: resolvedAgentId,
+              assistantMessageId: assistantMessageRecord.id,
+              detail: result.error ?? 'Device dispatch failed',
+              message: result.error ?? 'Device dispatch failed',
+              operationId,
+              topicId,
             });
             return {
               agentId: resolvedAgentId,
@@ -1582,9 +1713,24 @@ export class AiAgentService {
           spawnHeteroSandbox({
             ...heteroParams,
             agentType: heteroType as 'claude-code' | 'codex',
+            args: heteroExecArgs,
             marketService: this.marketService,
-          }).catch((err) => {
+          }).catch(async (err) => {
+            // Fire-and-forget: execAgent has already returned `autoStarted`, and
+            // the sandbox never reached the point of calling heteroFinish. Drive
+            // the same terminal funnel so the stranded run surfaces an error and
+            // its task is marked failed instead of hanging in `running`.
             log('execAgent: hetero sandbox spawn failed: %O', err);
+            await this.finalizeHeteroDispatchError({
+              agentId: resolvedAgentId,
+              assistantMessageId: assistantMessageRecord.id,
+              detail: err instanceof Error ? err.message : String(err),
+              message: 'Hetero sandbox spawn failed',
+              operationId,
+              topicId,
+            }).catch((finalizeErr) =>
+              log('execAgent: sandbox-failure finalize failed: %O', finalizeErr),
+            );
           });
         }
       }
@@ -1871,7 +2017,16 @@ export class AiAgentService {
       const boundDeviceId = topicBoundDeviceId || agentBoundDeviceId;
       if (gatewayConfigured) {
         try {
-          onlineDevices = await deviceGateway.queryDeviceList(this.userId);
+          // Personal pool (user principal) ∪ the current workspace's shared pool
+          // (workspace principal). Workspace devices are absent for non-workspace
+          // runs, so this is identical to the personal-only fetch there.
+          const [personalOnline, workspaceOnline] = await Promise.all([
+            deviceGateway.queryDeviceList(this.userId),
+            this.workspaceId
+              ? deviceGateway.queryDeviceList(this.userId, this.workspaceId)
+              : Promise.resolve([]),
+          ]);
+          onlineDevices = [...personalOnline, ...workspaceOnline];
           log('execAgent: found %d online device(s)', onlineDevices.length);
         } catch (error) {
           log('execAgent: failed to query device list: %O', error);
@@ -1986,7 +2141,6 @@ export class AiAgentService {
         disableLocalSystem,
         executionPlan,
         globalMemoryEnabled,
-        hasAgentDocuments,
         hasEnabledKnowledgeBases,
         isBotConversation,
         model,
@@ -3812,9 +3966,14 @@ export class AiAgentService {
           runningOp.deviceId,
           taskId,
         );
+        const cancelWorkspaceId = await this.resolveDeviceWorkspaceId(runningOp.deviceId);
         await deviceGateway
           .executeToolCall(
-            { deviceId: runningOp.deviceId, userId: this.userId },
+            {
+              deviceId: runningOp.deviceId,
+              userId: this.userId,
+              workspaceId: cancelWorkspaceId,
+            },
             {
               apiName: 'cancelHeteroTask',
               arguments: JSON.stringify({ signal: 'SIGINT', taskId }),

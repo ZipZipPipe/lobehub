@@ -63,13 +63,13 @@ const createVideoInputSchema = z.object({
       aspectRatio: z.string().optional(),
       cameraFixed: z.boolean().optional(),
       duration: z.number().optional(),
-      endImageUrl: z.string().nullable().optional(),
+      endImageUrl: z.string().nullish(),
       generateAudio: z.boolean().optional(),
-      imageUrl: z.string().nullable().optional(),
+      imageUrl: z.string().nullish(),
       imageUrls: z.array(z.string()).optional(),
       prompt: z.string(),
       resolution: z.string().optional(),
-      seed: z.number().nullable().optional(),
+      seed: z.number().nullish(),
     })
     .passthrough(),
   provider: z.string(),
@@ -383,6 +383,7 @@ export const videoRouter = router({
               prechargeResult,
               provider,
               userId,
+              workspaceId: wsId,
             });
           } catch (chargeError) {
             console.error('[video] chargeAfterGenerate failed:', chargeError);

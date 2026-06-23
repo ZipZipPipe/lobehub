@@ -305,6 +305,7 @@ export default {
   'document': 'User Manual',
   'download': 'Download',
   'getDesktopApp': 'Get Desktop App',
+  'goToTarget': 'Go to target',
   'duplicate': 'Duplicate',
   'edit': 'Edit',
   'errors.invalidFileFormat': 'Invalid file format',
@@ -582,6 +583,7 @@ export default {
   'userPanel.setting': 'Settings',
   'userPanel.upgradePlan': 'Upgrade Plan',
   'userPanel.usages': 'Usage',
+  'userPanel.workspaceSetting': 'Workspace Settings',
   'version': 'Version',
   'zoom': 'Zoom',
 };
