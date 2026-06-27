@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import type { PropsWithChildren, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatSettingsTabs } from '@/store/global/initialState';
@@ -22,42 +22,31 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@lobehub/ui', () => ({
-  Avatar: () => <div data-testid="avatar" />,
-  Block: ({ children }: PropsWithChildren) => <div>{children}</div>,
-  Flexbox: ({ children }: PropsWithChildren) => <div>{children}</div>,
-  Icon: () => <span />,
-  Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
-}));
-
-vi.mock('@/components/Menu', () => ({
-  default: ({
-    items = [],
-    onClick,
-    selectedKeys = [],
-  }: {
-    items?: { key?: string; label?: ReactNode }[];
-    onClick?: ({ key }: { key: string }) => void;
-    selectedKeys?: string[];
-  }) => (
-    <div data-selected={selectedKeys.join(',')} data-testid="agent-settings-menu">
-      {items.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          onClick={() => item.key && onClick?.({ key: item.key })}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
-  ),
-}));
-
 vi.mock('@/features/AgentSetting', () => ({
   AgentSettings: ({ tab }: { tab: ChatSettingsTabs }) => (
     <div data-tab={tab} data-testid="agent-settings-content" />
   ),
+  SettingsModalLayout: ({
+    activeTab,
+    tabs = [],
+    children,
+  }: {
+    activeTab?: string;
+    children?: ReactNode;
+    tabs?: { key: string }[];
+  }) => (
+    <div
+      data-active={activeTab}
+      data-tabs={tabs.map((tab) => tab.key).join(',')}
+      data-testid="layout"
+    >
+      {children}
+    </div>
+  ),
+}));
+
+vi.mock('@/hooks/usePermission', () => ({
+  usePermission: () => ({ allowed: true }),
 }));
 
 vi.mock('@/store/agent', () => {
@@ -84,13 +73,6 @@ vi.mock('@/store/serverConfig', () => ({
     selector(mocks.serverState),
 }));
 
-vi.mock('antd-style', () => ({
-  useTheme: () => ({
-    colorBgLayout: '#fff',
-    colorBorderSecondary: '#eee',
-  }),
-}));
-
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -106,12 +88,11 @@ describe('AgentSettings Content', () => {
   it('should select voice service when inbox hides opening settings', () => {
     render(<Content />);
 
-    expect(screen.queryByRole('button', { name: 'agentTab.opening' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'agentTab.tts' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'agentTab.selfIteration' })).toBeInTheDocument();
-    expect(screen.getByTestId('agent-settings-menu')).toHaveAttribute(
-      'data-selected',
-      ChatSettingsTabs.TTS,
+    const layout = screen.getByTestId('layout');
+    expect(layout).toHaveAttribute('data-active', ChatSettingsTabs.TTS);
+    expect(layout).toHaveAttribute(
+      'data-tabs',
+      `${ChatSettingsTabs.TTS},${ChatSettingsTabs.SelfIteration}`,
     );
     expect(screen.getByTestId('agent-settings-content')).toHaveAttribute(
       'data-tab',
@@ -119,19 +100,55 @@ describe('AgentSettings Content', () => {
     );
   });
 
-  it('opens voice service settings from the menu', () => {
+  it('exposes opening and voice service when not inbox', () => {
     mocks.agentState.isInbox = false;
     render(<Content />);
 
-    screen.getByRole('button', { name: 'agentTab.tts' }).click();
-
-    expect(screen.getByTestId('agent-settings-menu')).toHaveAttribute(
-      'data-selected',
-      ChatSettingsTabs.TTS,
+    const layout = screen.getByTestId('layout');
+    expect(layout).toHaveAttribute('data-active', ChatSettingsTabs.Opening);
+    expect(layout).toHaveAttribute(
+      'data-tabs',
+      `${ChatSettingsTabs.Opening},${ChatSettingsTabs.TTS},${ChatSettingsTabs.SelfIteration}`,
     );
     expect(screen.getByTestId('agent-settings-content')).toHaveAttribute(
       'data-tab',
-      ChatSettingsTabs.TTS,
+      ChatSettingsTabs.Opening,
+    );
+  });
+
+  it('exposes both tabs when not inbox and feature is on', () => {
+    mocks.agentState.isInbox = false;
+
+    render(<Content />);
+
+    const layout = screen.getByTestId('layout');
+    expect(layout).toHaveAttribute('data-active', ChatSettingsTabs.Opening);
+    expect(layout).toHaveAttribute(
+      'data-tabs',
+      `${ChatSettingsTabs.Opening},${ChatSettingsTabs.TTS},${ChatSettingsTabs.SelfIteration}`,
+    );
+  });
+
+  it('falls back to voice service when feature flag is off (inbox)', () => {
+    mocks.serverState.featureFlags.enableAgentSelfIteration = false;
+
+    render(<Content />);
+
+    const layout = screen.getByTestId('layout');
+    expect(layout).toHaveAttribute('data-active', ChatSettingsTabs.TTS);
+    expect(layout).toHaveAttribute('data-tabs', ChatSettingsTabs.TTS);
+  });
+
+  it('exposes opening and voice service when feature flag is off', () => {
+    mocks.agentState.isInbox = false;
+    mocks.serverState.featureFlags.enableAgentSelfIteration = false;
+
+    render(<Content />);
+
+    const layout = screen.getByTestId('layout');
+    expect(layout).toHaveAttribute(
+      'data-tabs',
+      `${ChatSettingsTabs.Opening},${ChatSettingsTabs.TTS}`,
     );
   });
 });
