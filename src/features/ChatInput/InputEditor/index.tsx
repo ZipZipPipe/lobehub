@@ -10,7 +10,7 @@ import {
 import { isCommandPressed } from '@lobechat/utils';
 import type { IEditor } from '@lobehub/editor';
 import { INSERT_MENTION_COMMAND, ReactAutoCompletePlugin, ReactMathPlugin } from '@lobehub/editor';
-import { Editor, FloatMenu, useEditorState } from '@lobehub/editor/react';
+import { Editor, useEditorState } from '@lobehub/editor/react';
 import { combineKeys } from '@lobehub/ui';
 import { css, cx } from 'antd-style';
 import Fuse from 'fuse.js';
@@ -67,7 +67,6 @@ const InputEditor = memo<{
 }>(({ defaultRows = 2, placeholder, placeholderVariant }) => {
   const [
     editor,
-    slashMenuRef,
     send,
     updateMarkdownContent,
     expand,
@@ -77,7 +76,6 @@ const InputEditor = memo<{
     isSlashEnabled,
   ] = useChatInputStore((s) => [
     s.editor,
-    s.slashMenuRef,
     s.handleSendButton,
     s.updateMarkdownContent,
     s.expand,
@@ -426,13 +424,7 @@ const InputEditor = memo<{
       ? CHAT_INPUT_EMBED_PLUGINS
       : createChatInputRichPlugins({
           linkPlugin: false,
-          mathPlugin: Editor.withProps(ReactMathPlugin, {
-            renderComp: expand
-              ? undefined
-              : (props) => (
-                  <FloatMenu {...props} getPopupContainer={() => (slashMenuRef as any)?.current} />
-                ),
-          }),
+          mathPlugin: Editor.withProps(ReactMathPlugin, {}),
         });
 
     const plugins = autoCompletePlugin ? [...basePlugins, autoCompletePlugin] : basePlugins;
@@ -440,7 +432,7 @@ const InputEditor = memo<{
     return !enableRichRender
       ? { enablePasteMarkdown: false, markdownOption: false, plugins }
       : { plugins };
-  }, [enableRichRender, expand, slashMenuRef, autoCompletePlugin]);
+  }, [enableRichRender, autoCompletePlugin]);
 
   const handleEditorInit = useCallback(
     (editor: IEditor) => {
