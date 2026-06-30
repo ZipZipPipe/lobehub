@@ -81,6 +81,7 @@ const InputEditor = memo<{
   const { t } = useTranslation('chat');
   const [
     editor,
+    slashMenuRef,
     send,
     updateMarkdownContent,
     expand,
@@ -91,6 +92,7 @@ const InputEditor = memo<{
     isSlashEnabled,
   ] = useChatInputStore((s) => [
     s.editor,
+    s.slashMenuRef,
     s.handleSendButton,
     s.updateMarkdownContent,
     s.expand,
