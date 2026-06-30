@@ -49,9 +49,11 @@ export function defineConfig(config: CustomNextConfig) {
               // which may not be picked up by Next.js output tracing.
               'node_modules/@napi-rs/canvas/**/*',
               'node_modules/@napi-rs/canvas-*/**/*',
-              // pnpm real package locations (including platform-specific bindings with `.node`)
-              'node_modules/.pnpm/@napi-rs+canvas*/**/*',
-              'node_modules/.pnpm/@napi-rs+canvas-*/**/*',
+              // pnpm real package locations for platform-specific native bindings.
+              // Keep this scoped to files; Turbopack can panic if it tries to hash the
+              // platform package directory itself as an output-tracing asset.
+              'node_modules/.pnpm/@napi-rs+canvas*/node_modules/@napi-rs/canvas/**/*.node',
+              'node_modules/.pnpm/@napi-rs+canvas-*/node_modules/@napi-rs/canvas-*/*.node',
             ]
           : []),
       ],
