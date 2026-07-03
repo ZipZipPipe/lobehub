@@ -38,6 +38,11 @@ interface AnalyzeVisualMediaParams {
 
 interface LobeAgentRuntimeContext {
   agentId?: string | null;
+  /**
+   * Visibility of the executing agent. Forwarded to the plan runtime so plan
+   * documents inherit private-agent visibility.
+   */
+  agentVisibility?: 'private' | 'public' | null;
   groupId?: string | null;
   messageId: string;
   /** The current Agent Run (`agent_operations.id`). */
@@ -98,7 +103,12 @@ class LobeAgentExecutionRuntime {
     this.userId = context.userId;
     this.workspaceId = context.workspaceId;
     this.planRuntime = new PlanExecutionRuntime(
-      createServerPlanRuntimeService(context.serverDB, context.userId, context.workspaceId),
+      createServerPlanRuntimeService(
+        context.serverDB,
+        context.userId,
+        context.workspaceId,
+        context.agentVisibility,
+      ),
     );
   }
 
@@ -392,6 +402,7 @@ export const lobeAgentRuntime: ServerRuntimeRegistration = {
 
     return new LobeAgentExecutionRuntime({
       agentId: context.agentId,
+      agentVisibility: context.agentVisibility,
       groupId: context.groupId,
       messageId: context.messageId,
       operationId: context.operationId,
