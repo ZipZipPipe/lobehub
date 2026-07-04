@@ -32,8 +32,10 @@ export const useTTS = (content: string, config?: TTSConfig) => {
   const voice = useAgentStore(agentSelectors.currentAgentTTSVoice(lang));
   const businessTTSProvider = useBusinessTTSProvider();
   const enableBusinessFeatures = useServerConfigStore(serverConfigSelectors.enableBusinessFeatures);
+  const currentVoice = config?.voice || voice;
   let useSelectedTTS;
   let options: any = {};
+
   switch (config?.server || ttsAgentSettings.ttsService) {
     case 'openai': {
       useSelectedTTS = useOpenAITTS;
@@ -44,7 +46,7 @@ export const useTTS = (content: string, config?: TTSConfig) => {
         },
         options: {
           model: ttsSettings.openAI.ttsModel,
-          voice: config?.voice || voice,
+          voice: currentVoice,
         },
       } as OpenAITTSOptions;
       break;
@@ -59,7 +61,7 @@ export const useTTS = (content: string, config?: TTSConfig) => {
            */
         },
         options: {
-          voice: config?.voice || voice,
+          voice: currentVoice,
         },
       } as EdgeSpeechOptions;
       break;
@@ -71,7 +73,7 @@ export const useTTS = (content: string, config?: TTSConfig) => {
           serviceUrl: API_ENDPOINTS.microsoft,
         },
         options: {
-          voice: config?.voice || voice,
+          voice: currentVoice,
         },
       } as MicrosoftSpeechOptions;
       break;
@@ -84,7 +86,7 @@ export const useTTS = (content: string, config?: TTSConfig) => {
         },
         options: {
           model: 'eleven_v3',
-          voice: config?.voice || voice,
+          voice: currentVoice,
         },
       } as OpenAITTSOptions;
       break;
@@ -95,7 +97,7 @@ export const useTTS = (content: string, config?: TTSConfig) => {
     ...config,
     ...options,
     onFinish: (arraybuffers) => {
-      config?.onUpload?.(options.voice || 'alloy', arraybuffers);
+      config?.onUpload?.(currentVoice || 'alloy', arraybuffers);
     },
   });
 };
