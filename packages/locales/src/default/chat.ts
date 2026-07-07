@@ -182,6 +182,10 @@ export default {
   'heteroAgent.fullAccess.label': 'Full access',
   'heteroAgent.fullAccess.tooltip':
     'The local coding agent runs with full read/write access to the working directory. Switching permission modes is not available yet.',
+  'heteroAgent.claudeQuota.errorRateLimited':
+    'Claude Code quota is temporarily rate limited. Please try again later.',
+  'heteroAgent.claudeQuota.refreshRateLimited':
+    'Quota refresh is temporarily rate limited. Showing the last available data.',
   'heteroAgent.claudeQuota.scopedWeekly': 'Weekly ({{model}})',
   'heteroAgent.claudeQuota.title': 'Claude Code quota',
   'heteroAgent.claudeQuota.tooltip': 'View Claude Code quota',
@@ -209,6 +213,7 @@ export default {
   'heteroAgent.quota.left': '{{percent}}% left',
   'heteroAgent.quota.noData': 'Quota is not available yet.',
   'heteroAgent.quota.refresh': 'Refresh quota',
+  'heteroAgent.quota.refreshFailed': "Couldn't refresh quota. Showing the last available data.",
   'heteroAgent.quota.resetsIn': 'Resets in {{duration}}',
   'heteroAgent.quota.resetsSoon': 'Resets soon',
   'heteroAgent.quota.session': 'Session',
@@ -928,6 +933,8 @@ export default {
   'taskDetail.comment.save': 'Save',
   'taskDetail.commentPlaceholder':
     'Leave feedback to guide the agent — your comments shape the next run...',
+  'taskDetail.runFollowUp': 'Ask a follow-up',
+  'taskDetail.runFollowUpPlaceholder': 'Ask a follow-up about this run...',
   'taskDetail.collapseReply': 'Collapse',
   'taskDetail.replyInThread': 'Reply in this thread',
   'taskDetail.replyPlaceholder': 'Reply in this thread...',
@@ -1140,6 +1147,10 @@ export default {
   'tool.intervention.optionApprove': 'Approve',
   'tool.intervention.optionApproveRemember': "Approve, and don't ask again for similar actions",
   'tool.intervention.rememberSimilar': "Don't ask again for similar actions",
+  'tool.intervention.renderFallback.description':
+    'This display was downgraded to raw JSON because the current model was not capable enough to generate a stable interactive payload. Switch to a stronger model and try again.',
+  'tool.intervention.renderFallback.rawJson': 'Raw JSON',
+  'tool.intervention.renderFallback.title': 'Interaction display downgraded',
   'tool.intervention.submit': 'Submit',
   'tool.intervention.mode.allowList': 'Allow List',
   'tool.intervention.mode.allowListDesc': 'Only automatically execute approved tools',
@@ -1403,6 +1414,7 @@ export default {
   'workingPanel.review.baseRef.loading': 'Loading branches…',
   'workingPanel.review.baseRef.reset': 'Reset to default branch',
   'workingPanel.review.baseRef.unresolved': 'Pick a base branch',
+  'workingPanel.review.addSelectionToContext.success': 'Added selected lines to context',
   'workingPanel.review.binary': 'Binary file — diff not shown',
   'workingPanel.review.collapseAll': 'Collapse all',
   'workingPanel.review.copied': 'Path copied',

@@ -24,7 +24,6 @@ import type {
 } from '@/store/chat/slices/agentRun/actions/lifecycle/types';
 import type { ChatStore } from '@/store/chat/store';
 import { notifyDesktopHumanApprovalRequired } from '@/store/chat/utils/desktopNotification';
-import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 
 // `agent_runtime_end` reasons that are NOT a clean completion: a mid-stream
 // cancel and a deferred-tool park. These must NOT mark the topic unread, and
@@ -107,7 +106,10 @@ const readToolPayload = (
  * tool packages can react before their own mutations dispatch (e.g.
  * optimistic UI). Fires for both client- and server-runtime tools.
  */
-const dispatchOnBeforeCall = async (data: ToolStartData | undefined): Promise<void> => {
+const dispatchOnBeforeCall = async (
+  data: ToolStartData | undefined,
+  topicId?: string,
+): Promise<void> => {
   const payload = data?.toolCalling as ChatToolPayloadLike | undefined;
   const identity = readToolPayload(payload);
   if (!identity) return;
@@ -116,7 +118,7 @@ const dispatchOnBeforeCall = async (data: ToolStartData | undefined): Promise<vo
   const executor = getExecutor(identity.identifier);
   if (!executor?.onBeforeCall) return;
 
-  await executor.onBeforeCall(identity);
+  await executor.onBeforeCall({ ...identity, topicId });
 };
 
 /**
@@ -141,7 +143,10 @@ const unwrapToolPayload = (raw: unknown): ChatToolPayloadLike | undefined => {
  * tool packages can react to their own mutations (e.g. invalidate store
  * caches) regardless of whether the tool ran client- or server-side.
  */
-const dispatchOnAfterCall = async (data: ToolEndData | undefined): Promise<void> => {
+const dispatchOnAfterCall = async (
+  data: ToolEndData | undefined,
+  topicId?: string,
+): Promise<void> => {
   const identity = readToolPayload(unwrapToolPayload(data?.payload));
   if (!identity) return;
 
@@ -152,6 +157,7 @@ const dispatchOnAfterCall = async (data: ToolEndData | undefined): Promise<void>
   await executor.onAfterCall({
     ...identity,
     result: (data?.result ?? {}) as BuiltinToolResult,
+    topicId,
   });
 };
 
@@ -585,10 +591,11 @@ export const createGatewayEventHandler = (
           // means visible output is done; the operation still waits for
           // agent_runtime_end to preserve terminal side-effect ordering.
           get().updateOperationMetadata(operationId, { visibleLoadingDone: true });
-          const hasQueuedMessage =
-            (get().queuedMessages?.[messageMapKey(context)]?.length ?? 0) > 0;
-          if (context.topicId && !hasQueuedMessage)
-            get().internal_updateTopicLoading(context.topicId, false);
+          // From here the sidebar item stops showing the running spinner (the
+          // answer is visibly complete) and — when the user isn't viewing the
+          // topic — shows the unread dot instead, ahead of markTopicUnread's
+          // persisted 'unread' at the terminal. See `isRunningTailUnread` in
+          // the sidebar topic Item.
         });
         break;
       }
@@ -598,7 +605,7 @@ export const createGatewayEventHandler = (
         // Loading is already active from stream_start (not cleared by stream_end).
         const data = event.data as ToolStartData | undefined;
         enqueue(async () => {
-          await dispatchOnBeforeCall(data).catch(console.error);
+          await dispatchOnBeforeCall(data, context.topicId ?? undefined).catch(console.error);
         });
         break;
       }
@@ -629,16 +636,22 @@ export const createGatewayEventHandler = (
 
         if (data?.phase === 'human_approval' && data.requiresApproval && data.pendingToolsCalling) {
           void notifyDesktopHumanApprovalRequired(get, context);
-          // Persist a paused marker so the sidebar reflects "waiting on user" across reload.
-          // Resume back to 'running' is free: approve / reject both spawn a new op via the
-          // executor entries, which already write 'running'.
-          if (context.topicId)
-            void get().updateTopicStatus?.({
+          // Persist the explicit "needs user input" marker so the sidebar swaps
+          // the running spinner for the hand icon across reloads.
+          if (context.topicId) {
+            const statusWrite = get().updateTopicStatus?.({
               agentId: context.agentId,
               groupId: context.groupId,
-              status: 'paused',
+              ...(context.scope === 'group' || context.scope === 'group_agent'
+                ? { scope: context.scope }
+                : {}),
+              status: 'waitingForHuman',
               topicId: context.topicId,
             });
+            void statusWrite?.catch((error) => {
+              console.error('[gatewayEventHandler] updateTopicStatus failed:', error);
+            });
+          }
         }
 
         break;
@@ -664,7 +677,7 @@ export const createGatewayEventHandler = (
         enqueue(async () => {
           await Promise.all([
             fetchAndReplaceMessages(get, context).catch(console.error),
-            dispatchOnAfterCall(data).catch(console.error),
+            dispatchOnAfterCall(data, context.topicId ?? undefined).catch(console.error),
           ]);
         });
         break;

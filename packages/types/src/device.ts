@@ -59,12 +59,39 @@ export interface WorkspaceInitResult {
 
 /**
  * A working directory source a device has used. Structured (rather than a bare
- * path string) so metadata such as the detected repo type and active git
- * worktree survives — a remote client viewing this device can't re-probe its
- * filesystem, so whatever isn't captured here at the source is lost. Mirrors
- * the client-local `RecentDirEntry` shape.
+ * path string) so metadata such as the detected repo type, active git
+ * branch, and active git worktree survives — a remote client viewing this
+ * device can't re-probe its filesystem, so whatever isn't captured here at the
+ * source is lost.
  */
 export type WorkingDirRepoType = 'git' | 'github';
+
+export type DeviceGitPullRequestCiStatus = 'failure' | 'pending' | 'success' | 'unknown';
+
+/** A GitHub pull request linked to a branch. */
+export interface DeviceGitLinkedPullRequest {
+  ciStatus?: DeviceGitPullRequestCiStatus;
+  isDraft?: boolean;
+  mergeable?: string;
+  mergedAt?: string | null;
+  mergeStateStatus?: string;
+  number: number;
+  reviewDecision?: string;
+  state: string;
+  title: string;
+  url: string;
+}
+
+export type DeviceGitLinkedPullRequestLookupStatus = 'error' | 'gh-missing' | 'ok';
+
+export interface WorkingDirGithubState {
+  /** Additional PRs targeting the same head branch, beyond the primary one. */
+  extraPullRequestCount?: number;
+  /** GitHub PR linked to the effective working directory's branch. */
+  pullRequest?: DeviceGitLinkedPullRequest | null;
+  /** Lookup status for the linked PR probe. */
+  pullRequestStatus?: DeviceGitLinkedPullRequestLookupStatus;
+}
 
 export interface WorkingDirGitState {
   /**
@@ -72,6 +99,20 @@ export interface WorkingDirGitState {
    * path itself is the effective working directory.
    */
   activeWorktree?: string;
+  /**
+   * Branch for the effective working directory. Undefined for detached HEAD or
+   * when it has not been probed yet.
+   */
+  branch?: string;
+  /** True when the effective working directory is currently detached. */
+  detached?: boolean;
+  /** GitHub-specific branch metadata such as linked PR and check status. */
+  github?: WorkingDirGithubState;
+  /**
+   * True when the effective working directory is a linked worktree rather than
+   * the source path itself.
+   */
+  isWorktree?: boolean;
 }
 
 export interface WorkingDirConfig {
@@ -95,6 +136,43 @@ export const getWorkingDirEffectivePath = (
   if (!entry) return undefined;
   if (typeof entry === 'string') return entry;
   return entry.git?.activeWorktree || entry.path;
+};
+
+/**
+ * Derive the target directory for a new worktree: a sibling of the source repo
+ * named `<repoName>-<branch>` (e.g. `/code/lobehub` + `feat/x` →
+ * `/code/lobehub-feat-x`), matching the convention agents already use for their
+ * linked worktrees. Preserves the source path's separator so Windows paths stay
+ * intact, and folds ref-illegal characters in the branch to `-` for the folder.
+ *
+ * Shared by the renderer (path preview + local IPC call) and the server
+ * (`device.addGitWorktree`), which re-derives the target from the trusted
+ * `path` + `branch` rather than trusting a client-supplied absolute path — so a
+ * crafted web request can't ask a remote device to check out at an arbitrary
+ * location. Both callers must derive identically, hence the single source here.
+ */
+const isSep = (ch: string): boolean => ch === '/' || ch === '\\';
+
+export const deriveWorktreePath = (sourcePath: string, branch: string): string => {
+  const sep = sourcePath.includes('\\') && !sourcePath.includes('/') ? '\\' : '/';
+  // Strip trailing path separators, then the leading/trailing '-' of the folded
+  // branch, both with linear scans rather than anchored /[…]+$/ quantifiers —
+  // those are polynomial-ReDoS shapes (flagged by CodeQL) on a long crafted
+  // input, and this runs per request on the server with untrusted path/branch.
+  let te = sourcePath.length;
+  while (te > 0 && isSep(sourcePath[te - 1])) te -= 1;
+  const trimmed = sourcePath.slice(0, te);
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  const parent = cut >= 0 ? trimmed.slice(0, cut) : '';
+  const repoName = (cut >= 0 ? trimmed.slice(cut + 1) : trimmed) || 'repo';
+  const folded = branch.trim().replaceAll(/[\s~^:?*[\]\\/]+/g, '-');
+  let start = 0;
+  let end = folded.length;
+  while (start < end && folded[start] === '-') start += 1;
+  while (end > start && folded[end - 1] === '-') end -= 1;
+  const suffix = folded.slice(start, end);
+  const folder = suffix ? `${repoName}-${suffix}` : repoName;
+  return parent ? `${parent}${sep}${folder}` : folder;
 };
 
 export interface WorkingDirEntry extends WorkingDirConfig {
@@ -186,25 +264,17 @@ export interface DeviceGitBranchInfo {
   detached?: boolean;
 }
 
-/** A GitHub pull request linked to a branch. */
-export interface DeviceGitLinkedPullRequest {
-  number: number;
-  state: string;
-  title: string;
-  url: string;
-}
-
 /**
  * Result of the `getLinkedPullRequest` device RPC: the PR linked to a branch
  * (when the repo is a GitHub remote). Mirrors the desktop shape.
  */
 export interface DeviceGitLinkedPullRequestResult {
-  /** Additional open PRs targeting the same head branch, beyond the primary one. */
+  /** Additional PRs targeting the same head branch, beyond the primary one. */
   extraCount?: number;
-  /** Null when no open PR is linked to the branch. */
+  /** Null when no PR is linked to the branch. */
   pullRequest: DeviceGitLinkedPullRequest | null;
   /** 'ok' — lookup succeeded; 'gh-missing' — gh CLI unavailable; 'error' — other failure. */
-  status: 'error' | 'gh-missing' | 'ok';
+  status: DeviceGitLinkedPullRequestLookupStatus;
 }
 
 /**
@@ -377,6 +447,14 @@ export interface DeviceGitDeleteBranchResult {
 export interface DeviceGitRemoveWorktreeResult {
   error?: string;
   success: boolean;
+}
+
+/** Result of the `addGitWorktree` device RPC. Mirrors the desktop shape. */
+export interface DeviceGitAddWorktreeResult {
+  error?: string;
+  success: boolean;
+  /** Absolute path of the created worktree, echoed back so the UI can switch to it. */
+  worktreePath?: string;
 }
 
 /**

@@ -72,11 +72,9 @@ import { TopicModel } from '@/database/models/topic';
 import { UserModel } from '@/database/models/user';
 import { UserPersonaModel } from '@/database/models/userMemory/persona';
 import { fileEnv } from '@/envs/file';
-import { type ExecutionPlan, isDeviceCapablePlan } from '@/helpers/executionTarget';
 import { serverMessagesEngine } from '@/server/modules/Mecha/ContextEngineering';
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { AgentDocumentsService } from '@/server/services/agentDocuments';
-import { type DeviceAccessReason } from '@/server/services/aiAgent/deviceToolAudit';
 import { FileService } from '@/server/services/file';
 import { MarketService } from '@/server/services/market';
 import { OnboardingService } from '@/server/services/onboarding';
@@ -101,6 +99,7 @@ import { formatErrorEventData } from '../formatErrorEventData';
 import { classifyLLMError } from '../llmErrorClassification';
 import { createConversationParentMissingError } from '../messagePersistErrors';
 import { VISIBLE_OUTPUT_END_PUBLISHED_STEP_INDEX_METADATA_KEY } from '../visibleOutputEnd';
+import { resolveRunActiveDeviceId } from './resolveRunActiveDeviceId';
 
 export const callLlm =
   (ctx: RuntimeExecutorContext): InstructionExecutor =>
@@ -118,20 +117,10 @@ export const callLlm =
     //
     // Single-track device gate: `buildStepToolDelta` treats activeDeviceId as
     // an independent activation signal (it only dedupes against already-
-    // enabled tools), so any id that reaches it WILL inject local-system. The
-    // execution plan is the only authority on whether this session may touch
-    // a device — swallow the id for non-device-capable plans (`none`,
-    // `sandbox`) and for denied senders, even if `state.metadata.activeDeviceId`
-    // was populated by a bug or a mid-run side effect. Plans absent on old /
-    // resumed operations fall back to the policy-only gate.
-    const devicePolicy = state.metadata?.deviceAccessPolicy as
-      { canUseDevice: boolean; reason: DeviceAccessReason } | undefined;
-    const executionPlan = state.metadata?.executionPlan as ExecutionPlan | undefined;
-    const planAllowsDevice = !executionPlan || isDeviceCapablePlan(executionPlan);
-    const activeDeviceId =
-      devicePolicy?.canUseDevice === false || !planAllowsDevice
-        ? undefined
-        : state.metadata?.activeDeviceId;
+    // enabled tools), so any id that reaches it WILL inject local-system.
+    // `resolveRunActiveDeviceId` swallows the id whenever the plan/policy
+    // forbids devices — the same filter the tool executors apply.
+    const activeDeviceId = resolveRunActiveDeviceId(state.metadata);
     const operationToolSet: OperationToolSet = state.operationToolSet ?? {
       enabledToolIds: [],
       executorMap: state.toolExecutorMap ?? {},
@@ -752,6 +741,18 @@ export const callLlm =
           // into op metadata, mirroring agentConfig/botContext — no per-step DB
           // lookup here.
           agentGroup: state.metadata?.agentGroup as AgentGroupConfig | undefined,
+          // Bridge the @-mentioned agents (persisted into the runtime
+          // initialContext by AiAgentService.execAgent) into the agent-management
+          // context so AgentManagementContextInjector injects the delegation
+          // block, prompting the supervisor to `callAgent` the mentioned agents.
+          // Mirrors the client's contextEngineering bridge; scoped to mention
+          // runs only (undefined otherwise) so ordinary runs are unaffected.
+          agentManagementContext: (state as any).initialContext?.initialContext?.mentionedAgents
+            ?.length
+            ? {
+                mentionedAgents: (state as any).initialContext.initialContext.mentionedAgents,
+              }
+            : undefined,
           additionalVariables: {
             ...state.metadata?.deviceSystemInfo,
             ...lobehubSkillVariables,
@@ -904,6 +905,22 @@ export const callLlm =
         );
       } else {
         processedMessages = llmPayload.messages;
+      }
+
+      // A turn must carry at least one non-system message. Anthropic-compatible
+      // providers (anthropic / deepseek) move `role: system` into a separate
+      // top-level field, so a system-only array dispatches `messages: []` and
+      // the upstream rejects it with a 400 `messages: at least one message is
+      // required` (surfaced as an opaque UpstreamHttpError); for other providers
+      // a system-only turn has nothing to respond to. Either way the context
+      // pipeline dropped everything real — fail fast with a locatable internal
+      // error instead of a doomed round-trip. Attributed here (agent-runtime),
+      // not the provider layer, since it's our own pipeline that emptied it.
+      if (!processedMessages.some((message) => message.role !== 'system')) {
+        throw new Error(
+          `call_llm produced no non-system messages for ${provider}/${model} ` +
+            `(topic=${state.metadata?.topicId ?? 'n/a'}, step=${stepIndex}); refusing to dispatch`,
+        );
       }
 
       // Initialize ModelRuntime (read user's keyVaults from database)

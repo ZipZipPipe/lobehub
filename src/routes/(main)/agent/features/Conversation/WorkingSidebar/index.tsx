@@ -87,6 +87,10 @@ const TWO_PANE_MIN_WIDTH = 560;
 const AgentWorkingSidebar = memo(() => {
   const { t } = useTranslation(['chat', 'setting']);
   const toggleRightPanel = useGlobalStore((s) => s.toggleRightPanel);
+  // Panel open/collapsed state (drives the `<RightPanel>` expand). Used to gate
+  // the resources pane's document fetch so a collapsed sidebar doesn't pull the
+  // full agent-document list into the conversation's initial batch.
+  const showRightPanel = useGlobalStore((s) => s.status.showRightPanel);
   const setWorkingSidebarTab = useGlobalStore((s) => s.setWorkingSidebarTab);
   const storedTab = useGlobalStore((s) => s.status.workingSidebarTab);
   const activeAgentId = useAgentStore((s) => s.activeAgentId);
@@ -168,7 +172,11 @@ const AgentWorkingSidebar = memo(() => {
       minWidth={300}
       width={panelWidth}
       onSizeChange={(size) => {
-        if (typeof size?.width === 'number') setPanelWidth(size.width);
+        if (!size?.width) return;
+        // DraggablePanel emits width as a `"420px"` string on drag-stop; parse it so
+        // the controlled width actually updates (otherwise the panel snaps back).
+        const w = typeof size.width === 'string' ? Number.parseInt(size.width) : size.width;
+        if (Number.isFinite(w)) setPanelWidth(w);
       }}
     >
       <Flexbox height={'100%'} width={'100%'}>
@@ -231,6 +239,7 @@ const AgentWorkingSidebar = memo(() => {
           {reviewAvailable && (
             <Flexbox className={activeTab === 'review' ? styles.pane : styles.paneHidden}>
               <Review
+                active={activeTab === 'review'}
                 deviceId={remoteDeviceId}
                 showTree={showReviewTree}
                 workingDirectory={workingDirectory}
@@ -249,7 +258,10 @@ const AgentWorkingSidebar = memo(() => {
             width={'100%'}
           >
             <ProgressSection />
-            <ResourcesSection deviceId={remoteDeviceId} />
+            <ResourcesSection
+              deviceId={remoteDeviceId}
+              enabled={showRightPanel && activeTab === 'resources'}
+            />
           </Flexbox>
         </Flexbox>
       </Flexbox>

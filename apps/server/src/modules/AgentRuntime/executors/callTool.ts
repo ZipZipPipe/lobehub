@@ -1,6 +1,7 @@
 import {
   type AgentEvent,
   type AgentInstruction,
+  extractActivatedSkillsFromMessages,
   type InstructionExecutor,
   UsageCounter,
 } from '@lobechat/agent-runtime';
@@ -14,6 +15,7 @@ import {
 import { type ChatToolPayload } from '@lobechat/types';
 
 import { AgentModel } from '@/database/models/agent';
+import { isDeviceCapablePlan } from '@/helpers/executionTarget';
 import {
   type DeviceAccessReason,
   isDeviceToolIdentifier,
@@ -42,6 +44,8 @@ import {
   markPersistFatal,
 } from '../messagePersistErrors';
 import { resolveToolTimeoutMs } from '../resolveToolTimeout';
+import { resolveRunActiveDeviceId } from './resolveRunActiveDeviceId';
+import { resolveRunProjectSkills } from './resolveRunProjectSkills';
 
 export const callTool =
   (ctx: RuntimeExecutorContext): InstructionExecutor =>
@@ -259,7 +263,16 @@ export const callTool =
           execution = await executeToolWithRetry(
             () =>
               toolExecutionService.executeTool(chatToolPayload, {
-                activeDeviceId: state.metadata?.activeDeviceId,
+                // Server-side equivalent of the client transport's
+                // computeStepContext: state.messages carries the DB rows
+                // (pluginState included), so skills execScript can resolve the
+                // activated skill archives. Without this the device/sandbox
+                // skill preparation silently runs with zero skills.
+                activatedSkills: extractActivatedSkillsFromMessages(state.messages),
+                // Plan/policy-filtered: a preset or stale metadata id must not route
+                // tool execution (e.g. skills execScript) onto a device the resolved
+                // plan didn't authorize.
+                activeDeviceId: resolveRunActiveDeviceId(state.metadata),
                 agentId: toolCallAgentId,
                 agentMember: buildServerAgentMemberRunner(
                   ctx,
@@ -270,6 +283,9 @@ export const callTool =
                 agentVisibility,
                 // Assistant message owning this tool call (≠ source user message).
                 assistantMessageId: payload.parentMessageId,
+                deviceCapable: state.metadata?.executionPlan
+                  ? isDeviceCapablePlan(state.metadata.executionPlan)
+                  : undefined,
                 documentId: state.metadata?.documentId,
                 editingAgentId: state.metadata?.editingAgentId,
                 execSubAgent: ctx.execSubAgent,
@@ -279,16 +295,7 @@ export const callTool =
                 memoryToolPermission: agentConfig?.chatConfig?.memory?.toolPermission,
                 messageId: state.metadata?.sourceMessageId,
                 operationId,
-                projectSkills: (state.metadata?.operationSkillSet?.skills ?? [])
-                  .filter(
-                    (skill: { location?: string; source?: string }) =>
-                      (skill.source === 'project' || skill.source === 'device') && !!skill.location,
-                  )
-                  .map((skill: { location: string; name: string; source?: string }) => ({
-                    location: skill.location,
-                    name: skill.name,
-                    source: skill.source === 'device' ? 'device' : 'project',
-                  })),
+                projectSkills: resolveRunProjectSkills(state.metadata),
                 scope: state.metadata?.scope,
                 serverDB: ctx.serverDB,
                 skipResultTruncation: true,
@@ -469,8 +476,14 @@ export const callTool =
 
         const newState = structuredClone(state);
 
+        // Keep plugin/pluginState on the in-state copy: the batch executor
+        // refreshes state.messages from full DB rows, but this single-tool path
+        // never does — without these fields a later step could not extract the
+        // skill activation this call just produced (activatedSkills above).
         newState.messages.push({
           content: executionResult.content,
+          plugin: chatToolPayload,
+          pluginState: executionResult.state,
           role: 'tool',
           tool_call_id: chatToolPayload.id,
         });

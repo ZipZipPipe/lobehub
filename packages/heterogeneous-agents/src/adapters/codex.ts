@@ -996,19 +996,30 @@ export class CodexAdapter implements AgentEventAdapter {
     const belongsToCurrentStep =
       pendingStepIndex === undefined || pendingStepIndex === this.stepIndex;
 
+    const toolPayload = toToolPayload(item);
     if (!this.pendingToolCalls.has(item.id)) {
-      const tool = toToolPayload(item);
-      this.pendingToolCallStepIndex.set(tool.id, this.stepIndex);
-      events.push(...this.emitToolChunk(tool));
+      this.pendingToolCallStepIndex.set(toolPayload.id, this.stepIndex);
+      events.push(...this.emitToolChunk(toolPayload));
     }
 
     this.pendingToolCalls.delete(item.id);
     this.pendingToolCallStepIndex.delete(item.id);
     if (belongsToCurrentStep) this.hasToolActivitySinceAgentMessage = true;
-    events.push(this.makeEvent('tool_result', getToolResultData(item as CodexToolItem)));
+    const resultData = getToolResultData(item as CodexToolItem);
+    const isSuccess = isSuccessfulToolCompletion(item as CodexToolItem);
+    events.push(this.makeEvent('tool_result', resultData));
+    // Align tool_end with the server/gateway shape — carry the `{ toolCalling }`
+    // payload + a `BuiltinToolResult`-shaped `result` so renderer `onAfterCall`
+    // hooks resolve the executor and observe the result, identically to server runs.
     events.push(
       this.makeEvent('tool_end', {
-        isSuccess: isSuccessfulToolCompletion(item as CodexToolItem),
+        isSuccess,
+        payload: { toolCalling: toolPayload },
+        result: {
+          content: resultData.content,
+          success: isSuccess,
+          ...(resultData.pluginState ? { state: resultData.pluginState } : {}),
+        },
         toolCallId: item.id,
       }),
     );
@@ -1055,6 +1066,13 @@ export class CodexAdapter implements AgentEventAdapter {
     return {
       ...(this.currentModel ? { model: this.currentModel } : {}),
       provider: CODEX_IDENTIFIER,
+      // Stamp the codex thread id on every stream_start (set from
+      // `thread.started`, which fires before `turn.started` emits this), so
+      // the resume token persists at stream_start on BOTH the server
+      // (HeterogeneousPersistenceHandler) and desktop renderer paths — matching
+      // claudeCode. Without it codex relied solely on `finish()`, so a
+      // rate-limit error (no finish / error branch) lost the session.
+      ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       ...extra,
     };
   }

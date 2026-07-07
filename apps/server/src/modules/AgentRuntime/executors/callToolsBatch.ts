@@ -1,6 +1,7 @@
 import {
   type AgentEvent,
   type AgentInstruction,
+  extractActivatedSkillsFromMessages,
   type InstructionExecutor,
   UsageCounter,
 } from '@lobechat/agent-runtime';
@@ -14,6 +15,7 @@ import {
 } from '@lobechat/observability-otel/modules/agent-runtime';
 import { type ChatToolPayload } from '@lobechat/types';
 
+import { isDeviceCapablePlan } from '@/helpers/executionTarget';
 import {
   type DeviceAccessReason,
   isDeviceToolIdentifier,
@@ -43,6 +45,8 @@ import {
   markPersistFatal,
 } from '../messagePersistErrors';
 import { resolveToolTimeoutMs } from '../resolveToolTimeout';
+import { resolveRunActiveDeviceId } from './resolveRunActiveDeviceId';
+import { resolveRunProjectSkills } from './resolveRunProjectSkills';
 
 export const callToolsBatch =
   (ctx: RuntimeExecutorContext): InstructionExecutor =>
@@ -113,6 +117,11 @@ export const callToolsBatch =
 
     // Execute server tools concurrently (skip client tools in mixed batch)
     const toolsToExecute = serverTools.length > 0 ? serverTools : toolsCalling;
+    // Server-side equivalent of the client transport's computeStepContext
+    // (mirrors the single-tool `callTool` context): skills execScript resolves
+    // activated skill archives from the message history, which the raw LLM
+    // args never carry. Computed once — identical for every tool in the batch.
+    const runActivatedSkills = extractActivatedSkillsFromMessages(state.messages);
     await Promise.all(
       toolsToExecute.map(async (chatToolPayload: ChatToolPayload) => {
         const toolName = `${chatToolPayload.identifier}/${chatToolPayload.apiName}`;
@@ -204,8 +213,7 @@ export const callToolsBatch =
 
             if (isDeviceToolIdentifier(chatToolPayload.identifier) && !batchHookResult?.isMocked) {
               const policy = state.metadata?.deviceAccessPolicy as
-                | { canUseDevice: boolean; reason: DeviceAccessReason }
-                | undefined;
+                { canUseDevice: boolean; reason: DeviceAccessReason } | undefined;
               logDeviceToolAudit({
                 apiName: chatToolPayload.apiName,
                 botContext: state.metadata?.botContext,
@@ -259,7 +267,11 @@ export const callToolsBatch =
               execution = await executeToolWithRetry(
                 () =>
                   toolExecutionService.executeTool(chatToolPayload, {
-                    activeDeviceId: state.metadata?.activeDeviceId,
+                    activatedSkills: runActivatedSkills,
+                    // Plan/policy-filtered: a preset or stale metadata id must not route
+                    // tool execution (e.g. skills execScript) onto a device the resolved
+                    // plan didn't authorize.
+                    activeDeviceId: resolveRunActiveDeviceId(state.metadata),
                     agentId: state.metadata?.agentId,
                     agentMember: buildServerAgentMemberRunner(
                       ctx,
@@ -269,6 +281,9 @@ export const callToolsBatch =
                     ),
                     // Assistant message owning this tool call (≠ source user message).
                     assistantMessageId: payload.parentMessageId,
+                    deviceCapable: state.metadata?.executionPlan
+                      ? isDeviceCapablePlan(state.metadata.executionPlan)
+                      : undefined,
                     documentId: state.metadata?.documentId,
                     execSubAgent: ctx.execSubAgent,
                     executionTimeoutMs: timeoutMs,
@@ -277,6 +292,10 @@ export const callToolsBatch =
                     memoryToolPermission: batchAgentConfig?.chatConfig?.memory?.toolPermission,
                     messageId: state.metadata?.sourceMessageId,
                     operationId,
+                    // Mirrors the single-tool `callTool` context: without these
+                    // a batched device execScript loses the SKILL.md / selected
+                    // working directory and runs from the daemon's default cwd.
+                    projectSkills: resolveRunProjectSkills(state.metadata),
                     scope: state.metadata?.scope,
                     serverDB: ctx.serverDB,
                     skipResultTruncation: true,
@@ -293,6 +312,10 @@ export const callToolsBatch =
                     toolResultMaxLength: batchAgentConfig?.chatConfig?.toolResultMaxLength,
                     topicId: ctx.topicId,
                     userId: ctx.userId,
+                    // Device-bound cwd folded into deviceSystemInfo at operation
+                    // creation; resume-safe via computeDeviceContext (recovers it
+                    // from the prior tool message's pluginState.metadata).
+                    workingDirectory: state.metadata?.deviceSystemInfo?.workingDirectory,
                     workspaceId: state.metadata?.workspaceId ?? ctx.workspaceId,
                   }),
                 {
@@ -521,8 +544,7 @@ export const callToolsBatch =
     );
     for (const result of toolResults) {
       const discovered = result.data?.state?.activatedTools as
-        | Array<{ identifier: string }>
-        | undefined;
+        Array<{ identifier: string }> | undefined;
       if (discovered?.length) {
         const newActivations = discovered
           .filter((t) => !existingActivationIds.has(t.identifier))

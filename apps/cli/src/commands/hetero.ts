@@ -7,11 +7,13 @@ import path from 'node:path';
 
 import type { AskUserBridge } from '@lobechat/heterogeneous-agents/askUser';
 import { AskUserMcpServer } from '@lobechat/heterogeneous-agents/askUser';
+import { resolveHeteroSpawnCommand } from '@lobechat/heterogeneous-agents/resolveCliCommand';
 import type {
   AgentContentBlock,
   AgentImageSource,
   AgentPromptInput,
   AgentStreamEvent,
+  UploadHeterogeneousImage,
 } from '@lobechat/heterogeneous-agents/spawn';
 import { spawnAgent } from '@lobechat/heterogeneous-agents/spawn';
 import type { Command } from 'commander';
@@ -19,10 +21,19 @@ import type { Command } from 'commander';
 import { getTrpcClient } from '../api/client';
 import { log } from '../utils/logger';
 import { TrpcIngestSink } from '../utils/TrpcIngestSink';
+import { uploadFileBuffer } from '../utils/uploadLocalFile';
 
 const SUPPORTED_AGENT_TYPES = new Set(['claude-code', 'codex']);
 const CODEX_REASONING_EFFORT_CONFIG_KEY = 'model_reasoning_effort';
 const CODEX_SERVICE_TIER_CONFIG_KEY = 'service_tier';
+
+/** Extension seed for an uploaded tool_result image, by IANA media type. */
+const IMAGE_EXT_BY_MEDIA_TYPE: Record<string, string> = {
+  'image/gif': 'gif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
 
 /**
  * Patterns that indicate a `--resume <sessionId>` run should be retried
@@ -475,6 +486,13 @@ const exec = async (options: ExecOptions): Promise<void> => {
   const agentType = options.type as 'claude-code' | 'codex';
   let sink: TrpcIngestSink | undefined;
   let serverIngester: SerialServerIngester | undefined;
+  // Uploader for tool_result images (CC `Read` on an image file). Reuses the
+  // CLI's authenticated lambda client so the persisted event carries a
+  // `{ fileId, url }` reference instead of heavy base64. Only wired in
+  // server-ingest mode — standalone runs don't persist events, so there is
+  // nothing to echo. The pipeline degrades a throw/undefined to the
+  // `[Image: …]` text placeholder, so this never fails the run.
+  let uploadImage: UploadHeterogeneousImage | undefined;
   if (serverIngest) {
     const client = await getTrpcClient();
     sink = new TrpcIngestSink(
@@ -485,6 +503,16 @@ const exec = async (options: ExecOptions): Promise<void> => {
       process.env.LOBEHUB_ASSISTANT_MESSAGE_ID,
     );
     serverIngester = new SerialServerIngester(sink);
+
+    uploadImage = async ({ data, mediaType }) => {
+      const ext = IMAGE_EXT_BY_MEDIA_TYPE[mediaType] ?? 'png';
+      const record = await uploadFileBuffer(await getTrpcClient(), {
+        buffer: Buffer.from(data, 'base64'),
+        fileName: `cc-read-image.${ext}`,
+        fileType: mediaType,
+      });
+      return { fileId: record.id, url: record.url };
+    };
   }
 
   // ─── AskUserQuestion MCP — remote Human-in-the-loop (claude-code only) ──────
@@ -786,15 +814,25 @@ const exec = async (options: ExecOptions): Promise<void> => {
     // Point CC at the lobe_cc AskUserQuestion MCP server we just mounted.
     ...(askMcpConfigPath ? ['--mcp-config', askMcpConfigPath] : []),
   ];
+  // Resolve the CLI binary once, up front, and reuse it for both the initial
+  // run and the resume-retry. For the default bare command (`codex`/`claude`)
+  // this finds the validated binary — including the Codex.app bundled CLI when
+  // a broken `codex` shim shadows PATH — so sandbox/terminal runs no longer
+  // ENOENT on a stale global install. Custom commands are used verbatim.
+  const resolvedCommand = await resolveHeteroSpawnCommand(agentType, options.command);
+  const commandEnv = resolvedCommand.pathEnv ? { PATH: resolvedCommand.pathEnv } : undefined;
+
   const first = await runOneAgent(
     {
       agentType: options.type,
-      command: options.command,
+      command: resolvedCommand.command,
       cwd: options.cwd || process.cwd(),
+      env: commandEnv,
       extraArgs,
       operationId,
       prompt: resolved.prompt,
       resumeSessionId: options.resume,
+      uploadImage,
     },
     interceptResume,
     'attempt-1',
@@ -819,11 +857,13 @@ const exec = async (options: ExecOptions): Promise<void> => {
     result = await runOneAgent(
       {
         agentType: options.type,
-        command: options.command,
+        command: resolvedCommand.command,
         cwd: options.cwd || process.cwd(),
+        env: commandEnv,
         extraArgs,
         operationId,
         prompt: resolved.prompt,
+        uploadImage,
         // No resumeSessionId — start fresh
       },
       false, // no need to intercept resume errors on a fresh run

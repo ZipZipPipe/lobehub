@@ -1,6 +1,7 @@
 import isEqual from 'fast-deep-equal';
 import { current, produce } from 'immer';
 
+import { type TopicMapScope } from '@/store/chat/utils/topicMapKey';
 import { type ChatTopic, type CreateTopicParams } from '@/types/topic';
 
 /**
@@ -13,6 +14,7 @@ import { type ChatTopic, type CreateTopicParams } from '@/types/topic';
 interface ChatTopicScope {
   agentId?: string;
   groupId?: string;
+  scope?: TopicMapScope;
 }
 
 type AddChatTopicAction = ChatTopicScope & {
@@ -50,7 +52,7 @@ export const topicReducer = (state: ChatTopic[] = [], payload: ChatTopicDispatch
           createdAt: Date.now(),
           favorite: false,
           id: payload.value.id ?? Date.now().toString(),
-          sessionId: payload.value.sessionId ? payload.value.sessionId : undefined,
+          sessionId: payload.value.sessionId || undefined,
           updatedAt: Date.now(),
         });
 
@@ -70,9 +72,19 @@ export const topicReducer = (state: ChatTopic[] = [], payload: ChatTopicDispatch
           // Only update if the merged value is different from current (excluding updatedAt).
           // Compare against a plain snapshot, not the raw draft proxy — see message/reducer.ts.
           if (!isEqual(current(currentTopic), mergedTopic)) {
-            // TODO: updatedAt type needs to be changed to Date later
-            // @ts-ignore
-            draftState[topicIndex] = { ...mergedTopic, updatedAt: new Date() };
+            // Status flips (running/unread/read bookkeeping) are not user activity —
+            // bumping updatedAt here reorders the updatedAt-sorted sidebar on every
+            // run end / topic read, and the bump reverts on the next refetch (the
+            // server orders by latest-message time), so rows visibly jump around.
+            const isStatusOnlyWrite = Object.keys(value).every((key) => key === 'status');
+
+            if (isStatusOnlyWrite) {
+              draftState[topicIndex] = mergedTopic;
+            } else {
+              // TODO: updatedAt type needs to be changed to Date later
+              // @ts-ignore
+              draftState[topicIndex] = { ...mergedTopic, updatedAt: new Date() };
+            }
           }
         }
       });

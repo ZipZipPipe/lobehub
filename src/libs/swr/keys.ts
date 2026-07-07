@@ -466,12 +466,16 @@ export const deviceKeys = {
     deviceId,
     path,
   ]),
-  gitLinkedPR: def('device:gitLinkedPR', (deviceId: string, path: string, branch: string) => [
+  gitLinkedPR: def(
     'device:gitLinkedPR',
-    deviceId,
-    path,
-    branch,
-  ]),
+    (deviceId: string, path: string, branch: string, pullRequestNumber?: number) => [
+      'device:gitLinkedPR',
+      deviceId,
+      path,
+      branch,
+      ...(pullRequestNumber === undefined ? [] : [pullRequestNumber]),
+    ],
+  ),
   gitRemoteBranches: def('device:gitRemoteBranches', (deviceId: string, dirPath: string) => [
     'device:gitRemoteBranches',
     deviceId,
@@ -672,7 +676,15 @@ export const verifyKeys = {
     'verify:reportBundle',
     verifyRunId,
   ]),
-  reportSummaries: def('verify:reportSummaries', () => ['verify:reportSummaries']),
+  reportSummaries: def(
+    'verify:reportSummaries',
+    (workspaceId?: string | null, q?: string, cursor?: string) => [
+      'verify:reportSummaries',
+      workspaceId ?? '',
+      q ?? '',
+      cursor ?? '',
+    ],
+  ),
   results: def('verify:results', (operationId: string) => ['verify:results', operationId]),
   rubric: def('verify:rubric', (rubricId: string) => ['verify:rubric', rubricId]),
   rubricCriteria: def('verify:rubricCriteria', (rubricId: string) => [

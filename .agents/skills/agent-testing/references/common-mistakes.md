@@ -179,3 +179,79 @@ The published `https://app.lobehub.com/verify/<id>` page already renders every
 screenshot inline — that URL is the only visual deliverable. Describe key visual
 outcomes in prose; mention the local report dir as a plain string (not a
 markdown link) if a reference is useful.
+
+## Case 8 — Asking the user "how should I run this?" instead of defaulting to an isolated full run
+
+**Wrong approach**: when a visual/screenshot request needs an isolated env (app
+must run the feature branch, not the working dir's current branch; a background
+process owns the shared checkout; the surface needs fixture data like a git repo
+with 2 worktrees), stopping to ask the user which approach to take — full
+isolated run vs a lighter HMR shot vs a static prototype — via a plan-approval
+question.
+
+**Why it's wrong**: the user's standing preference is that **agent-testing
+DEFAULTS to a full isolated-environment screenshot/recording run that ends in a
+published verify report** — "time is not a concern; solve the env problems
+yourself." Presenting environment difficulty as a menu of shortcuts pushes setup
+decisions back onto the user that the skill is supposed to own.
+
+**What it breaks**: wastes a round on a question the user doesn't want, and
+signals the agent will cut corners on fidelity when the env is inconvenient.
+
+**Correct approach**: for any "run it and show me" request, go straight to the
+**isolated full run** by default — spin up a dedicated worktree + dev instance on
+the feature branch (never disturb the user's running app or the branch a
+background process holds), build whatever fixture data the surface needs (create a
+throwaway git repo, `git worktree add` a second tree, point a fresh conversation's
+working directory at it, etc.), capture the real rendered screenshot/GIF, verify
+it by opening the PNG, and publish the `/verify` report. Only surface a
+plan-approval question when the _product decision_ is ambiguous (what to test),
+never for _environment mechanics_ (how to render it). Env obstacles are the
+skill's job to solve and then iterate back into these logs.
+
+---
+
+## Case 9 — Self-judging a screenshot as "too costly" and asking the user to picture the result
+
+**Wrong approach**: after a small user-facing UI change (a padding tweak), skipping
+the rendered screenshot with "it's a trivial style change; restarting Electron to
+screenshot costs more than the change is worth — tell me if you want one." I decided
+the cost/benefit for the user and shipped a diff they had to picture in their head.
+
+**Why it's wrong**: whether a verification artifact is "worth it" is **not mine to
+decide**. The measuring stick is _whether the user can conveniently inspect the
+product_, not how much effort _I_ spend rendering it. Making the user guess the visual
+effect from a code diff is the actually-expensive outcome.
+
+**What it breaks**: the user can't check the deliverable, loses trust, and has to push
+back (" 成本高不高不是你自己说了算，而是用户是否方便检查产物作为衡量标准。你让用户猜效果
+这个成本才高，别瞎揣测和偷懒 ") — burning a round to get the screenshot I should have
+produced up front.
+
+**Correct approach**: for ANY user-facing change (even one line of padding/color),
+default to rendering it and attaching the screenshot to the verify report as a record
+point — open the PNG to confirm, publish. Never offer the screenshot as an opt-in
+("want me to screenshot?"); just produce it. Env/restart cost is the skill's job to
+absorb, not a reason to shift the checking burden onto the user.
+
+---
+
+## Case 10 — Reporting a UI-touching change with only CLI transcripts and no screenshot
+
+**Wrong approach**: when a change includes visible UI copy/badges/alerts, treating
+the run as purely backend/service validation and publishing only command-output
+evidence, then calling it a complete agent-testing report.
+
+**Why it's wrong**: CLI transcripts prove code paths and tests passed, but they do
+not let the reviewer inspect the actual rendered UI. If the feature changed a
+channel page alert or badge, the report needs at least one screenshot evidence item
+for that visible state.
+
+**What it breaks**: the user opens the report expecting visual proof and asks
+"没截图吗？", because the report cannot show whether the UI looks correct.
+
+**Correct approach**: if any UI surface changed, include a visual case in the same
+verify run. Either drive the real app UI with agent-browser/Electron/Web and attach
+a screenshot, or explicitly mark the UI screenshot case blocked with the measured
+environment blocker. Do not present a UI-touching report as complete with only CLI
+evidence.
