@@ -1177,6 +1177,7 @@
   "r1-1776.description": "R1-1776 是 DeepSeek R1 的后训练版本，旨在提供无审查、无偏见的真实信息。",
   "seedance-1-5-pro-251215.description": "字节跳动推出的 Seedance 1.5 Pro 支持文本生成视频、图像生成视频（首帧、首+尾帧）以及与视觉同步的音频生成。",
   "seedream-5-0-260128.description": "字节跳动 BytePlus 推出的 Seedream 5.0-lite，支持基于网络检索增强的实时信息生成，改进复杂提示的解析能力，并提升参考一致性，适用于专业视觉创作。",
+  "ep-20260709084715-c64bj.description": "Dola-Seedream-5.0 Pro 是 BytePlus ModelArk 上的 Seedream 5.0 Pro 在线推理端点，已关闭预输入审核。",
   "seedream-5-0-pro-260628.description": "Seedream 5.0 Pro 是 BytePlus ModelArk 上的字节跳动 Seedream 5.0 系列图像生成模型，面向高质量专业视觉创作，具备优秀的提示词遵循、参考一致性和图像编辑能力。",
   "sensenova-6.7-flash-lite.description": "一款为真实工作流设计的轻量级多模态代理模型，支持基于文本的对话和图像理解。轻量高效，平衡性能、成本和可部署性。原生多模态架构，支持图像理解，包括OCR和图表解析。针对办公和生产力场景进行了增强，稳定支持复杂的长链任务。改进了令牌效率，为复杂工作负载提供更好的成本控制。上下文长度为256K令牌（最大输入：252K，最大输出：64K）。",
   "sensenova-u1-fast.description": "基于SenseNova U1的加速版本，专为信息图生成进行了优化。",
