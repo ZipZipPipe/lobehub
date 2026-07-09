@@ -12,6 +12,7 @@ export enum ModelProvider {
   BailianCodingPlan = 'bailiancodingplan',
   Bedrock = 'bedrock',
   Bfl = 'bfl',
+  BytePlus = 'byteplus',
   Cerebras = 'cerebras',
   Cloudflare = 'cloudflare',
   Cohere = 'cohere',

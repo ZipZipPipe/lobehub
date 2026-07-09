@@ -5,6 +5,7 @@ export type ApiType =
   | 'azure'
   | 'azureopenai'
   | 'bedrock'
+  | 'byteplus'
   | 'cloudflare'
   | 'deepseek'
   | 'fal'

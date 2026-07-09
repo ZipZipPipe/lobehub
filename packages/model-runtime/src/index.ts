@@ -42,6 +42,7 @@ export { LobeAzureOpenAI } from './providers/azureOpenai';
 export { LobeBailianCodingPlanAI } from './providers/bailianCodingPlan';
 export { LobeBedrockAI } from './providers/bedrock';
 export { LobeBflAI } from './providers/bfl';
+export { LobeBytePlusAI } from './providers/byteplus';
 export { LobeCerebrasAI } from './providers/cerebras';
 export { LobeCometAPIAI } from './providers/cometapi';
 export { LobeComfyUI } from './providers/comfyui';

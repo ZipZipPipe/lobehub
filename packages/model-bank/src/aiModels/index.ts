@@ -14,6 +14,7 @@ import { default as baichuan } from './baichuan';
 import { default as bailiancodingplan } from './bailianCodingPlan';
 import { default as bedrock } from './bedrock';
 import { default as bfl } from './bfl';
+import { default as byteplus } from './byteplus';
 import { default as cerebras } from './cerebras';
 import { default as cloudflare } from './cloudflare';
 import { default as cohere } from './cohere';
@@ -122,6 +123,7 @@ const staticModelMap: ModelsMap = {
   bailiancodingplan,
   bedrock,
   bfl,
+  byteplus,
   cerebras,
   cloudflare,
   cohere,
@@ -236,6 +238,7 @@ export { default as baichuan } from './baichuan';
 export { default as bailiancodingplan } from './bailianCodingPlan';
 export { default as bedrock } from './bedrock';
 export { default as bfl } from './bfl';
+export { default as byteplus } from './byteplus';
 export { default as cerebras } from './cerebras';
 export { default as cloudflare } from './cloudflare';
 export { default as cohere } from './cohere';

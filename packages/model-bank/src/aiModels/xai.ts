@@ -5,6 +5,59 @@ const xaiChatModels: AIChatModelCard[] = [
   {
     abilities: {
       functionCall: true,
+      reasoning: true,
+      search: true,
+      structuredOutput: true,
+      vision: true,
+    },
+    contextWindowTokens: 500_000,
+    description:
+      "xAI's most intelligent and fastest model for code, chat, and general-purpose tasks.",
+    displayName: 'Grok 4.5',
+    enabled: true,
+    family: 'grok',
+    generation: 'grok-4.5',
+    id: 'grok-4.5',
+    pricing: {
+      units: [
+        {
+          name: 'textInput_cacheRead',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 0.5, upTo: 0.2 },
+            { rate: 1, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textInput',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 2, upTo: 0.2 },
+            { rate: 4, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+        {
+          name: 'textOutput',
+          strategy: 'tiered',
+          tiers: [
+            { rate: 6, upTo: 0.2 },
+            { rate: 12, upTo: 'infinity' },
+          ],
+          unit: 'millionTokens',
+        },
+      ],
+    },
+    releasedAt: '2026-07-09',
+    settings: {
+      searchImpl: 'params',
+    },
+    type: 'chat',
+  },
+  {
+    abilities: {
+      functionCall: true,
       search: true,
       structuredOutput: true,
       vision: true,

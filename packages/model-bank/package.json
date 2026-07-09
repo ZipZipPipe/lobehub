@@ -19,6 +19,7 @@
     "./bailianCodingPlan": "./src/aiModels/bailianCodingPlan.ts",
     "./bedrock": "./src/aiModels/bedrock.ts",
     "./bfl": "./src/aiModels/bfl.ts",
+    "./byteplus": "./src/aiModels/byteplus.ts",
     "./cerebras": "./src/aiModels/cerebras.ts",
     "./cloudflare": "./src/aiModels/cloudflare.ts",
     "./cohere": "./src/aiModels/cohere.ts",

@@ -2,6 +2,7 @@ import { LobeAnthropicAI } from '../../providers/anthropic';
 import { LobeAzureAI } from '../../providers/azureai';
 import { LobeAzureOpenAI } from '../../providers/azureOpenai';
 import { LobeBedrockAI } from '../../providers/bedrock';
+import { LobeBytePlusAI } from '../../providers/byteplus';
 import { LobeCloudflareAI } from '../../providers/cloudflare';
 import { LobeDeepSeekAI } from '../../providers/deepseek';
 import { LobeFalAI } from '../../providers/fal';
@@ -22,6 +23,7 @@ export const baseRuntimeMap = {
   azure: LobeAzureAI,
   azureopenai: LobeAzureOpenAI,
   bedrock: LobeBedrockAI,
+  byteplus: LobeBytePlusAI,
   cloudflare: LobeCloudflareAI,
   deepseek: LobeDeepSeekAI,
   fal: LobeFalAI,

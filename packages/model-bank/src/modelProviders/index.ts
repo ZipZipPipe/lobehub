@@ -15,6 +15,7 @@ import BaichuanProvider from './baichuan';
 import BailianCodingPlanProvider from './bailianCodingPlan';
 import BedrockProvider from './bedrock';
 import BflProvider from './bfl';
+import BytePlusProvider from './byteplus';
 import CerebrasProvider from './cerebras';
 import CloudflareProvider from './cloudflare';
 import CohereProvider from './cohere';
@@ -197,6 +198,7 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   SenseNovaProvider,
   StepfunProvider,
   BaichuanProvider,
+  BytePlusProvider,
   VolcengineProvider,
   VolcengineCodingPlanProvider,
   MinimaxProvider,
@@ -250,6 +252,7 @@ export { default as BaichuanProviderCard } from './baichuan';
 export { default as BailianCodingPlanProviderCard } from './bailianCodingPlan';
 export { default as BedrockProviderCard } from './bedrock';
 export { default as BflProviderCard } from './bfl';
+export { default as BytePlusProviderCard } from './byteplus';
 export { default as CerebrasProviderCard } from './cerebras';
 export { default as CloudflareProviderCard } from './cloudflare';
 export { default as CohereProviderCard } from './cohere';
