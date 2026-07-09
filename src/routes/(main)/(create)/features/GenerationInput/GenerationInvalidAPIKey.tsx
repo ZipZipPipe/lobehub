@@ -40,7 +40,7 @@ const GenerationInvalidAPIKey = memo<GenerationInvalidAPIKeyProps>(({ provider, 
       desc={
         provider === ModelProvider.Bedrock
           ? t('bedrock.unlock.description')
-          : t(`unlock.apiKey.description`, {
+          : t(`unlock.apiKey.imageGenerationDescription`, {
               name: providerName,
               ns: 'error',
             })

@@ -420,10 +420,39 @@ export const initModelRuntimeFromDB = async (
   const aiProviderModel = new AiProviderModel(db, userId, workspaceId);
 
   // Use getAiProviderById with KeyVaultsGateKeeper.getUserKeyVaults as decryptor
-  const providerConfig = await aiProviderModel.getAiProviderById(
+  let providerConfig = await aiProviderModel.getAiProviderById(
     provider,
     KeyVaultsGateKeeper.getUserKeyVaults,
   );
+
+  if (workspaceId) {
+    const globalProviderConfig = await new AiProviderModel(db, userId).getAiProviderById(
+      provider,
+      KeyVaultsGateKeeper.getUserKeyVaults,
+    );
+
+    if (globalProviderConfig) {
+      providerConfig = providerConfig
+        ? ({
+            ...globalProviderConfig,
+            ...providerConfig,
+            config: {
+              ...(globalProviderConfig.config || {}),
+              ...(providerConfig.config || {}),
+            },
+            fetchOnClient: providerConfig.fetchOnClient ?? globalProviderConfig.fetchOnClient,
+            keyVaults: {
+              ...(globalProviderConfig.keyVaults || {}),
+              ...(providerConfig.keyVaults || {}),
+            },
+            settings: {
+              ...(globalProviderConfig.settings || {}),
+              ...(providerConfig.settings || {}),
+            },
+          } as typeof providerConfig)
+        : globalProviderConfig;
+    }
+  }
 
   // 2. Resolve the runtime provider for custom providers
   // For custom providers, use sdkType from settings (defaults to 'openai')
