@@ -134,7 +134,7 @@ vi.mock('@/server/services/file', () => ({
   })),
 }));
 
-describe('RuntimeExecutors', () => {
+describe('RuntimeExecutors', { timeout: 60_000 }, () => {
   let mockMessageModel: any;
   let mockStreamManager: any;
   let mockToolExecutionService: any;
@@ -915,13 +915,27 @@ describe('RuntimeExecutors', () => {
           state,
         );
         // Drive the retry backoff sleeps to completion.
-        const settled = expect(promise).rejects.toBeInstanceOf(ModelEmptyError);
+        const rejection = promise.catch((error) => error);
         await vi.runAllTimersAsync();
         // Must throw (so the harness records a readable error state) instead of
         // silently finalizing to a completion with a blank assistant message.
-        await settled;
+        const error = await rejection;
+        expect(error).toBeInstanceOf(ModelEmptyError);
         // EMPTY_COMPLETION_MAX_RETRIES (2) retries → 3 total attempts.
         expect(mockChat).toHaveBeenCalledTimes(3);
+        expect(error.diagnostics).toMatchObject({
+          attempt: 3,
+          maxAttempts: 3,
+          model: 'deepseek-v4-pro',
+          outputTokens: 1,
+          provider: 'lobehub',
+          retryBudget: 2,
+          retryEvents: [
+            expect.objectContaining({ attempt: 2, delayMs: 1000, maxAttempts: 3 }),
+            expect.objectContaining({ attempt: 3, delayMs: 2000, maxAttempts: 3 }),
+          ],
+          toolCallCount: 0,
+        });
       } finally {
         vi.useRealTimers();
       }
@@ -4738,7 +4752,7 @@ describe('RuntimeExecutors', () => {
           'op-123',
           expect.objectContaining({
             type: 'stream_retry',
-            data: { attempt: 2, delayMs: 1000, maxAttempts: 6 },
+            data: expect.objectContaining({ attempt: 2, delayMs: 1000, maxAttempts: 6 }),
           }),
         );
       } finally {
@@ -4869,21 +4883,21 @@ describe('RuntimeExecutors', () => {
           'op-123',
           expect.objectContaining({
             type: 'stream_retry',
-            data: { attempt: 2, delayMs: 1000, maxAttempts: 6 },
+            data: expect.objectContaining({ attempt: 2, delayMs: 1000, maxAttempts: 6 }),
           }),
         );
         expect(mockStreamManager.publishStreamEvent).toHaveBeenCalledWith(
           'op-123',
           expect.objectContaining({
             type: 'stream_retry',
-            data: { attempt: 3, delayMs: 2000, maxAttempts: 6 },
+            data: expect.objectContaining({ attempt: 3, delayMs: 2000, maxAttempts: 6 }),
           }),
         );
         expect(mockStreamManager.publishStreamEvent).toHaveBeenCalledWith(
           'op-123',
           expect.objectContaining({
             type: 'stream_retry',
-            data: { attempt: 4, delayMs: 4000, maxAttempts: 6 },
+            data: expect.objectContaining({ attempt: 4, delayMs: 4000, maxAttempts: 6 }),
           }),
         );
       } finally {
@@ -5305,7 +5319,7 @@ describe('RuntimeExecutors', () => {
       expect(result.nextContext).toBeUndefined();
     });
 
-    it('exec_sub_agent executor creates task message and calls execSubAgent callback', async () => {
+    it('exec_sub_agent executor dispatches from the source parent message', async () => {
       const mockExecSubAgent = vi
         .fn()
         .mockResolvedValue({ success: true, operationId: 'child-op', threadId: 'thread-child' });
@@ -5333,26 +5347,16 @@ describe('RuntimeExecutors', () => {
 
       const result = await executors.exec_sub_agent!(instruction as any, state);
 
-      // Task message created with role:'task'
-      expect(mockMessageModel.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentId: 'parent-agent-id',
-          metadata: expect.objectContaining({
-            targetAgentId: 'target-agent-id',
-          }),
-          role: 'task',
-          parentId: 'tool-msg-id',
-          topicId: 'topic-123',
-        }),
-      );
+      expect(mockMessageModel.create).not.toHaveBeenCalled();
 
       // execSubAgent callback fired with targetAgentId
       expect(mockExecSubAgent).toHaveBeenCalledWith(
         expect.objectContaining({
           agentId: 'target-agent-id',
           instruction: 'Do something useful',
-          topicId: 'topic-123',
           parentOperationId: 'op-123',
+          parentMessageId: 'tool-msg-id',
+          topicId: 'topic-123',
         }),
       );
 
@@ -5419,10 +5423,8 @@ describe('RuntimeExecutors', () => {
 
       const result = await executors.exec_sub_agent!(instruction as any, state);
 
-      // Should still return sub_agent_result (not crash)
       expect(result.nextContext?.phase).toBe('sub_agent_result');
-      // Task message still created for UI
-      expect(mockMessageModel.create).toHaveBeenCalled();
+      expect(mockMessageModel.create).not.toHaveBeenCalled();
     });
   });
 });

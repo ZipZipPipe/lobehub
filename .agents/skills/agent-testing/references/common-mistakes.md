@@ -255,3 +255,142 @@ verify run. Either drive the real app UI with agent-browser/Electron/Web and att
 a screenshot, or explicitly mark the UI screenshot case blocked with the measured
 environment blocker. Do not present a UI-touching report as complete with only CLI
 evidence.
+
+## Case 11 — Skipping the agent-testing entry point for a UI E2E check
+
+**Wrong approach**: after implementing a user-facing Markdown/chat interaction,
+running generic local checks and an ad-hoc browser probe without first reading and
+following the repo's `agent-testing` skill. The user had to ask why the test plan
+did not use the dedicated skill.
+
+**Why it's wrong**: `agent-testing` encodes LobeHub-specific surface choice, auth,
+isolated Electron dev instances, screenshot evidence rules, reporting, and known
+tooling traps. Bypassing it makes the validation weaker even when individual unit
+tests pass.
+
+**What it breaks**: the run can stop at DOM/text heuristics, use the wrong app
+surface, miss required screenshot/report evidence, or fail to publish a verify
+report that the user can inspect.
+
+**Correct approach**: for any local end-to-end or manual verification task,
+especially UI-facing changes, start with `agent-testing`: read this file and
+`probe-mock-patterns.md`, resolve the test env, choose the correct surface, run
+the app-specific probes, capture visually confirmed evidence, publish the verify
+report, and tear down processes started by the run.
+
+## Case 12 — Verifying the selection chip but not the final model payload
+
+**Wrong approach**: after adding a chat text-selection action, marking the feature
+verified because the floating toolbar appeared, the selected-text chip rendered,
+and the UI store contained a `contextSelections` entry — without checking the
+final message payload that the model receives.
+
+**Why it's wrong**: UI metadata can be saved and displayed while a later
+context-engine/runtime gate drops it before request construction. In this case,
+the user bubble showed the selected text, but the Anthropic request only carried
+the raw user question because generic `contextSelections` were gated behind page
+editor context injection.
+
+**What it breaks**: ships a feature that looks successful in the chat UI but has
+no effect on model behavior; the user must inspect DevTools to discover the
+selected context never reached the assistant.
+
+**Correct approach**: for any feature that claims to "inject" context, verify the
+last mile: add or run an integration-level assertion against the transformed
+messages/request body (e.g. `MessagesEngine` output or transport payload), and
+only treat the UI chip/store as supporting evidence.
+
+---
+
+## Case 13 — GIF evidence ending on an expected-failure frame reads as "the page failed to load"
+
+**Wrong approach**: for a loading-skeleton case, attaching a GIF that records the
+full timeline — skeleton (the asserted state) followed by the error page that the
+test data inevitably produces (fake ids / dummy provider keys mean the route can
+only end in its error state). The GIF loops and rests on its final frames, so the
+viewer opens the report and sees the error card, not the skeleton.
+
+**Why it's wrong**: same trap as Case 5 (unlabeled before-shot) in time-based
+form — the LAST frame of a GIF is its de-facto headline. An expected-failure
+terminal state without explanation reads as the case failing (" 这里怎么加载失败
+了 "), even when the asserted behavior (the skeleton) passed.
+
+**What it breaks**: the user reads a passed case as a load failure and a round is
+burned re-explaining the evidence.
+
+**Correct approach**: trim evidence to the asserted state — end the GIF on the
+skeleton/loading phase (cut the frames after the terminal state appears), or
+attach the static shot of the asserted state as the primary evidence. If the
+expected-failure terminal state is worth showing, say so explicitly in the
+case's `observation` ("ends in the error page because the test session id is
+fake — expected, not the assertion") so the viewer is told before they see it.
+
+---
+
+## Case 14 — Verifying only the entry compose surface when a shared component also appears in deeper pages
+
+**Wrong approach**: after changing a shared chat input component, publishing a
+passing UI report from the home compose surface only, even though the same
+component also renders after entering an agent/conversation page.
+
+**Why it's wrong**: shared components can be composed with different wrappers,
+slots, and responsive containers across surfaces. A fix that looks correct on the
+home input can still be misplaced on an inner conversation page.
+
+**What it breaks**: the verify report goes green while a deeper product path
+still shows the old or awkward warning placement, and the user has to point out
+that the page after entry was never checked.
+
+**Correct approach**: enumerate all product surfaces where the changed shared UI
+renders before publishing. For ChatInput placement changes, verify both the home
+input and an inner agent/conversation page, attach separate screenshot evidence
+for each, and mark any skipped surface explicitly blocked or untested.
+
+---
+
+## Case 15 — Verifying action-bar placement without covering collapsed toolbar state
+
+**Wrong approach**: after moving a warning into a chat input action bar, checking
+only the normal expanded toolbar state and publishing the layout as passed,
+without forcing the toolbar into its persisted collapsed / auto-collapsed state.
+
+**Why it's wrong**: action bars often have their own overflow behavior and saved
+user preference. Adding a warning beside the toolbar can shrink the measured
+available width enough to trigger a popup collapse, or a previously saved
+collapsed preference can hide the exact action the change is supposed to sit
+beside.
+
+**What it breaks**: the screenshot can look acceptable for a fresh profile while
+real users who have collapsed the toolbar, or narrower input containers, see the
+primary left action replaced by a chevron/popup icon.
+
+**Correct approach**: for any UI change inside an action/toolbar row, verify both
+the default state and the collapsed/overflow state. If the design requires a
+specific action to stay visible, disable or bypass the toolbar collapse logic for
+that surface and include evidence that no collapse chevron is rendered.
+
+---
+
+## Case 16 — Publishing a component harness when the user asked for full product verification
+
+**Wrong approach**: when the isolated Electron instance failed once and local Docker
+was unavailable, declaring the product-surface verification blocked and publishing a
+component harness report as the main answer, even though another live Electron dev
+pool / CDP route was already running and previous runs had used it successfully.
+
+**Why it's wrong**: a component harness proves a narrow render contract, but it does
+not prove the full product composition, message list layout, app theme tokens,
+store plumbing, or that the evidence is inspectable in the actual desktop surface.
+Environment friction is the agent-testing job to solve, not a reason to downgrade
+without exhausting known running surfaces.
+
+**What it breaks**: the user opens a report expecting complete product evidence and
+gets a partial proof instead, then has to push back that the full verification used
+to run normally.
+
+**Correct approach**: before marking Electron/Web blocked, inventory existing dev
+instances and CDP ports, check whether a sibling worktree already runs the needed
+live branch, measure the target URL/bundle, and use that path if it renders current
+code. Only keep a harness as supporting evidence; the primary UI evidence must come
+from the product surface, or the report must clearly fail/block after every known
+path is measured.

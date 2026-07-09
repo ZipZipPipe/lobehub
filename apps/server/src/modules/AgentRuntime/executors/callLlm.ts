@@ -3,15 +3,21 @@ import {
   type AgentInstruction,
   type CallLLMPayload,
   type GeneralAgentCallLLMResultPayload,
+  getLLMRetryDelayMs,
   type InstructionExecutor,
+  resolveLLMMaxAttempts,
+  resolveLLMRetryBudget,
+  shouldRetryLLM,
   stripAssistantReasoningForReplay,
   UsageCounter,
 } from '@lobechat/agent-runtime';
 import {
   type ComposioServiceSummary,
   type CredSummary,
+  excludeDisabledComposioServices,
   generateComposioServicesList,
   generateCredsList,
+  resolveAvailableComposioServices,
 } from '@lobechat/builtin-tool-creds';
 import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { builtinTools } from '@lobechat/builtin-tools';
@@ -58,7 +64,13 @@ import {
   CONTEXT_ENGINEERING_SPAN_NAME,
   tracer as agentRuntimeTracer,
 } from '@lobechat/observability-otel/modules/agent-runtime';
-import { type ChatToolPayload, type MessageToolCall, type UIChatMessage } from '@lobechat/types';
+import {
+  type ChatToolPayload,
+  getActivePluginIds,
+  getDisabledPluginIds,
+  type MessageToolCall,
+  type UIChatMessage,
+} from '@lobechat/types';
 import { sanitizeToolCallArguments, serializePartsForStorage } from '@lobechat/utils';
 import { type ExtendParamsType, ModelProvider } from 'model-bank';
 
@@ -85,13 +97,9 @@ import { type RuntimeExecutorContext } from '../context';
 import {
   buildPostProcessUrl,
   buildToolDiscoveryConfig,
-  getLLMRetryDelayMs,
   isOperationInterrupted,
   log,
-  resolveLLMMaxAttempts,
-  resolveLLMRetryBudget,
   resolveRuntimeHistoryCount,
-  shouldRetryLLM,
   sleep,
   timing,
 } from '../executorHelpers';
@@ -100,6 +108,11 @@ import { classifyLLMError } from '../llmErrorClassification';
 import { createConversationParentMissingError } from '../messagePersistErrors';
 import { VISIBLE_OUTPUT_END_PUBLISHED_STEP_INDEX_METADATA_KEY } from '../visibleOutputEnd';
 import { resolveRunActiveDeviceId } from './resolveRunActiveDeviceId';
+
+const SERVER_LLM_RETRY_POLICY = {
+  isEmptyCompletionError: (error: unknown) => error instanceof ModelEmptyError,
+  noRetryProviders: [BRANDING_PROVIDER],
+};
 
 export const callLlm =
   (ctx: RuntimeExecutorContext): InstructionExecutor =>
@@ -203,11 +216,18 @@ export const callLlm =
     // If assistantMessageId is provided in payload, use existing message instead of creating new one
     const existingAssistantMessageId = (llmPayload as any).assistantMessageId;
     let assistantMessageItem: { id: string };
+    // Seed fields for the client to insert this message into its local store.
+    // The step_start uiMessages snapshot is resolved BEFORE this row exists,
+    // so the client has no other way to learn about it until the next DB
+    // refetch — chunks would silently no-op against the missing id (LOBE-11501).
+    let assistantMessageSeed: Record<string, unknown> | undefined;
 
     if (existingAssistantMessageId) {
       // Use existing assistant message (created by execAgent)
       assistantMessageItem = { id: existingAssistantMessageId };
       log(`${stagePrefix} Using existing assistant message: %s`, existingAssistantMessageId);
+      const existingRow = await ctx.messageModel.findById(existingAssistantMessageId);
+      if (existingRow) assistantMessageSeed = existingRow;
     } else {
       // Create new assistant message (legacy behavior)
       assistantMessageItem = await ctx.messageModel.create({
@@ -221,6 +241,7 @@ export const callLlm =
         threadId: state.metadata?.threadId,
         topicId: state.metadata?.topicId,
       });
+      assistantMessageSeed = assistantMessageItem as Record<string, unknown>;
       log(`${stagePrefix} Created new assistant message: %s`, assistantMessageItem.id);
     }
 
@@ -228,7 +249,20 @@ export const callLlm =
     const stepLabel = (instruction as any).stepLabel;
     await streamManager.publishStreamEvent(operationId, {
       data: {
-        assistantMessage: assistantMessageItem,
+        // Only the seed fields the client needs — not the whole DB row.
+        assistantMessage: {
+          id: assistantMessageItem.id,
+          ...(assistantMessageSeed && {
+            agentId: assistantMessageSeed.agentId,
+            groupId: assistantMessageSeed.groupId,
+            model: assistantMessageSeed.model,
+            parentId: assistantMessageSeed.parentId,
+            provider: assistantMessageSeed.provider,
+            role: assistantMessageSeed.role,
+            threadId: assistantMessageSeed.threadId,
+            topicId: assistantMessageSeed.topicId,
+          }),
+        },
         model,
         provider,
         ...(stepLabel && { stepLabel }),
@@ -577,13 +611,24 @@ export const callLlm =
         if (ctx.userId) {
           try {
             const marketService = new MarketService({ userInfo: { userId: ctx.userId } });
-            const credsResult = await marketService.market.creds.list();
+            // Inside a workspace, the agent must only see the workspace's shared
+            // organization credentials — personal creds are not visible here (LOBE-10978).
+            const credsResult = ctx.workspaceId
+              ? await marketService.market.organizations
+                  .creds({ workspaceId: ctx.workspaceId })
+                  .list()
+              : await marketService.market.creds.list();
             const userCreds = (credsResult as any)?.data ?? [];
             credsListStr = generateCredsList(
               userCreds.map((cred: any): CredSummary => ({
                 description: cred.description,
                 key: cred.key,
                 name: cred.name,
+                // Only present on the workspace-merged list (organizations.creds().list())
+                // above — tells the AI whether this credential is the workspace's own or a
+                // member's shared one, so it never misrepresents whose secret it's using.
+                ownerDisplayName: cred.ownerDisplayName,
+                ownerType: cred.ownerType,
                 type: cred.type,
               })),
             );
@@ -609,12 +654,25 @@ export const callLlm =
                 )
                 .map((p) => p.identifier),
             );
-            const connected: ComposioServiceSummary[] = COMPOSIO_APP_TYPES.filter((t) =>
-              connectedIds.has(t.identifier),
+            // Disabled services are dropped from both lists — not surfaced as
+            // "connected, use directly" (this agent shouldn't use it) nor as
+            // "available to connect" (the account-level OAuth connection, if
+            // any, is untouched; this agent just isn't meant to see it).
+            let disabledIdSet = new Set<string>();
+            if (agentId) {
+              const agentModel = new AgentModel(ctx.serverDB, ctx.userId, ctx.workspaceId);
+              const agentConfig = await agentModel.getAgentConfigById(agentId);
+              disabledIdSet = new Set(getDisabledPluginIds(agentConfig?.plugins ?? undefined));
+            }
+            const connected: ComposioServiceSummary[] = excludeDisabledComposioServices(
+              COMPOSIO_APP_TYPES.filter((t) => connectedIds.has(t.identifier)),
+              disabledIdSet,
             ).map((t) => ({ identifier: t.identifier, name: t.label }));
-            const available: ComposioServiceSummary[] = COMPOSIO_APP_TYPES.filter(
-              (t) => !connectedIds.has(t.identifier),
-            ).map((t) => ({ identifier: t.identifier, name: t.label }));
+            const available = resolveAvailableComposioServices(
+              COMPOSIO_APP_TYPES,
+              connectedIds,
+              disabledIdSet,
+            );
             composioServicesListStr = generateComposioServicesList(connected, available);
             log(
               'Fetched Composio services for {{COMPOSIO_SERVICES_LIST}}: connected=%d, available=%d',
@@ -651,9 +709,9 @@ export const callLlm =
               // search API — can't see installable builtin/Composio tools or their
               // enabled/connected status, so the model may pick invalid ids or
               // claim a supported tool is unavailable.
-              const enabledPlugins: string[] = Array.isArray(editingConfig.plugins)
-                ? (editingConfig.plugins as string[])
-                : [];
+              const enabledPlugins: string[] = getActivePluginIds(
+                Array.isArray(editingConfig.plugins) ? editingConfig.plugins : undefined,
+              );
               const composioIdentifiers = new Set(COMPOSIO_APP_TYPES.map((t) => t.identifier));
               const officialTools: OfficialToolItem[] = [];
 
@@ -710,7 +768,7 @@ export const callLlm =
                   openingMessage: editingConfig.openingMessage ?? undefined,
                   openingQuestions: editingConfig.openingQuestions ?? undefined,
                   params: editingConfig.params ?? undefined,
-                  plugins: editingConfig.plugins ?? undefined,
+                  plugins: enabledPlugins,
                   provider: editingConfig.provider ?? undefined,
                   systemRole: editingConfig.systemRole ?? undefined,
                 },
@@ -1054,7 +1112,7 @@ export const callLlm =
           });
       };
 
-      const maxAttempts = resolveLLMMaxAttempts(provider);
+      const maxAttempts = resolveLLMMaxAttempts(provider, SERVER_LLM_RETRY_POLICY);
 
       // OTel chat span — wraps all retry attempts; TTFT recorded on the first
       // text/reasoning chunk regardless of which attempt produced it (the
@@ -1388,7 +1446,19 @@ export const callLlm =
                   attempt,
                   maxAttempts,
                 );
-                throw new ModelEmptyError();
+                throw new ModelEmptyError(undefined, {
+                  attempt,
+                  contentLength: content.length,
+                  finishReason: currentStepFinishReason,
+                  imageCount: imageList.length,
+                  maxAttempts,
+                  model,
+                  outputTokens:
+                    typeof reportedOutputTokens === 'number' ? reportedOutputTokens : undefined,
+                  provider,
+                  reasoningLength: thinkingContent.length,
+                  toolCallCount: toolsCalling.length + tool_calls.length,
+                });
               }
 
               // Answer-in-thinking salvage: some thinking-mode models — notably
@@ -1668,7 +1738,7 @@ export const callLlm =
               const classified = classifyLLMError(error);
               const interrupted = await isOperationInterrupted(ctx);
 
-              const retryBudget = resolveLLMRetryBudget(provider, error);
+              const retryBudget = resolveLLMRetryBudget(provider, error, SERVER_LLM_RETRY_POLICY);
 
               if (!interrupted && shouldRetryLLM(classified.kind, attempt, retryBudget)) {
                 const delayMs = getLLMRetryDelayMs(attempt);
@@ -1682,8 +1752,20 @@ export const callLlm =
                   delayMs,
                 );
 
+                const retryEvent: AgentEvent = {
+                  data: {
+                    attempt: attempt + 1,
+                    delayMs,
+                    errorType: classified.code,
+                    kind: classified.kind,
+                    maxAttempts,
+                  },
+                  type: 'stream_retry',
+                };
+                events.push(retryEvent);
+
                 await streamManager.publishStreamEvent(operationId, {
-                  data: { attempt: attempt + 1, delayMs, maxAttempts },
+                  data: retryEvent.data,
                   stepIndex,
                   type: 'stream_retry',
                 });
@@ -1695,6 +1777,13 @@ export const callLlm =
                 }
 
                 continue;
+              }
+
+              if (error instanceof ModelEmptyError && error.diagnostics) {
+                error.diagnostics.retryBudget = retryBudget;
+                error.diagnostics.retryEvents = events
+                  .filter((event) => event.type === 'stream_retry')
+                  .map((event) => event.data);
               }
 
               // Cancel/interrupt path: when the user stops mid-stream, the model-runtime
