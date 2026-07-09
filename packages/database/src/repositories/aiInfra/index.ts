@@ -8,7 +8,12 @@ import type {
   ProviderConfig,
 } from '@lobechat/types';
 import { isEmpty } from 'es-toolkit/compat';
-import type { AIChatModelCard, AiProviderModelListItem, EnabledAiModel } from 'model-bank';
+import type {
+  AIChatModelCard,
+  AiProviderModelListItem,
+  EnabledAiModel,
+  ModelParamsSchema,
+} from 'model-bank';
 import { AiModelSourceEnum, isAiModelVisible, normalizeAiModelType } from 'model-bank';
 import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 import pMap from 'p-map';
@@ -22,6 +27,18 @@ import type { LobeChatDatabase } from '../../type';
 type DecryptUserKeyVaults = (encryptKeyVaultsStr: string | null) => Promise<any>;
 
 const normalizeProvider = (provider: string) => provider.toLowerCase();
+
+const VOLCENGINE_IMAGE_PARAMETERS: ModelParamsSchema = {
+  height: { default: 2048, max: 16_384, min: 480, step: 1 },
+  imageUrls: { default: [], maxCount: 14, maxFileSize: 10 * 1024 * 1024 },
+  prompt: {
+    default: '',
+  },
+  promptExtend: { default: 'off', enum: ['off', 'standard'] },
+  watermark: { default: false },
+  webSearch: { default: false },
+  width: { default: 2048, max: 16_384, min: 480, step: 1 },
+};
 
 /**
  * Provider-level search defaults (only used when built-in models don't provide settings.searchImpl and settings.searchProvider)
@@ -121,6 +138,24 @@ const injectSearchSettings = (providerId: string, item: any) => {
   return item;
 };
 
+const injectDefaultImageParameters = (
+  providerId: string,
+  item: any,
+  providerRuntimeConfig: Record<string, any>,
+) => {
+  const type = normalizeAiModelType(item.type);
+  if (type !== 'image' || !isEmpty(item.parameters)) return item;
+
+  const runtimeProvider = providerRuntimeConfig[providerId]?.settings?.sdkType;
+  if (providerId !== 'volcengine' && providerId !== 'byteplus' && runtimeProvider !== 'volcengine')
+    return item;
+
+  return {
+    ...item,
+    parameters: VOLCENGINE_IMAGE_PARAMETERS,
+  };
+};
+
 export class AiInfraRepos {
   private userId: string;
   private db: LobeChatDatabase;
@@ -191,9 +226,10 @@ export class AiInfraRepos {
    * used in the chat page. to show the enabled models
    */
   getEnabledModels = async (filterEnabled: boolean = true) => {
-    const [providers, allModels] = await Promise.all([
+    const [providers, allModels, providerRuntimeConfig] = await Promise.all([
       this.getAiProviderList(),
       this.aiModelModel.getAllModels(),
+      this.aiProviderModel.getAiProviderRuntimeConfig(),
     ]);
     const enabledProviders = providers.filter((item) => (filterEnabled ? item.enabled : true));
 
@@ -251,9 +287,15 @@ export class AiInfraRepos {
         if (builtinModelKeys.has(`${item.providerId}:${item.id}`)) return false;
         return filterEnabled ? enabledProviderIds.has(item.providerId) && item.enabled : true;
       })
-      .map((item) =>
-        injectSearchSettings(item.providerId, { ...item, type: normalizeAiModelType(item.type) }),
-      );
+      .map((item) => {
+        const normalizedModel = injectDefaultImageParameters(
+          item.providerId,
+          { ...item, type: normalizeAiModelType(item.type) },
+          providerRuntimeConfig,
+        );
+
+        return injectSearchSettings(item.providerId, normalizedModel);
+      });
 
     return [...builtinModels, ...appendedUserModels].sort(
       (a, b) => (a?.sort ?? Infinity) - (b?.sort ?? Infinity),
