@@ -25,6 +25,7 @@ import GPT5ReasoningEffortSlider from './GPT5ReasoningEffortSlider';
 import GPT51ReasoningEffortSlider from './GPT51ReasoningEffortSlider';
 import GPT52ProReasoningEffortSlider from './GPT52ProReasoningEffortSlider';
 import GPT52ReasoningEffortSlider from './GPT52ReasoningEffortSlider';
+import GPT56ReasoningEffortSlider from './GPT56ReasoningEffortSlider';
 import Grok43ReasoningEffortSlider from './Grok43ReasoningEffortSlider';
 import Grok45ReasoningEffortSlider from './Grok45ReasoningEffortSlider';
 import Grok420ReasoningEffortSlider from './Grok420ReasoningEffortSlider';
@@ -397,6 +398,17 @@ const ControlsForm = memo<ControlsFormProps>(
         layout: 'vertical',
         minWidth: undefined,
         name: 'step3_5ReasoningEffort',
+        style: {
+          paddingBottom: 0,
+        },
+      },
+      {
+        children: <GPT56ReasoningEffortSlider />,
+        desc: 'reasoning_effort',
+        label: t('extendParams.reasoningEffort.title'),
+        layout: 'vertical',
+        minWidth: undefined,
+        name: 'gpt5_6ReasoningEffort',
         style: {
           paddingBottom: 0,
         },

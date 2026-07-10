@@ -273,6 +273,8 @@ export default {
     'For GPT-5.2 Pro series; controls reasoning intensity.',
   'providerModels.item.modelConfig.extendParams.options.gpt5_2ReasoningEffort.hint':
     'For GPT-5.2 series; controls reasoning intensity.',
+  'providerModels.item.modelConfig.extendParams.options.gpt5_6ReasoningEffort.hint':
+    'For GPT-5.6 series; controls reasoning intensity from none through max.',
   'providerModels.item.modelConfig.extendParams.options.glm5_2ReasoningEffort.hint':
     'For GLM-5.2; controls reasoning effort with High and Max levels.',
   'providerModels.item.modelConfig.extendParams.options.grok4_20ReasoningEffort.hint':
