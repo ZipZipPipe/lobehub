@@ -12,7 +12,7 @@ const xaiChatModels: AIChatModelCard[] = [
     },
     contextWindowTokens: 500_000,
     description:
-      "xAI's most intelligent and fastest model for code, chat, and general-purpose tasks.",
+      "SpaceXAI's flagship model for coding, agentic tasks, and knowledge work — configurable reasoning (low/medium/high, always on).",
     displayName: 'Grok 4.5',
     enabled: true,
     family: 'grok',
@@ -20,37 +20,14 @@ const xaiChatModels: AIChatModelCard[] = [
     id: 'grok-4.5',
     pricing: {
       units: [
-        {
-          name: 'textInput_cacheRead',
-          strategy: 'tiered',
-          tiers: [
-            { rate: 0.5, upTo: 0.2 },
-            { rate: 1, upTo: 'infinity' },
-          ],
-          unit: 'millionTokens',
-        },
-        {
-          name: 'textInput',
-          strategy: 'tiered',
-          tiers: [
-            { rate: 2, upTo: 0.2 },
-            { rate: 4, upTo: 'infinity' },
-          ],
-          unit: 'millionTokens',
-        },
-        {
-          name: 'textOutput',
-          strategy: 'tiered',
-          tiers: [
-            { rate: 6, upTo: 0.2 },
-            { rate: 12, upTo: 'infinity' },
-          ],
-          unit: 'millionTokens',
-        },
+        { name: 'textInput_cacheRead', rate: 0.5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 6, strategy: 'fixed', unit: 'millionTokens' },
       ],
     },
-    releasedAt: '2026-07-09',
+    releasedAt: '2026-07-08',
     settings: {
+      extendParams: ['grok4_5ReasoningEffort'],
       searchImpl: 'params',
     },
     type: 'chat',
@@ -76,7 +53,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textInput_cacheRead',
           strategy: 'tiered',
           tiers: [
-            { rate: 0.2, upTo: 0.2 },
+            { rate: 0.2, upTo: 200_000 },
             { rate: 0.4, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -85,7 +62,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textInput',
           strategy: 'tiered',
           tiers: [
-            { rate: 1.25, upTo: 0.2 },
+            { rate: 1.25, upTo: 200_000 },
             { rate: 2.5, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -94,7 +71,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textOutput',
           strategy: 'tiered',
           tiers: [
-            { rate: 2.5, upTo: 0.2 },
+            { rate: 2.5, upTo: 200_000 },
             { rate: 5, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -128,7 +105,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textInput_cacheRead',
           strategy: 'tiered',
           tiers: [
-            { rate: 0.2, upTo: 0.2 },
+            { rate: 0.2, upTo: 200_000 },
             { rate: 0.4, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -137,7 +114,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textInput',
           strategy: 'tiered',
           tiers: [
-            { rate: 1.25, upTo: 0.2 },
+            { rate: 1.25, upTo: 200_000 },
             { rate: 2.5, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -146,7 +123,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textOutput',
           strategy: 'tiered',
           tiers: [
-            { rate: 2.5, upTo: 0.2 },
+            { rate: 2.5, upTo: 200_000 },
             { rate: 5, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -180,7 +157,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textInput_cacheRead',
           strategy: 'tiered',
           tiers: [
-            { rate: 0.2, upTo: 0.2 },
+            { rate: 0.2, upTo: 200_000 },
             { rate: 0.4, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -189,7 +166,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textInput',
           strategy: 'tiered',
           tiers: [
-            { rate: 1.25, upTo: 0.2 },
+            { rate: 1.25, upTo: 200_000 },
             { rate: 2.5, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -198,7 +175,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textOutput',
           strategy: 'tiered',
           tiers: [
-            { rate: 2.5, upTo: 0.2 },
+            { rate: 2.5, upTo: 200_000 },
             { rate: 5, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -232,7 +209,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textInput_cacheRead',
           strategy: 'tiered',
           tiers: [
-            { rate: 0.2, upTo: 0.2 },
+            { rate: 0.2, upTo: 200_000 },
             { rate: 0.4, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -241,7 +218,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textInput',
           strategy: 'tiered',
           tiers: [
-            { rate: 1.25, upTo: 0.2 },
+            { rate: 1.25, upTo: 200_000 },
             { rate: 2.5, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -250,7 +227,7 @@ const xaiChatModels: AIChatModelCard[] = [
           name: 'textOutput',
           strategy: 'tiered',
           tiers: [
-            { rate: 2.5, upTo: 0.2 },
+            { rate: 2.5, upTo: 200_000 },
             { rate: 5, upTo: 'infinity' },
           ],
           unit: 'millionTokens',
@@ -351,52 +328,34 @@ const xaiImageModels: AIImageModelCard[] = [
   },
 ];
 
-const grokImagineVideoParameters: AIVideoModelCard['parameters'] = {
-  aspectRatio: {
-    default: '16:9',
-    enum: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'],
-  },
-  duration: { default: 8, max: 15, min: 1 },
-  imageUrl: {
-    default: null,
-  },
-  prompt: { default: '' },
-  resolution: {
-    default: '480p',
-    enum: ['480p', '720p'],
-  },
-};
-
-const grokImagineVideoReferenceParameters: AIVideoModelCard['parameters'] = {
-  ...grokImagineVideoParameters,
-  imageUrls: {
-    default: [],
-    description: 'Reference images for multi-image reference-to-video generation.',
-    maxCount: 7,
-  },
-};
-
-const grokImagineVideoPricing: AIVideoModelCard['pricing'] = {
-  units: [{ name: 'videoGeneration', rate: 0.05, strategy: 'fixed', unit: 'second' }],
-};
-
 const xaiVideoModels: AIVideoModelCard[] = [
-  {
-    description: 'Preview Grok Imagine 1.5 image-to-video generation model.',
-    displayName: 'Grok Imagine Video 1.5 Preview',
-    enabled: true,
-    id: 'grok-imagine-video-1.5-preview',
-    parameters: grokImagineVideoParameters,
-    pricing: grokImagineVideoPricing,
-    type: 'video',
-  },
   {
     description: 'State-of-the-art video generation across quality, cost, and latency.',
     displayName: 'Grok Imagine Video',
     enabled: true,
     id: 'grok-imagine-video',
-    parameters: grokImagineVideoReferenceParameters,
-    pricing: grokImagineVideoPricing,
+    parameters: {
+      aspectRatio: {
+        default: '16:9',
+        enum: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'],
+      },
+      duration: { default: 8, max: 15, min: 1 },
+      imageUrl: {
+        default: null,
+      },
+      prompt: { default: '' },
+      resolution: {
+        default: '480p',
+        enum: ['480p', '720p'],
+      },
+      size: {
+        default: '848x480',
+        enum: ['848x480', '1696x960', '1280x720', '1920x1080'],
+      },
+    },
+    pricing: {
+      units: [{ name: 'videoGeneration', rate: 0.05, strategy: 'fixed', unit: 'second' }],
+    },
     releasedAt: '2026-01-28',
     type: 'video',
   },
