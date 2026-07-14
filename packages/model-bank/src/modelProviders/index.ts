@@ -68,6 +68,7 @@ import SparkProvider from './spark';
 import StepfunProvider from './stepfun';
 import StraicoProvider from './straico';
 import StreamLakeProvider from './streamlake';
+import SuperGrokProvider from './superGrok';
 import TaichuProvider from './taichu';
 import TencentcloudProvider from './tencentcloud';
 import TogetherAIProvider from './togetherai';
@@ -183,6 +184,7 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   Ai21Provider,
   UpstageProvider,
   XAIProvider,
+  SuperGrokProvider,
   JinaProvider,
   SambaNovaProvider,
   CohereProvider,
@@ -238,6 +240,11 @@ export const isProviderDisableBrowserRequest = (id: string) => {
   );
   return !!provider;
 };
+
+export const isProviderOAuthDeviceFlow = (id?: string) =>
+  DEFAULT_MODEL_PROVIDER_LIST.some(
+    (provider) => provider.id === id && provider.settings?.authType === 'oauthDeviceFlow',
+  );
 
 export { default as Ai21ProviderCard } from './ai21';
 export { default as Ai302ProviderCard } from './ai302';
@@ -305,6 +312,7 @@ export { default as SparkProviderCard } from './spark';
 export { default as StepfunProviderCard } from './stepfun';
 export { default as StraicoProviderCard } from './straico';
 export { default as StreamLakeProviderCard } from './streamlake';
+export { default as SuperGrokProviderCard } from './superGrok';
 export { default as TaichuProviderCard } from './taichu';
 export { default as TencentCloudProviderCard } from './tencentcloud';
 export { default as TogetherAIProviderCard } from './togetherai';

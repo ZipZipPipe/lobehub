@@ -1,11 +1,16 @@
 'use client';
 
 import type {
+  VerifyAgentPlanConfig,
+  VerifyCheckItem,
   VerifyCodingScope,
   VerifyEvidenceType,
   VerifyInteractionCost,
   VerifyInteractionCostOperators,
   VerifyInteractionCostPhase,
+  VerifyRunOrigin,
+  VerifySurface,
+  VerifyVerdict,
 } from '@lobechat/types';
 import { toRecord } from '@lobechat/utils/object';
 import {
@@ -21,26 +26,28 @@ import {
   Text,
 } from '@lobehub/ui';
 import { Button } from '@lobehub/ui/base-ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar, cx } from 'antd-style';
 import type { TFunction } from 'i18next';
 import {
   AlertTriangle,
+  Bot,
   CalendarClock,
   Check,
   ChevronRight,
+  CircleDashed,
   CircleHelp,
-  ClipboardList,
   Clock3,
   ExternalLink,
   FileText,
   GitBranch,
   GitCommit,
   GitPullRequest,
+  Globe,
   Image as ImageIcon,
-  Layers,
+  MessagesSquare,
+  Monitor,
   RefreshCw,
-  ShieldCheck,
-  Target,
+  Smartphone,
   Terminal,
   Video,
   X,
@@ -51,13 +58,13 @@ import { useParams } from 'react-router';
 
 import Loading from '@/components/Loading/BrandTextLoading';
 import { useTextFileLoader } from '@/features/FileViewer/hooks/useTextFileLoader';
-import type { VerifyEvidenceWithUrl, VerifyResultWithEvidence } from '@/services/verify';
+import type { VerifyEvidenceWithUrl } from '@/services/verify';
 import { getLanguageFromFilename } from '@/utils/fileLanguage';
 
 import { useVerifyReportBundle } from './hooks';
+import { buildCheckRows, type CheckRowData, type CheckState, renderableSurfaces } from './utils';
 
-type Verdict = 'passed' | 'failed' | 'uncertain';
-type Filter = 'all' | Verdict;
+type Filter = 'all' | CheckState;
 
 /** Best-effort filename from a (possibly signed) file URL, for syntax highlighting. */
 const filenameFromUrl = (url: string): string => {
@@ -76,114 +83,13 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   page: css`
     width: 100%;
-    max-width: 1180px;
+    max-width: 880px;
     margin-inline: auto;
     padding-block: 32px 64px;
-    padding-inline: 32px;
-  `,
 
-  reportLayout: css`
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 280px;
-    gap: 24px;
-    align-items: start;
-
-    /* Reclaim the rail's track when it hides — a hidden child leaves the column behind. */
-    @media (width <= 1120px) {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  `,
-  reportMain: css`
-    min-width: 0;
-  `,
-  sideRail: css`
-    position: sticky;
-    inset-block-start: 32px;
-
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-
-    min-width: 0;
-
-    @media (width <= 1120px) {
-      position: static;
-      display: none;
-    }
-  `,
-  overviewCard: css`
-    padding-block: 14px;
-    padding-inline: 14px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadiusLG};
-
-    background: ${cssVar.colorBgContainer};
-  `,
-  overviewTitle: css`
-    display: flex;
-    gap: 7px;
-    align-items: center;
-
-    margin-block-end: 12px;
-
-    font-size: 13px;
-    font-weight: 600;
-    color: ${cssVar.colorTextSecondary};
-
-    svg {
-      color: ${cssVar.colorTextTertiary};
-    }
-  `,
-  overviewGrid: css`
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  `,
-  overviewMetric: css`
-    min-width: 0;
-    padding-block: 12px 10px;
-    padding-inline: 12px;
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadius};
-
-    background: ${cssVar.colorFillQuaternary};
-  `,
-  overviewMetricValue: css`
-    font-size: 22px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    line-height: 1.1;
-    color: ${cssVar.colorText};
-  `,
-  overviewMetricLabel: css`
-    margin-block-start: 5px;
-    font-size: 12px;
-    line-height: 1.35;
-    color: ${cssVar.colorTextTertiary};
-  `,
-  nextList: css`
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  `,
-  nextItem: css`
-    display: grid;
-    grid-template-columns: 16px minmax(0, 1fr);
-    gap: 8px;
-    align-items: start;
-
-    font-size: 12px;
-    line-height: 1.55;
-    color: ${cssVar.colorTextSecondary};
-
-    svg {
-      margin-block-start: 2px;
-    }
-  `,
-  nextEmpty: css`
-    font-size: 12px;
-    line-height: 1.55;
-    color: ${cssVar.colorTextTertiary};
+    /* Start-aligned with the 46px gutter a check row's body sits at, so the hero
+       prose and the expanded check prose share one text edge. */
+    padding-inline: 46px 32px;
   `,
 
   /* hero */
@@ -431,21 +337,34 @@ const styles = createStaticStyles(({ css }) => ({
     font-variant-numeric: tabular-nums;
     color: ${cssVar.colorTextTertiary};
   `,
+  /* Provenance: where the code came from. Reference material the reader scans,
+     so it stays visually subordinate to the verdict + summary above it. */
   codingScope: css`
     display: flex;
     flex-direction: column;
     gap: 6px;
 
+    min-width: 0;
     max-width: 100%;
-    margin-block-start: 8px;
+    margin-block-start: 4px;
   `,
-  codingScopeMain: css`
+  /* The PR gets its own line. It is the one outbound link a reader actually
+     follows, and its title is long enough that sharing a row with branch/commit
+     would either push them onto a second line anyway or truncate the title to
+     nothing. */
+  scopePullRequestLine: css`
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+  `,
+  scopeMetaLine: css`
     display: flex;
     flex-wrap: wrap;
     gap: 6px 14px;
     align-items: center;
 
     min-width: 0;
+    max-width: 100%;
   `,
   branchChip: css`
     display: inline-flex;
@@ -502,8 +421,9 @@ const styles = createStaticStyles(({ css }) => ({
     gap: 6px;
     align-items: center;
 
+    /* Owns its own line, so the title gets the full column before ellipsizing. */
     min-width: 0;
-    max-width: 420px;
+    max-width: 100%;
 
     font-size: 12px;
     color: ${cssVar.colorTextSecondary};
@@ -536,14 +456,6 @@ const styles = createStaticStyles(({ css }) => ({
     text-overflow: ellipsis;
     white-space: nowrap;
   `,
-  scopeMetaRow: css`
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 14px;
-    align-items: center;
-
-    min-width: 0;
-  `,
   scopeMetaItem: css`
     display: inline-flex;
     gap: 6px;
@@ -567,17 +479,29 @@ const styles = createStaticStyles(({ css }) => ({
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
+    svg {
+      flex: 0 0 auto;
+      color: ${cssVar.colorTextQuaternary};
+    }
   `,
-  scopeFocus: css`
-    display: inline-flex;
-    gap: 6px;
-    align-items: flex-start;
+  /* The command / URL under test. Can be long; it must never push the rest of
+     the provenance line onto a second row. */
+  scopeEntry: css`
+    max-width: 260px;
+  `,
+  originLink: css`
+    cursor: pointer;
+    color: ${cssVar.colorTextTertiary};
+    text-decoration: none;
 
-    max-width: 72ch;
+    &:hover {
+      color: ${cssVar.colorLink};
+    }
 
-    font-size: 13px;
-    line-height: 1.45;
-    color: ${cssVar.colorTextSecondary};
+    &:hover svg {
+      color: ${cssVar.colorLink};
+    }
   `,
   surfaceList: css`
     display: flex;
@@ -585,6 +509,10 @@ const styles = createStaticStyles(({ css }) => ({
     gap: 4px;
   `,
   surfaceChip: css`
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+
     padding-block: 1px;
     padding-inline: 6px;
     border-radius: ${cssVar.borderRadiusSM};
@@ -593,6 +521,10 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextSecondary};
 
     background: ${cssVar.colorFillTertiary};
+
+    svg {
+      color: ${cssVar.colorTextTertiary};
+    }
   `,
 
   /* sticky filter chips */
@@ -742,19 +674,37 @@ const styles = createStaticStyles(({ css }) => ({
     padding-inline: 46px 16px;
   `,
   reasoning: css`
-    max-width: 70ch;
     font-size: 13px;
     line-height: 1.6;
     color: ${cssVar.colorTextSecondary};
   `,
   suggestion: css`
-    max-width: 70ch;
     padding-inline-start: 10px;
     border-inline-start: 2px solid ${cssVar.colorBorder};
 
     font-size: 13px;
     line-height: 1.6;
     color: ${cssVar.colorTextSecondary};
+  `,
+  /* What the run said it would do, before it did it — read above the outcome so
+     intent and result sit together and a gap between them is visible. */
+  planDetail: css`
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 8px;
+
+    font-size: 13px;
+    line-height: 1.6;
+    color: ${cssVar.colorTextTertiary};
+  `,
+  planDetailLabel: css`
+    color: ${cssVar.colorTextQuaternary};
+    white-space: nowrap;
+  `,
+  notExecutedHint: css`
+    font-size: 13px;
+    line-height: 1.6;
+    color: ${cssVar.colorTextTertiary};
   `,
 
   /* narrative */
@@ -804,7 +754,64 @@ const styles = createStaticStyles(({ css }) => ({
     gap: 6px;
     align-items: flex-start;
 
-    max-width: 70ch;
+    width: 100%;
+  `,
+  comparison: css`
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+
+    @media (width <= 640px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  /* Wide, short captures (a toolbar, a one-line footer) get halved into
+     illegible slivers by the two-column grid — stack them instead. */
+  comparisonVertical: css`
+    grid-template-columns: 1fr;
+  `,
+  comparisonItem: css`
+    overflow: hidden;
+
+    min-width: 0;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadius};
+
+    background: ${cssVar.colorBgContainer};
+  `,
+  /* The role rides on a tinted band fused to its own screenshot, so which state
+     you're looking at survives being read at a glance — a neutral heading above
+     the image reads as a caption for the whole pair. */
+  comparisonLabel: css`
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+
+    padding-block: 7px;
+    padding-inline: 10px;
+
+    font-size: 12px;
+  `,
+  comparisonLabelBefore: css`
+    border-block-end: 1px solid ${cssVar.colorErrorBorder};
+    color: ${cssVar.colorErrorText};
+    background: ${cssVar.colorErrorBg};
+  `,
+  comparisonLabelAfter: css`
+    border-block-end: 1px solid ${cssVar.colorSuccessBorder};
+    color: ${cssVar.colorSuccessText};
+    background: ${cssVar.colorSuccessBg};
+  `,
+  comparisonRole: css`
+    flex: none;
+    font-weight: 600;
+  `,
+  /* The two captions are themselves a before/after contrast, so they must stay
+     readable side by side — wrap rather than ellipsize. */
+  comparisonCaption: css`
+    min-width: 0;
+    opacity: 0.85;
   `,
   evidenceFile: css`
     cursor: pointer;
@@ -915,7 +922,7 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 const VERDICT_META: Record<
-  Verdict,
+  CheckState,
   { bg: string; color: string; dot: string; icon: typeof Check; labelKey: string }
 > = {
   failed: {
@@ -924,6 +931,13 @@ const VERDICT_META: Record<
     dot: cssVar.colorError,
     icon: X,
     labelKey: 'report.verdict.failed',
+  },
+  not_executed: {
+    bg: cssVar.colorFillTertiary,
+    color: cssVar.colorTextTertiary,
+    dot: cssVar.colorTextQuaternary,
+    icon: CircleDashed,
+    labelKey: 'report.verdict.notExecuted',
   },
   passed: {
     bg: cssVar.colorSuccessBg,
@@ -939,6 +953,15 @@ const VERDICT_META: Record<
     icon: CircleHelp,
     labelKey: 'report.verdict.uncertain',
   },
+};
+
+/** Each surface reads as a badge, so it needs a mark, not just a word. */
+const SURFACE_ICON: Record<VerifySurface, typeof Check> = {
+  bot: Bot,
+  cli: Terminal,
+  desktop: Monitor,
+  mobile: Smartphone,
+  web: Globe,
 };
 
 const imageEvidenceTypes = new Set(['gif', 'screenshot']);
@@ -1101,15 +1124,6 @@ const phaseOperatorSegments = (
     return seconds > 0 ? [{ key, seconds, value }] : [];
   });
 
-/** Severity-first sort: failed → uncertain → passed. */
-const SEVERITY_RANK: Record<Verdict, number> = { failed: 0, passed: 2, uncertain: 1 };
-
-const checkVerdict = (result: VerifyResultWithEvidence): Verdict => {
-  const v = result.verdict ?? result.status;
-  if (v === 'passed' || v === 'failed' || v === 'uncertain') return v;
-  return 'uncertain';
-};
-
 const evidenceDisplayName = (
   evidence: VerifyEvidenceWithUrl,
   t: TFunction<'verify'>,
@@ -1119,6 +1133,42 @@ const evidenceDisplayName = (
   (evidence.fileUrl ? filenameFromUrl(evidence.fileUrl) : '') ||
   evidence.description ||
   t('report.evidence.inlineFallback', { index });
+
+interface EvidenceComparison {
+  id: string;
+  label?: string;
+  /**
+   * How the pair is arranged. Side by side reads best for tall, narrow captures
+   * (a sidebar, a form); stacking is the only way a wide, short strip (a toolbar,
+   * a one-line footer) stays legible, since two of them side by side halve an
+   * already-thin band. Authors pick per pair; defaults to side by side.
+   */
+  layout: 'horizontal' | 'vertical';
+  role: 'after' | 'before';
+}
+
+const evidenceComparison = (evidence: VerifyEvidenceWithUrl): EvidenceComparison | null => {
+  const metadata = toRecord(evidence.metadata);
+  if (!metadata) return null;
+
+  const comparison = toRecord(metadata.comparison);
+  if (!comparison) return null;
+
+  const role = comparison.role;
+  if (
+    typeof comparison.id !== 'string' ||
+    (role !== 'before' && role !== 'after') ||
+    !isInlineVisualEvidence(evidence)
+  )
+    return null;
+
+  return {
+    id: comparison.id,
+    label: typeof comparison.label === 'string' ? comparison.label : undefined,
+    layout: comparison.layout === 'vertical' ? 'vertical' : 'horizontal',
+    role,
+  };
+};
 
 /** A file-backed text evidence, decoded + syntax highlighted (avoids mojibake). */
 const DocumentViewer = memo<{ fileName?: string | null; url: string }>(({ fileName, url }) => {
@@ -1380,104 +1430,215 @@ const EvidenceDrawer = memo<{
 
 EvidenceItem.displayName = 'EvidenceItem';
 
+const EvidenceComparisonView = memo<{
+  after: VerifyEvidenceWithUrl;
+  before: VerifyEvidenceWithUrl;
+}>(({ after, before }) => {
+  const { t } = useTranslation('verify');
+
+  // Either half may carry the layout; the `before` one wins so a pair can't
+  // render as two different arrangements.
+  const layout = evidenceComparison(before)?.layout ?? evidenceComparison(after)?.layout;
+
+  return (
+    <div className={cx(styles.comparison, layout === 'vertical' && styles.comparisonVertical)}>
+      {[before, after].map((evidence, index) => {
+        const comparison = evidenceComparison(evidence)!;
+        const isBefore = comparison.role === 'before';
+        return (
+          <div className={styles.comparisonItem} key={evidence.id}>
+            <div
+              className={cx(
+                styles.comparisonLabel,
+                isBefore ? styles.comparisonLabelBefore : styles.comparisonLabelAfter,
+              )}
+            >
+              <span className={styles.comparisonRole}>
+                {t(`report.evidence.comparison.${comparison.role}`)}
+              </span>
+              {comparison.label && (
+                <span className={styles.comparisonCaption}>{comparison.label}</span>
+              )}
+            </div>
+            <EvidenceItem evidence={evidence} index={index + 1} />
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
+EvidenceComparisonView.displayName = 'EvidenceComparisonView';
+
 EvidenceDrawer.displayName = 'EvidenceDrawer';
 
 /** One check — an expandable row; evidence opens one artifact at a time. */
-const CheckRow = memo<{ defaultOpen: boolean; result: VerifyResultWithEvidence }>(
-  ({ defaultOpen, result }) => {
-    const { t } = useTranslation('verify');
-    const [open, setOpen] = useState(defaultOpen);
-    const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-    const verdict = checkVerdict(result);
-    const meta = VERDICT_META[verdict];
-    const evidenceCount = result.evidence.length;
-    const categoryCounts = result.evidence.reduce(
-      (acc, e) => {
-        acc[evidenceCategory(e.type)] += 1;
-        return acc;
-      },
-      { file: 0, image: 0, video: 0 } as Record<EvidenceCategory, number>,
-    );
-    const hasBody =
-      Boolean(result.toulmin?.evidence) || Boolean(result.suggestion) || evidenceCount > 0;
-    const selectedEvidenceIndex = selectedEvidenceId
-      ? result.evidence.findIndex((e) => e.id === selectedEvidenceId)
-      : -1;
-    const selectedEvidence =
-      selectedEvidenceIndex >= 0 ? result.evidence[selectedEvidenceIndex] : null;
+const CheckRow = memo<{ defaultOpen: boolean; row: CheckRowData }>(({ defaultOpen, row }) => {
+  const { t } = useTranslation('verify');
+  const { planItem, result, state } = row;
+  const [open, setOpen] = useState(defaultOpen);
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
+  const meta = VERDICT_META[state];
+  const evidence = result?.evidence ?? [];
+  const evidenceCount = evidence.length;
+  // An agent-authored plan item records how it meant to check this and what it
+  // expected to see (prose), plus the evidence media it is required to produce
+  // (a closed set the executor's coverage gate enforces).
+  const planConfig = (planItem?.verifierConfig ?? {}) as VerifyAgentPlanConfig;
+  const requiredEvidence = planConfig.requiredEvidence ?? [];
+  const categoryCounts = evidence.reduce(
+    (acc, e) => {
+      acc[evidenceCategory(e.type)] += 1;
+      return acc;
+    },
+    { file: 0, image: 0, video: 0 } as Record<EvidenceCategory, number>,
+  );
+  // `required` lives on the result when there is one, on the plan item otherwise
+  // — a check that never ran still knows whether it was optional.
+  const required = result?.required ?? planItem?.required ?? true;
+  const hasBody =
+    Boolean(result?.toulmin?.evidence) ||
+    Boolean(result?.suggestion) ||
+    Boolean(planConfig.method) ||
+    Boolean(planConfig.expected) ||
+    requiredEvidence.length > 0 ||
+    state === 'not_executed' ||
+    evidenceCount > 0;
+  const selectedEvidenceIndex = selectedEvidenceId
+    ? evidence.findIndex((e) => e.id === selectedEvidenceId)
+    : -1;
+  const selectedEvidence = selectedEvidenceIndex >= 0 ? evidence[selectedEvidenceIndex] : null;
+  const comparisonGroups = new Map<
+    string,
+    Partial<Record<'after' | 'before', VerifyEvidenceWithUrl>>
+  >();
+  for (const item of evidence) {
+    const comparison = evidenceComparison(item);
+    if (!comparison) continue;
+    const group = comparisonGroups.get(comparison.id) ?? {};
+    group[comparison.role] = item;
+    comparisonGroups.set(comparison.id, group);
+  }
+  const pairedEvidenceIds = new Set(
+    [...comparisonGroups.values()]
+      .filter((group) => group.before && group.after)
+      .flatMap((group) => [group.before!.id, group.after!.id]),
+  );
 
-    return (
-      <div className={styles.row}>
-        <button
-          className={styles.rowHead}
-          type={'button'}
-          onClick={() => hasBody && setOpen((o) => !o)}
-        >
-          <span style={{ color: meta.dot, display: 'flex' }}>
-            <Icon icon={meta.icon} size={16} />
-          </span>
-          <span className={styles.rowTitle} data-failed={verdict === 'failed'}>
-            {result.checkItemTitle || result.checkItemId}
-          </span>
-          <span className={styles.rowSide}>
-            {CATEGORY_ORDER.map((cat) =>
-              categoryCounts[cat] > 0 ? (
-                <span
-                  className={styles.evChip}
-                  key={cat}
-                  title={`${t(`report.evidence.category.${cat}`)} × ${categoryCounts[cat]}`}
-                >
-                  <Icon icon={CATEGORY_ICON[cat]} size={12} />
-                  {categoryCounts[cat]}
-                </span>
-              ) : null,
-            )}
-            {!result.required && (
-              <span className={styles.softTag}>{t('report.check.optional')}</span>
-            )}
-            {hasBody && (
-              <Icon className={styles.chev} data-open={open} icon={ChevronRight} size={14} />
-            )}
-          </span>
-        </button>
-        {open && hasBody && (
-          <div className={styles.rowBody}>
-            {result.toulmin?.evidence && (
-              <p className={styles.reasoning}>{result.toulmin.evidence}</p>
-            )}
-            {result.suggestion && <p className={styles.suggestion}>{result.suggestion}</p>}
-            {evidenceCount > 0 && (
-              <>
-                <div className={styles.evidenceList}>
-                  {result.evidence.map((e, index) =>
-                    isInlineEvidence(e) ? (
-                      <EvidenceItem evidence={e} index={index + 1} key={e.id} />
-                    ) : (
-                      <EvidenceFileButton
-                        evidence={e}
-                        index={index + 1}
-                        key={e.id}
-                        onClick={() => setSelectedEvidenceId(e.id)}
-                      />
-                    ),
-                  )}
-                </div>
-                {selectedEvidence && (
-                  <EvidenceDrawer
-                    evidence={[selectedEvidence]}
-                    open={Boolean(selectedEvidence)}
-                    title={evidenceDisplayName(selectedEvidence, t, selectedEvidenceIndex + 1)}
-                    onClose={() => setSelectedEvidenceId(null)}
-                  />
+  return (
+    <div className={styles.row}>
+      <button
+        className={styles.rowHead}
+        type={'button'}
+        onClick={() => hasBody && setOpen((o) => !o)}
+      >
+        <span style={{ color: meta.dot, display: 'flex' }}>
+          <Icon icon={meta.icon} size={16} />
+        </span>
+        <span className={styles.rowTitle} data-failed={state === 'failed'}>
+          {result?.checkItemTitle || planItem?.title || row.id}
+        </span>
+        <span className={styles.rowSide}>
+          {CATEGORY_ORDER.map((cat) =>
+            categoryCounts[cat] > 0 ? (
+              <span
+                className={styles.evChip}
+                key={cat}
+                title={`${t(`report.evidence.category.${cat}`)} × ${categoryCounts[cat]}`}
+              >
+                <Icon icon={CATEGORY_ICON[cat]} size={12} />
+                {categoryCounts[cat]}
+              </span>
+            ) : null,
+          )}
+          {state === 'not_executed' && (
+            <span className={styles.softTag}>{t('report.verdict.notExecuted')}</span>
+          )}
+          {!required && <span className={styles.softTag}>{t('report.check.optional')}</span>}
+          {hasBody && (
+            <Icon className={styles.chev} data-open={open} icon={ChevronRight} size={14} />
+          )}
+        </span>
+      </button>
+      {open && hasBody && (
+        <div className={styles.rowBody}>
+          {(planConfig.method || planConfig.expected || requiredEvidence.length > 0) && (
+            <div className={styles.planDetail}>
+              {planConfig.method && (
+                <>
+                  <span className={styles.planDetailLabel}>{t('report.plan.method')}</span>
+                  <span>{planConfig.method}</span>
+                </>
+              )}
+              {planConfig.expected && (
+                <>
+                  <span className={styles.planDetailLabel}>{t('report.plan.expected')}</span>
+                  <span>{planConfig.expected}</span>
+                </>
+              )}
+              {/* The media this item is *required* to produce. Not decoration: a
+                  missing one fails the item through the executor's coverage gate,
+                  so a reader can see what the check was contractually owed. */}
+              {requiredEvidence.length > 0 && (
+                <>
+                  <span className={styles.planDetailLabel}>
+                    {t('report.plan.requiredEvidence')}
+                  </span>
+                  <span className={styles.surfaceList}>
+                    {requiredEvidence.map((spec) => (
+                      <span className={styles.surfaceChip} key={spec.type} title={spec.hint}>
+                        <Icon icon={CATEGORY_ICON[evidenceCategory(spec.type)]} size={12} />
+                        {t(`report.evidence.medium.${spec.type}`)}
+                      </span>
+                    ))}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+          {state === 'not_executed' && (
+            <p className={styles.notExecutedHint}>{t('report.plan.notExecutedHint')}</p>
+          )}
+          {result?.toulmin?.evidence && (
+            <p className={styles.reasoning}>{result.toulmin.evidence}</p>
+          )}
+          {result?.suggestion && <p className={styles.suggestion}>{result.suggestion}</p>}
+          {evidenceCount > 0 && (
+            <>
+              <div className={styles.evidenceList}>
+                {[...comparisonGroups.entries()].map(([id, group]) =>
+                  group.before && group.after ? (
+                    <EvidenceComparisonView after={group.after} before={group.before} key={id} />
+                  ) : null,
                 )}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  },
-);
+                {evidence.map((e, index) =>
+                  pairedEvidenceIds.has(e.id) ? null : isInlineEvidence(e) ? (
+                    <EvidenceItem evidence={e} index={index + 1} key={e.id} />
+                  ) : (
+                    <EvidenceFileButton
+                      evidence={e}
+                      index={index + 1}
+                      key={e.id}
+                      onClick={() => setSelectedEvidenceId(e.id)}
+                    />
+                  ),
+                )}
+              </div>
+              {selectedEvidence && (
+                <EvidenceDrawer
+                  evidence={[selectedEvidence]}
+                  open={Boolean(selectedEvidence)}
+                  title={evidenceDisplayName(selectedEvidence, t, selectedEvidenceIndex + 1)}
+                  onClose={() => setSelectedEvidenceId(null)}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
 
 CheckRow.displayName = 'CheckRow';
 
@@ -1522,23 +1683,34 @@ const pullRequestLabel = (
   });
 };
 
-const CodingScopeCard = memo<{ context: VerifyCodingScope | null | undefined }>(({ context }) => {
+/**
+ * One line of provenance: the PR, the code, when, and where it ran. Reference
+ * material — the reader scans it to place the report, then moves on — so it
+ * stays subordinate to the verdict and the summary above it, and never grows
+ * into a stack of labelled rows.
+ */
+const CodingScopeCard = memo<{
+  context: VerifyCodingScope | null | undefined;
+  origin?: VerifyRunOrigin;
+}>(({ context, origin }) => {
   const { t } = useTranslation('verify');
   if (!context) return null;
 
-  const { branch, commit, entry, focus, pullRequest, surfaces, testedAt } = context;
+  const { branch, commit, entry, pullRequest, testedAt } = context;
   const hasPullRequest = Boolean(
     pullRequest && (pullRequest.number !== undefined || pullRequest.title || pullRequest.url),
   );
   const date = formatScopeDate(testedAt);
+  const surfaces = renderableSurfaces(context.surfaces);
+  const originTopicId = origin?.topicId;
   const hasScope =
     Boolean(branch) ||
     Boolean(commit) ||
     Boolean(entry) ||
-    Boolean(focus) ||
     hasPullRequest ||
-    Boolean(surfaces?.length) ||
-    Boolean(date);
+    surfaces.length > 0 ||
+    Boolean(date) ||
+    Boolean(originTopicId);
 
   if (!hasScope) return null;
 
@@ -1556,154 +1728,82 @@ const CodingScopeCard = memo<{ context: VerifyCodingScope | null | undefined }>(
 
   return (
     <div className={styles.codingScope}>
-      {(hasPullRequest || branch || commit || date) && (
-        <div className={styles.codingScopeMain}>
-          {pullRequestContent &&
-            (pullRequestUrl ? (
-              <a
-                className={styles.prChip}
-                data-link={true}
-                href={pullRequestUrl}
-                rel="noreferrer"
-                target="_blank"
-                title={pullRequest?.title ?? pullRequestUrl}
-              >
-                {pullRequestContent}
-              </a>
-            ) : (
-              <span className={styles.prChip} title={pullRequest?.title}>
-                {pullRequestContent}
+      {pullRequestContent && (
+        <div className={styles.scopePullRequestLine}>
+          {pullRequestUrl ? (
+            <a
+              className={styles.prChip}
+              data-link={true}
+              href={pullRequestUrl}
+              rel="noreferrer"
+              target="_blank"
+              title={pullRequest?.title ?? pullRequestUrl}
+            >
+              {pullRequestContent}
+            </a>
+          ) : (
+            <span className={styles.prChip} title={pullRequest?.title}>
+              {pullRequestContent}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className={styles.scopeMetaLine}>
+        {branch && (
+          <span className={styles.branchChip} title={branch}>
+            <Icon icon={GitBranch} size={15} />
+            <code>{branch}</code>
+          </span>
+        )}
+        {commit && (
+          <span className={styles.commitChip} title={commit}>
+            <Icon icon={GitCommit} size={14} />
+            <code>{shortCommit}</code>
+          </span>
+        )}
+        {date && (
+          <span className={styles.scopeMetaItem}>
+            <Icon icon={CalendarClock} size={13} />
+            <span>{date}</span>
+          </span>
+        )}
+        {surfaces.length > 0 && (
+          <span className={styles.surfaceList}>
+            {surfaces.map((surface) => (
+              <span className={styles.surfaceChip} key={surface}>
+                <Icon icon={SURFACE_ICON[surface]} size={12} />
+                {t(`report.surface.${surface}`)}
               </span>
             ))}
-          {branch && (
-            <span className={styles.branchChip} title={branch}>
-              <Icon icon={GitBranch} size={15} />
-              <code>{branch}</code>
-            </span>
-          )}
-          {commit && (
-            <span className={styles.commitChip} title={commit}>
-              <Icon icon={GitCommit} size={14} />
-              <code>{shortCommit}</code>
-            </span>
-          )}
-          {date && (
-            <span className={styles.scopeMetaItem}>
-              <Icon icon={CalendarClock} size={13} />
-              <span>{date}</span>
-            </span>
-          )}
-        </div>
-      )}
-
-      {(surfaces?.length || entry) && (
-        <div className={styles.scopeMetaRow}>
-          {surfaces && surfaces.length > 0 && (
-            <span className={styles.scopeMetaItem}>
-              <Icon icon={Layers} size={13} />
-              <span className={styles.surfaceList}>
-                {surfaces.map((surface) => (
-                  <span className={styles.surfaceChip} key={surface}>
-                    {surface}
-                  </span>
-                ))}
-              </span>
-            </span>
-          )}
-          {entry && (
-            <span className={styles.scopeMetaItem} title={entry}>
-              <Icon icon={Terminal} size={13} />
-              <code>{entry}</code>
-            </span>
-          )}
-        </div>
-      )}
-
-      {focus && (
-        <div className={styles.scopeFocus}>
-          <Icon icon={Target} size={13} />
-          <span>{focus}</span>
-        </div>
-      )}
+          </span>
+        )}
+        {entry && (
+          <span className={cx(styles.scopeMetaItem, styles.scopeEntry)} title={entry}>
+            <Icon icon={Terminal} size={13} />
+            <code>{entry}</code>
+          </span>
+        )}
+        {/* Only ever rendered for the report's author — the server redacts `origin`
+            from a bundle fetched by anyone else holding the shared link. */}
+        {originTopicId && (
+          <a
+            className={cx(styles.scopeMetaItem, styles.originLink)}
+            href={`/chat?topic=${originTopicId}`}
+            rel="noreferrer"
+            target="_blank"
+            title={t('report.scope.origin')}
+          >
+            <Icon icon={MessagesSquare} size={13} />
+            <Icon icon={ExternalLink} size={11} />
+          </a>
+        )}
+      </div>
     </div>
   );
 });
 
 CodingScopeCard.displayName = 'CodingScopeCard';
-
-const CheckOverviewPanel = memo<{
-  failed: number;
-  passed: number;
-  total: number;
-  uncertain: number;
-}>(({ failed, passed, total, uncertain }) => {
-  const { t } = useTranslation('verify');
-  const hasBlockingItems = failed > 0 || uncertain > 0;
-  const metrics = [
-    { key: 'total', label: t('report.overview.total'), value: total },
-    { color: cssVar.colorError, key: 'failed', label: t('report.overview.failed'), value: failed },
-    {
-      color: cssVar.colorWarning,
-      key: 'uncertain',
-      label: t('report.overview.uncertain'),
-      value: uncertain,
-    },
-    {
-      color: cssVar.colorSuccess,
-      key: 'passed',
-      label: t('report.overview.passed'),
-      value: passed,
-    },
-  ];
-
-  return (
-    <aside aria-label={t('report.overview.title')} className={styles.sideRail}>
-      <section className={styles.overviewCard}>
-        <div className={styles.overviewTitle}>
-          <Icon icon={ClipboardList} size={14} />
-          {t('report.overview.title')}
-        </div>
-        <div className={styles.overviewGrid}>
-          {metrics.map((item) => (
-            <div className={styles.overviewMetric} key={item.key}>
-              <div className={styles.overviewMetricValue} style={{ color: item.color }}>
-                {item.value}
-              </div>
-              <div className={styles.overviewMetricLabel}>{item.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className={styles.overviewCard}>
-        <div className={styles.overviewTitle}>
-          <Icon icon={ShieldCheck} size={14} />
-          {t('report.overview.nextTitle')}
-        </div>
-        {hasBlockingItems ? (
-          <div className={styles.nextList}>
-            {failed > 0 && (
-              <div className={styles.nextItem}>
-                <Icon icon={CircleHelp} size={14} style={{ color: cssVar.colorError }} />
-                <span>{t('report.overview.nextFailed')}</span>
-              </div>
-            )}
-            {uncertain > 0 && (
-              <div className={styles.nextItem}>
-                <Icon icon={CircleHelp} size={14} style={{ color: cssVar.colorWarning }} />
-                <span>{t('report.overview.nextUncertain')}</span>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className={styles.nextEmpty}>{t('report.overview.nextPassed')}</div>
-        )}
-      </section>
-    </aside>
-  );
-});
-
-CheckOverviewPanel.displayName = 'CheckOverviewPanel';
 
 /**
  * The report detail pane. Renders the verdict hero, a sticky verdict-filter bar,
@@ -1711,10 +1811,14 @@ CheckOverviewPanel.displayName = 'CheckOverviewPanel';
  * and the full narrative behind a collapsed disclosure. Addressed by `:runId`;
  * refreshes itself while the run is non-terminal.
  */
-const ReportViewer = memo(() => {
+interface ReportViewerProps {
+  runId?: string;
+}
+
+const ReportViewer = memo<ReportViewerProps>(({ runId: explicitRunId }) => {
   const { t } = useTranslation('verify');
-  const { runId } = useParams<{ runId: string }>();
-  const verifyRunId = runId ?? null;
+  const { runId: routeRunId } = useParams<{ runId: string }>();
+  const verifyRunId = explicitRunId ?? routeRunId ?? null;
   const { data, error, isLoading, mutate } = useVerifyReportBundle(verifyRunId);
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -1727,9 +1831,7 @@ const ReportViewer = memo(() => {
 
   const ordered = useMemo(() => {
     if (!data) return [];
-    return [...data.results].sort(
-      (a, b) => SEVERITY_RANK[checkVerdict(a)] - SEVERITY_RANK[checkVerdict(b)],
-    );
+    return buildCheckRows((data.run.plan as VerifyCheckItem[] | null) ?? null, data.results);
   }, [data]);
 
   if (!verifyRunId) {
@@ -1773,20 +1875,28 @@ const ReportViewer = memo(() => {
       : null;
 
   const counts = ordered.reduce(
-    (acc, r) => {
-      acc[checkVerdict(r)] += 1;
+    (acc, row) => {
+      acc[row.state] += 1;
       return acc;
     },
-    { failed: 0, passed: 0, uncertain: 0 } as Record<Verdict, number>,
+    { failed: 0, not_executed: 0, passed: 0, uncertain: 0 } as Record<CheckState, number>,
   );
-  const total = report?.totalChecks ?? ordered.length;
-  const passed = report?.passedChecks ?? counts.passed;
-  const failed = report?.failedChecks ?? counts.failed;
-  const uncertain = report?.uncertainChecks ?? counts.uncertain;
-  const verdict = (report?.verdict as Verdict | null) ?? null;
-  const visible = filter === 'all' ? ordered : ordered.filter((r) => checkVerdict(r) === filter);
+  // A chip's count is a promise about the rows behind it, so whenever there are
+  // rows they are the truth — the report's own stats count the cases it ingested
+  // and know nothing about a planned check that never produced one. Only an
+  // empty list falls back to them (a report can exist before any result does).
+  const hasRows = ordered.length > 0;
+  const total = hasRows ? ordered.length : (report?.totalChecks ?? 0);
+  const passed = hasRows ? counts.passed : (report?.passedChecks ?? 0);
+  const failed = hasRows ? counts.failed : (report?.failedChecks ?? 0);
+  const uncertain = hasRows ? counts.uncertain : (report?.uncertainChecks ?? 0);
+  const verdict = (report?.verdict as VerifyVerdict | null) ?? null;
+  const visible = filter === 'all' ? ordered : ordered.filter((row) => row.state === filter);
   const isCodingReport = run.scenario === 'coding';
   const interactionCost = readInteractionCost(run.metadata);
+  // The server strips `origin` for anyone but the author; `isOwner` keeps the
+  // affordance off the page for a visitor even if that ever regressed.
+  const origin = data.isOwner ? run.metadata?.origin : undefined;
 
   const chips: { count: number; dot?: string; key: Filter; label: string }[] = [
     { count: total, key: 'all', label: t('report.filter.all') },
@@ -1797,111 +1907,121 @@ const ReportViewer = memo(() => {
       key: 'uncertain',
       label: t('report.filter.uncertain'),
     },
+    // Only a report with a stored plan can have these, so the chip appears only
+    // when there is something to filter to.
+    ...(counts.not_executed > 0
+      ? [
+          {
+            count: counts.not_executed,
+            dot: cssVar.colorTextQuaternary,
+            key: 'not_executed' as const,
+            label: t('report.filter.notExecuted'),
+          },
+        ]
+      : []),
     { count: passed, dot: cssVar.colorSuccess, key: 'passed', label: t('report.filter.passed') },
   ];
 
   return (
     <div className={styles.scroll}>
       <div className={styles.page}>
-        <div className={styles.reportLayout}>
-          <main className={styles.reportMain}>
-            <Flexbox gap={12}>
-              <div className={styles.heroLine}>
-                {verdict && (
-                  <span
-                    className={styles.pill}
-                    style={{
-                      background: VERDICT_META[verdict].bg,
-                      color: VERDICT_META[verdict].color,
-                    }}
-                  >
-                    <Icon icon={VERDICT_META[verdict].icon} size={15} />
-                    {t(`report.verdict.${verdict}`)}
-                  </span>
-                )}
-                <Text as={'h1'} style={{ fontSize: 24, lineHeight: 1.3, margin: 0 }}>
-                  {run.title || t('report.titleFallback')}
-                </Text>
-              </div>
-
-              {!isCodingReport && run.goal && <Text className={styles.summary}>{run.goal}</Text>}
-              {report?.summary && <Text className={styles.summary}>{report.summary}</Text>}
-
-              {isCodingReport && <CodingScopeCard context={run.context} />}
-
-              {liveStatus && (
-                <div className={styles.liveBanner}>
-                  <Icon icon={Clock3} size={14} />
-                  {t(liveStatusLabelKey[liveStatus])}
-                </div>
-              )}
-            </Flexbox>
-
-            <div className={styles.stats}>
-              {chips.map((c) => (
-                <button
-                  className={styles.chip}
-                  data-active={filter === c.key}
-                  key={c.key}
-                  type={'button'}
-                  onClick={() => setFilter(c.key)}
+        <main>
+          <Flexbox gap={12}>
+            <div className={styles.heroLine}>
+              <Text as={'h1'} style={{ fontSize: 24, lineHeight: 1.3, margin: 0 }}>
+                {run.title || t('report.titleFallback')}
+              </Text>
+              {verdict && (
+                <span
+                  className={styles.pill}
+                  style={{
+                    background: VERDICT_META[verdict].bg,
+                    color: VERDICT_META[verdict].color,
+                  }}
                 >
-                  {c.dot && <span className={styles.dot} style={{ background: c.dot }} />}
-                  {c.label} <b>{c.count}</b>
-                </button>
-              ))}
-              {typeof report?.overallConfidence === 'number' && (
-                <span className={`${styles.chip} ${styles.score}`}>
-                  {t('report.stats.confidence')}{' '}
-                  <b>{Math.round(report.overallConfidence * 100)}%</b>
+                  <Icon icon={VERDICT_META[verdict].icon} size={15} />
+                  {t(`report.verdict.${verdict}`)}
                 </span>
               )}
             </div>
 
-            {visible.length > 0 ? (
-              <div className={styles.checks}>
-                {visible.map((r) => (
-                  <CheckRow
-                    key={r.id}
-                    result={r}
-                    defaultOpen={
-                      checkVerdict(r) === 'failed' || r.evidence.some(isInlineVisualEvidence)
-                    }
-                  />
-                ))}
+            {!isCodingReport && run.goal && <Text className={styles.summary}>{run.goal}</Text>}
+            {report?.summary && <Text className={styles.summary}>{report.summary}</Text>}
+
+            {isCodingReport && <CodingScopeCard context={run.context} origin={origin} />}
+
+            {liveStatus && (
+              <div className={styles.liveBanner}>
+                <Icon icon={Clock3} size={14} />
+                {t(liveStatusLabelKey[liveStatus])}
               </div>
-            ) : (
-              <Block align={'center'} padding={24}>
-                <Text type={'secondary'}>{t('report.filterEmpty')}</Text>
-              </Block>
             )}
+          </Flexbox>
 
-            {report?.content && (
-              <details className={styles.narrative}>
-                <summary className={styles.narrativeSummary}>
-                  <Icon icon={ChevronRight} size={13} />
-                  {t('report.sections.details')}
-                </summary>
-                <div className={styles.narrativeBody}>
-                  <Markdown>{report.content}</Markdown>
-                </div>
-              </details>
+          <div className={styles.stats}>
+            {chips.map((c) => (
+              <button
+                className={styles.chip}
+                data-active={filter === c.key}
+                key={c.key}
+                type={'button'}
+                onClick={() => setFilter(c.key)}
+              >
+                {c.dot && <span className={styles.dot} style={{ background: c.dot }} />}
+                {c.label} <b>{c.count}</b>
+              </button>
+            ))}
+            {typeof report?.overallConfidence === 'number' && (
+              <span className={`${styles.chip} ${styles.score}`}>
+                {t('report.stats.confidence')} <b>{Math.round(report.overallConfidence * 100)}%</b>
+              </span>
             )}
+          </div>
 
-            {interactionCost && (
-              <details className={styles.narrative}>
-                <summary className={styles.narrativeSummary}>
-                  <Icon icon={ChevronRight} size={13} />
-                  {t('report.interaction.title')}
-                </summary>
-                <div className={styles.interactionCostBody}>
-                  <InteractionCostPanel cost={interactionCost} />
-                </div>
-              </details>
-            )}
-          </main>
-          <CheckOverviewPanel failed={failed} passed={passed} total={total} uncertain={uncertain} />
-        </div>
+          {visible.length > 0 ? (
+            <div className={styles.checks}>
+              {visible.map((row) => (
+                <CheckRow
+                  key={row.id}
+                  row={row}
+                  defaultOpen={
+                    row.state === 'failed' ||
+                    row.state === 'not_executed' ||
+                    (row.result?.evidence ?? []).some(isInlineVisualEvidence)
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <Block align={'center'} padding={24}>
+              <Text type={'secondary'}>{t('report.filterEmpty')}</Text>
+            </Block>
+          )}
+
+          {report?.content && (
+            <details className={styles.narrative}>
+              <summary className={styles.narrativeSummary}>
+                <Icon icon={ChevronRight} size={13} />
+                {t('report.sections.details')}
+              </summary>
+              <div className={styles.narrativeBody}>
+                <Markdown>{report.content}</Markdown>
+              </div>
+            </details>
+          )}
+
+          {interactionCost && (
+            <details className={styles.narrative}>
+              <summary className={styles.narrativeSummary}>
+                <Icon icon={ChevronRight} size={13} />
+                {t('report.interaction.title')}
+              </summary>
+              <div className={styles.interactionCostBody}>
+                <InteractionCostPanel cost={interactionCost} />
+              </div>
+            </details>
+          )}
+        </main>
       </div>
     </div>
   );

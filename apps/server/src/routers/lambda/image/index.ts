@@ -281,8 +281,8 @@ export const imageRouter = router({
 
       log('Database transaction completed successfully. Starting async task triggers directly.');
 
-      // Step 2: Trigger background image generation tasks using after() API
-      log('Starting async image generation tasks with after()');
+      // Step 2: Trigger background image generation tasks.
+      log('Starting async image generation tasks');
 
       try {
         log('Creating unified async caller for userId: %s', userId);
@@ -297,7 +297,7 @@ export const imageRouter = router({
 
         // Fire-and-forget: trigger async tasks without awaiting
         // These calls go to the async router which handles them independently
-        // Do NOT use after() here as it would keep the lambda alive unnecessarily
+        // Do not schedule here; the async router handles these tasks independently.
         generationsWithTasks.forEach(({ generation, asyncTaskId }) => {
           log('Starting background async task %s for generation %s', asyncTaskId, generation.id);
 

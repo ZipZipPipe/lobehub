@@ -8,7 +8,7 @@ import {
 } from '@lobechat/prompts';
 import { isCommandPressed } from '@lobechat/utils';
 import type { IEditor, ISlashMenuOption, ISlashSectionOption } from '@lobehub/editor';
-import { INSERT_MENTION_COMMAND, ReactAutoCompletePlugin, ReactMathPlugin } from '@lobehub/editor';
+import { INSERT_MENTION_COMMAND, ReactAutoCompletePlugin } from '@lobehub/editor';
 import { Editor, useEditorState } from '@lobehub/editor/react';
 import { combineKeys } from '@lobehub/ui';
 import { css, cx } from 'antd-style';
@@ -489,10 +489,7 @@ const InputEditor = memo<{
   const richRenderProps = useMemo(() => {
     const basePlugins = !enableRichRender
       ? CHAT_INPUT_EMBED_PLUGINS
-      : createChatInputRichPlugins({
-          linkPlugin: false,
-          mathPlugin: Editor.withProps(ReactMathPlugin, {}),
-        });
+      : createChatInputRichPlugins({ linkPlugin: false });
 
     const plugins = autoCompletePlugin ? [...basePlugins, autoCompletePlugin] : basePlugins;
 

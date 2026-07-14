@@ -9,10 +9,14 @@ export const labPreferSelectors = {
     false,
   enableAgentSelfIteration: (s: UserState): boolean =>
     s.preference.lab?.enableAgentSelfIteration ?? false,
+  enableArtifactDeployment: (s: UserState): boolean =>
+    s.preference.lab?.enableArtifactDeployment ?? false,
+  enableClaudeCodeSdk: (s: UserState): boolean => s.preference.lab?.enableClaudeCodeSdk ?? false,
   enableFleet: (s: UserState): boolean => s.preference.lab?.enableFleet ?? false,
   enableFoldFinishedTurn: (s: UserState): boolean =>
     s.preference.lab?.enableFoldFinishedTurn ?? false,
   enableImessage: (s: UserState): boolean => s.preference.lab?.enableImessage ?? false,
+  enableInAppBrowser: (s: UserState): boolean => s.preference.lab?.enableInAppBrowser ?? false,
   enableInputMarkdown: (s: UserState): boolean =>
     s.preference.lab?.enableInputMarkdown ?? DEFAULT_PREFERENCE.lab?.enableInputMarkdown ?? true,
   enableMessageTextSelectionActions: (s: UserState): boolean =>

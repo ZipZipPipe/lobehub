@@ -5,7 +5,13 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { registerVerifyCommand } from './verify';
+import {
+  originFromEnv,
+  planFromResult,
+  registerVerifyCommand,
+  reportEvidence,
+  surfacesFromResult,
+} from './verify';
 
 const { mockTrpcClient } = vi.hoisted(() => ({
   mockTrpcClient: {
@@ -230,5 +236,238 @@ describe('verify init command', () => {
     expect(out.skill).toBe('verify');
     expect(out.written).toContain('SKILL.md');
     expect(existsSync(path.join(out.dir, 'SKILL.md'))).toBe(true);
+  });
+});
+
+describe('reportEvidence — comparison normalization', () => {
+  it('accepts plain string paths', () => {
+    expect(reportEvidence('assets/a.png')).toEqual([{ path: 'assets/a.png' }]);
+    expect(reportEvidence(['a.png', 'b.png']).map((e) => e.path)).toEqual(['a.png', 'b.png']);
+  });
+
+  it('keeps a comparison that carries both an id and a before/after role', () => {
+    const [before, after] = reportEvidence([
+      { comparison: { id: 'row', role: 'before' }, path: 'before.png' },
+      { comparison: { id: 'row', label: '改后', role: 'after' }, path: 'after.png' },
+    ]);
+
+    expect(before.comparison).toEqual({
+      id: 'row',
+      label: undefined,
+      layout: undefined,
+      role: 'before',
+    });
+    expect(after.comparison).toEqual({
+      id: 'row',
+      label: '改后',
+      layout: undefined,
+      role: 'after',
+    });
+  });
+
+  it('passes a vertical layout through and ignores any other value', () => {
+    const forLayout = (layout: unknown) =>
+      reportEvidence([{ comparison: { id: 'row', layout, role: 'before' }, path: 'a.png' }])[0]
+        .comparison?.layout;
+
+    expect(forLayout('vertical')).toBe('vertical');
+    // Side by side is the default, so anything unrecognized simply falls back to it.
+    expect(forLayout('horizontal')).toBeUndefined();
+    expect(forLayout('diagonal')).toBeUndefined();
+    expect(forLayout(undefined)).toBeUndefined();
+  });
+
+  // The report viewer pairs on `id`, so an id-less comparison could never render
+  // side by side — dropping it here keeps the upload honest instead of shipping
+  // metadata the UI silently ignores.
+  it('drops a comparison missing an id, keeping the image as ordinary evidence', () => {
+    const [item] = reportEvidence([{ comparison: { role: 'before' }, path: 'before.png' }]);
+
+    expect(item).toEqual({ comparison: undefined, description: undefined, path: 'before.png' });
+  });
+
+  it('drops a comparison whose role is absent or unrecognized', () => {
+    expect(
+      reportEvidence([{ comparison: { id: 'x', role: 'middle' }, path: 'a.png' }])[0].comparison,
+    ).toBeUndefined();
+    expect(
+      reportEvidence([{ comparison: { id: 'x' }, path: 'a.png' }])[0].comparison,
+    ).toBeUndefined();
+  });
+
+  it('supports the `file` / `desc` aliases and skips entries with no path', () => {
+    expect(
+      reportEvidence([{ desc: 'a shot', file: 'a.png' }, { comparison: { id: 'x' } }]),
+    ).toEqual([{ comparison: undefined, description: 'a shot', path: 'a.png' }]);
+  });
+});
+
+describe('surfacesFromResult — surface normalization', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit');
+    }) as never);
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+  });
+
+  it('canonicalizes known aliases and dedupes', () => {
+    expect(surfacesFromResult({ surfaces: ['electron', 'cli', 'desktop'] })).toEqual([
+      'desktop',
+      'cli',
+    ]);
+  });
+
+  it('rejects a value that names no surface instead of silently dropping it', () => {
+    // Free-form surfaces are how the field rotted: prose, runtime modes and test
+    // kinds all ended up in it. Failing here puts the fix in the author's hands
+    // while they still have the context to make it.
+    expect(() =>
+      surfacesFromResult({ surfaces: ['Electron 打包版（app.isPackaged=true）'] }),
+    ).toThrow('process.exit');
+    expect(() => surfacesFromResult({ surfaces: ['unit'] })).toThrow('process.exit');
+  });
+
+  it('returns undefined when the report names no surfaces at all', () => {
+    expect(surfacesFromResult({})).toBeUndefined();
+    expect(surfacesFromResult({ surfaces: [] })).toBeUndefined();
+  });
+});
+
+describe('planFromResult — plan item normalization', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit');
+    }) as never);
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+  });
+
+  it('fills every frozen-item field the author does not write', () => {
+    expect(planFromResult({ plan: [{ id: '1', title: 'logs are persisted' }] })).toEqual([
+      {
+        description: undefined,
+        id: '1',
+        index: 0,
+        onFail: 'manual',
+        required: true,
+        title: 'logs are persisted',
+        verifierConfig: {},
+        verifierType: 'agent',
+      },
+    ]);
+  });
+
+  it('honors the declared verifier instead of assuming every check is agent-judged', () => {
+    const [item] = planFromResult({
+      plan: [{ id: '1', title: 'cli returns a tree', verifier: 'program' }],
+    })!;
+
+    expect(item.verifierType).toBe('program');
+  });
+
+  it('carries requiredEvidence, which the executor coverage gate actually enforces', () => {
+    const [item] = planFromResult({
+      plan: [
+        {
+          id: '1',
+          requiredEvidence: ['screenshot', { hint: 'the raw command output', type: 'text' }],
+          title: 'ui renders',
+        },
+      ],
+    })!;
+
+    expect(item.verifierConfig).toEqual({
+      requiredEvidence: [
+        { hint: undefined, type: 'screenshot' },
+        { hint: 'the raw command output', type: 'text' },
+      ],
+    });
+  });
+
+  it('rejects an out-of-vocabulary verifier or evidence medium', () => {
+    // An unrecognized medium would gate on nothing — silently weaker than no gate.
+    expect(() => planFromResult({ plan: [{ id: '1', title: 't', verifier: 'eyeball' }] })).toThrow(
+      'process.exit',
+    );
+    expect(() =>
+      planFromResult({ plan: [{ id: '1', requiredEvidence: ['vibes'], title: 't' }] }),
+    ).toThrow('process.exit');
+  });
+
+  it('carries how the check would be made and what it expected', () => {
+    const [item] = planFromResult({
+      plan: [{ expected: 'the file exists', id: '1', method: 'tail the log', title: 'logs' }],
+    })!;
+
+    expect(item.verifierConfig).toEqual({ expected: 'the file exists', method: 'tail the log' });
+  });
+
+  it('keys items by the same id the cases use, so results pair back to them', () => {
+    const items = planFromResult({ plan: [{ id: 'case-a', title: 'a' }, { title: 'b' }] })!;
+
+    expect(items.map((i) => i.id)).toEqual(['case-a', 'case-2']);
+  });
+
+  it('drops an item that names no check', () => {
+    expect(planFromResult({ plan: [{ id: '1' }] })).toEqual([]);
+  });
+
+  it('distinguishes "no plan field" from "an empty plan", so a re-ingest can CLEAR a stale one', () => {
+    // Absent → undefined → `updateRun` omits it → whatever is stored stays.
+    expect(planFromResult({})).toBeUndefined();
+
+    // Present but empty → `[]` → the stored plan is overwritten with nothing.
+    // Without this, re-ingesting a reused report dir whose plan was emptied
+    // would leave the PREVIOUS round's plan attached, and every one of its items
+    // would render as "not run" against a report that never planned them.
+    expect(planFromResult({ plan: [] })).toEqual([]);
+  });
+});
+
+describe('originFromEnv — in-app provenance', () => {
+  const saved = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it('reads the conversation the agent runtime echoed into the child env', () => {
+    process.env.LOBEHUB_AGENT_ID = 'agt_1';
+    process.env.LOBEHUB_TOPIC_ID = 'tpc_1';
+    process.env.LOBEHUB_OPERATION_ID = 'op_1';
+
+    expect(originFromEnv()).toEqual({
+      agentId: 'agt_1',
+      operationId: 'op_1',
+      topicId: 'tpc_1',
+    });
+  });
+
+  it('never takes its operationId from --operation, which names the run under TEST', () => {
+    // `--operation` links the session to the Agent Run being verified; origin is
+    // the run that AUTHORED the report. Conflating them attributes the report to
+    // its own subject — exactly the provenance this is meant to preserve.
+    process.env.LOBEHUB_OPERATION_ID = 'op_authoring_run';
+
+    expect(originFromEnv()?.operationId).toBe('op_authoring_run');
+    // The flag is passed to `createRun` separately; it must not reach here at all.
+    expect(originFromEnv).toHaveLength(0);
+  });
+
+  it('is undefined outside a LobeHub-spawned agent — a plain terminal is not an error', () => {
+    delete process.env.LOBEHUB_AGENT_ID;
+    delete process.env.LOBEHUB_TOPIC_ID;
+    delete process.env.LOBEHUB_OPERATION_ID;
+
+    expect(originFromEnv()).toBeUndefined();
   });
 });

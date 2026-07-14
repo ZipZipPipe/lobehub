@@ -2,13 +2,13 @@ import { AGENT_CHAT_TOPIC_URL } from '@lobechat/const';
 import type { ChatTopicStatus } from '@lobechat/types';
 import { type MenuProps } from '@lobehub/ui';
 import { Icon } from '@lobehub/ui';
-import { confirmModal } from '@lobehub/ui/base-ui';
 import { App } from 'antd';
 import {
-  CheckCircle2,
-  Circle,
+  Archive,
+  ArchiveRestore,
   ExternalLink,
   FolderInput,
+  Forward,
   Hash,
   Link2,
   LucideCopy,
@@ -26,6 +26,8 @@ import { useActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspa
 import { openRenameModal } from '@/components/RenameModal';
 import { isDesktop } from '@/const/version';
 import { createMoveTopicsModal } from '@/features/AgentTopicManager/MoveTopicsModal';
+import { createTopicForwardModal } from '@/features/Conversation/MessageForward/TopicForwardModal';
+import { confirmRemoveTopic } from '@/features/DeleteTopicConfirm';
 import { openShareModal } from '@/features/ShareModal';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
@@ -35,6 +37,7 @@ import { useAgentStore } from '@/store/agent';
 import { useChatStore } from '@/store/chat';
 import { useElectronStore } from '@/store/electron';
 import { useGlobalStore } from '@/store/global';
+import { isForbiddenError } from '@/utils/forbiddenError';
 
 interface TopicItemDropdownMenuProps {
   fav?: boolean;
@@ -92,7 +95,7 @@ export const useTopicItemDropdownMenu = ({
     return [
       {
         disabled: !canEditTopic,
-        icon: <Icon icon={isCompleted ? Circle : CheckCircle2} />,
+        icon: <Icon icon={isCompleted ? ArchiveRestore : Archive} />,
         key: 'markCompleted',
         label: isCompleted ? t('actions.unmarkCompleted') : t('actions.markCompleted'),
         onClick: () => {
@@ -137,7 +140,15 @@ export const useTopicItemDropdownMenu = ({
             defaultValue: title,
             description: t('renameModal.description', { ns: 'topic' }),
             onSave: async (newTitle) => {
-              await updateTopicTitle(id, newTitle);
+              try {
+                await updateTopicTitle(id, newTitle);
+              } catch (error) {
+                message.error(
+                  isForbiddenError(error)
+                    ? t('manageOnlyCreator', { ns: 'common' })
+                    : t('operationFailed', { ns: 'common' }),
+                );
+              }
             },
             title: t('renameModal.title', { ns: 'topic' }),
           });
@@ -205,6 +216,16 @@ export const useTopicItemDropdownMenu = ({
         },
       },
       {
+        disabled: !canCreateTopic || !activeAgentId,
+        icon: <Icon icon={Forward} />,
+        key: 'forwardToAgent',
+        label: t('actions.forwardToAgent'),
+        onClick: () => {
+          if (!activeAgentId) return;
+          createTopicForwardModal({ sourceAgentId: activeAgentId, topicId: id, topicTitle: title });
+        },
+      },
+      {
         disabled: !canEditTopic,
         icon: <Icon icon={FolderInput} />,
         key: 'moveToAgent',
@@ -233,15 +254,19 @@ export const useTopicItemDropdownMenu = ({
         key: 'delete',
         label: t('delete', { ns: 'common' }),
         onClick: () => {
-          confirmModal({
-            cancelText: t('cancel', { ns: 'common' }),
-            content: t('actions.confirmRemoveTopic'),
-            okButtonProps: { danger: true },
-            okText: t('delete', { ns: 'common' }),
-            onOk: async () => {
-              await removeTopic(id);
+          void confirmRemoveTopic({
+            onConfirm: async (removeFiles) => {
+              try {
+                await removeTopic(id, removeFiles);
+              } catch (error) {
+                message.error(
+                  isForbiddenError(error)
+                    ? t('manageOnlyCreator', { ns: 'common' })
+                    : t('operationFailed', { ns: 'common' }),
+                );
+              }
             },
-            title: t('delete', { ns: 'common' }),
+            topicIds: [id],
           });
         },
       },

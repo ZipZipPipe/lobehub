@@ -255,6 +255,44 @@ Re-tested end-to-end against the running dev server. The previous claim ("blocks
   show `0` even though the agent owns them in the DB; click **清空筛选 / Clear filters** (or
   `setStatus('all')` + clear) to reveal them.
 
+### A9. ✅ WORKS — before/after visual diffing by checking out the OLD file, but HMR is NOT trustworthy for it
+
+- **Situation**: producing labeled before→after evidence for a UI/style change (Case 5 requires a
+  real "before" render, not a code-derived guess). The clean way is to write the pre-change version
+  of the file into the working tree (`git show <base>:<path> > <path>`), capture, then restore.
+- **Doesn't work — silently**: assuming Vite HMR applied the swap. In this run the FIRST swap
+  hot-applied fine, and the SECOND one did not: the file on disk was the old version while the
+  renderer kept the new computed styles for 24s+ of polling. Screenshots taken then would have been
+  the AFTER state mislabeled as BEFORE — a Case-5 failure that no screenshot review would catch,
+  because both look plausible.
+- **Works — gate every capture on a measured version signal, not on a sleep**: pick a property that
+  differs between the two versions and read it back with `getComputedStyle` before shooting.
+  ```bash
+  # after writing the old file, confirm the OLD css is actually live
+  agent-browser --cdp 9222 eval '(function(){var i=document.querySelector("<selector>");
+    var s=getComputedStyle(i);return JSON.stringify({pos:s.position,bg:s.backgroundColor})})()'
+  # expect the OLD values; if not, force a full reload and re-enter the surface
+  agent-browser --cdp 9222 eval 'location.reload(); 1'
+  ```
+  A full reload resets SPA state, so budget for re-navigating and re-establishing any fixture
+  (re-open the tab, re-drag a resizable panel, …). Restore the new file the same way and re-measure
+  before the AFTER shots.
+- **Corollary — a layout change may be invisible at the default size.** A `flex: 1` right-alignment
+  fix renders identically to the broken version in a narrow container (the content already fills the
+  row); the difference only appears once there is slack. Drive the app's own resize affordance with
+  real mouse events before concluding "no visual change":
+  ```bash
+  # DraggablePanel handle: .ant-draggable-panel-left-handle (find via getComputedStyle cursor: col-resize)
+  agent-browser --cdp 9222 mouse move < handleX > 500
+  agent-browser --cdp 9222 mouse down left
+  for X in 1050 900 750 600 420; do
+    agent-browser --cdp 9222 mouse move $X 500
+    sleep 0.2
+  done
+  agent-browser --cdp 9222 mouse up left
+  ```
+  (zsh does not word-split unquoted vars — inline the `--cdp` flags, don't stash them in `$AB`.)
+
 ---
 
 ## B. Cache / stale state that MASKS the failure
@@ -335,6 +373,21 @@ Re-tested end-to-end against the running dev server. The previous claim ("blocks
 
 ## C. Probing app / store runtime state
 
+### C0. A picker backed by a list store may need fixture hydration after direct-route entry
+
+- **Situation**: a modal reads candidate entities from a list store, while the test enters a
+  detail route directly. The detail route can render from its own entity/config store without
+  ever mounting the list fetcher, so the picker correctly renders an empty candidate list even
+  though fixture rows exist in the database.
+- **Doesn't work**: inserting database rows alone, or refreshing the detail store. Neither
+  hydrates a separate list store that has not mounted its fetch hook.
+- **Works**: first enter the canonical list/home surface and let its real fetch settle. If the
+  fixture deliberately bypasses normal creation and the list API still does not expose it,
+  use the existing C1b dev-only `setState` exposer to hydrate the list store with the exact
+  fixture shape, then exercise the real picker component and remove the exposer patch after
+  capture. Keep the report explicit that fixture hydration was test setup; validate the actual
+  mutation and created entity through the database or network boundary.
+
 ### C1. `window.__LOBE_STORES.<name>` has no `.getState` — CALL it instead
 
 - **Doesn't work**: `window.__LOBE_STORES.page.getState()`. The exposed value is neither the
@@ -413,6 +466,30 @@ Re-tested end-to-end against the running dev server. The previous claim ("blocks
   - the toast → find the leaf node matching the message, climb while the subtree
     text stays short, then read its `button`s (`[Close, 重试]`).
     Pick fixture names that do NOT contain any state keyword you'll assert on.
+
+### C6. ✅ WORKS — read a topic's metadata (workingDirectoryConfig etc.) from the chat store, and reset to a fresh topic
+
+- **Doesn't work**: `chat().topicsMap[topicId]` / `chat().topicDataMap[topicId]` — there is
+  no per-topic-id map. `topicDataMap` is keyed by **view key** (`agent_<agentId>`), and each
+  value is a paginated view object (`{ items, total, hasMore, … }`), not a topic.
+- **Works** (verified while E2E-testing `git worktree add` side-effect recording):
+  ```js
+  var c = window.__LOBE_STORES.chat();
+  var view = c.topicDataMap['agent_' + agentId];
+  var topic = (view.items || []).find(function (x) {
+    return x.id === c.activeTopicId;
+  });
+  topic.metadata.workingDirectoryConfig; // ← e.g. git.activeWorktree written by recordGitCommandEffects
+  ```
+- **Fresh topic without touching the UI**: `await c.openNewTopicOrSaveTopic()` — with an
+  active topic it saves/exits to the agent's no-topic compose state (activeTopicId → null),
+  so the next send creates a new topic. Chain per-case fixtures this way instead of clicking
+  "Start New Topic". The contenteditable ref changes after the switch — re-run
+  `snapshot -i -C` before typing.
+- Full E2E loop this enabled: E11 fixture agent (`heterogeneousProvider: { type: 'claude-code' },
+executionTarget: 'local'` in `agencyConfig`) + one message per case asking CC to run a
+  specific shell command → poll `chat().operations` for `running === 0` → assert the
+  topic's metadata via the probe above. A real CC one-command turn completes in \~10–20s.
 
 ---
 
@@ -636,6 +713,27 @@ Re-tested end-to-end against the running dev server. The previous claim ("blocks
   DOM shows markup that contradicts the source, curl the dev server for the file and grep for a token you
   just added (`curl -s 127.0.0.1:<vitePort>/src/path/File.tsx | grep -c myNewSymbol`) before blaming the
   code. `electron-dev.sh stop <id>` then start again to get a clean server.
+
+### E8b. The standalone `apps/desktop` install BREAKS the root workspace's type resolution — re-run the root install after it
+
+- **Situation**: a worktree set up per E8 (`pnpm install` at the root, then
+  `cd apps/desktop && pnpm install`). Everything runs — Electron boots, the renderer serves live
+  code — but a full `bun run type-check` that passed BEFORE the desktop install now fails with
+  dozens of errors that have nothing to do with the change under test:
+  `Module '"@lobechat/types"' has no exported member 'MetaData' | 'HotkeyId' | …` plus
+  `Type 'UserHotkeyConfig' is missing the following properties from type 'UserHotkeyConfig'` —
+  the same name on both sides, i.e. **two copies of `@lobechat/types` in one program**.
+- **Doesn't work**: chasing it as a code defect, or checking the symlink
+  (`node_modules/@lobechat/types → ../../packages/types` looks correct) and `packages/types/node_modules`
+  (its deps are all present). Both look fine while the program still sees two instances.
+- **Cause**: `apps/desktop` is NOT in the root pnpm workspace (see E8). Its standalone install
+  re-resolves the `packages/*` links from its own lockfile and rewrites shared package deps under
+  `packages/*/node_modules`, leaving the root workspace pointing at a second instance.
+- **Works**: run `pnpm install` at the worktree root ONE MORE TIME, after the desktop install
+  (\~1.5 min, mostly cached). Type-check goes back to 0 errors and Electron keeps working.
+  So the safe order is: root install → desktop install → root install again. And never publish a
+  "type-check failed" verdict from a worktree until you've re-run the root install — the failure is
+  environmental, and the error text (a type "missing properties from" itself) is the tell.
 
 ### E9. Electron dev's FIRST cold boot sits on the splash with an empty `#root` for 1–3 minutes
 
@@ -895,3 +993,293 @@ agents. Set` `agentRules: false` `in next.config to disable.` and leaves the wor
 - **Works**: name the ignored directory explicitly (`grep -rl "agentRules" node_modules`), which
   overrides the ignore, or call `/usr/bin/grep` directly. Before asserting "X exists nowhere",
   re-run the search with an explicit path into the dependency tree.
+
+### E14. Electron `will-attach-webview` params carry NO custom attributes — identity via data-\* never arrives
+
+- **Situation**: a main-process controller needs to know WHICH renderer feature a mounting
+  `<webview>` belongs to (e.g. a per-conversation session id), and the renderer put it in a
+  custom `data-*` attribute on the element.
+- **Doesn't work**: reading `params['data-…']` in `will-attach-webview`. Measured live: params
+  only contains the standard set (`instanceId, partition, src, httpreferrer, useragent,
+nodeintegration, plugins, disablewebsecurity, allowpopups, preload, …`). The handler silently
+  no-ops and — trap — a unit test that mocks params WITH the custom key passes green.
+- **Works**: two-channel design. (1) Recognition/hardening keyed off the **`partition`
+  attribute** set by the renderer (it IS forwarded); (2) identity bound after mount via an
+  explicit IPC — renderer listens for the webview's `dom-ready`, calls
+  `attach({ sessionId, webContentsId: el.getWebContentsId() })`, main process
+  `webContents.fromId()` + validates the guest's session belongs to the expected partition.
+
+### E16. agent-browser session silently re-targets to a newly created `<webview>` guest
+
+- **Situation**: driving an Electron app over CDP while the app itself spawns a `<webview>`
+  (in-app browser). After the guest mounts, `eval` on the SAME session suddenly returns the
+  guest page's DOM (`__LOBE_STORES` undefined, app selectors empty) — looks like the app broke.
+- **Doesn't work**: assuming a session stays pinned to the app target; also assuming
+  `document.querySelectorAll('webview').length === 0` means "no webview" (you may be evaluating
+  INSIDE the guest).
+- **Works**: `curl -s localhost:<cdp>/json/list` to see targets (`page` = app, `webview` =
+  guest), then use **separate session names** per target (`--session app-x` re-picks the `page`
+  target; the old session keeps following the guest — handy for driving the embedded page).
+  Verify with `get url` (`app://` vs the site URL) before trusting any eval result.
+
+### E17. Dev-mode main-process `logger.warn/debug` is invisible without DEBUG env — probe with console.log
+
+- **Situation**: adding a temporary probe log in Electron main code and watching the dev
+  instance log; nothing prints, which reads as "code path never runs".
+- **Doesn't work**: `createLogger(ns).warn/debug` in development — it routes to the `debug`
+  package, which is silent unless `DEBUG=<ns>` was set when the process started.
+- **Works**: temporary probes use `console.log('[AGENT-TEST] …')` (always reaches the instance
+  log via stdout); confirm the rebuilt bundle actually contains the probe string
+  (`grep "<probe>" apps/desktop/dist/main/index.js`) before interpreting silence.
+
+### D15. Host-page CDP screenshot renders the `<webview>` region BLACK intermittently — guest DOM eval is ground truth
+
+- **Situation**: capturing evidence of an Electron in-app browser (`<webview>` in a sidebar).
+  Early `Page.captureScreenshot` shots of the host page included the guest's pixels; minutes
+  later the same command on the same target returned the webview region uniformly black
+  (byte-identical output across retries), while the app chrome around it rendered fine.
+- **Doesn't work**: concluding the embedded page went blank/failed from the host screenshot,
+  or retrying the host capture. The guest was healthy the whole time: an `agent-browser`
+  session following the webview target (E16) read `document.title` = the expected page and
+  full body text.
+- **Works**: treat the guest target as the source of truth — eval `title`/`innerText` in the
+  webview target for the assertion, and capture the guest's own pixels via a session pinned
+  to the `webview` target (`agent-browser screenshot` there) when the embedded page's visual
+  matters. Use host-page screenshots only for the app chrome around the webview. Cause of the
+  black compositing not established (OOPIF surface not composited into the host capture).
+
+### E18. Cloud-connected desktop routes even `local` agents to the SERVER runtime — force client with `disableGatewayMode`
+
+- **Situation**: verifying a **client-only** builtin tool (`executors: ['client']`) via a real agent turn on the desktop. The agent's `executionTarget` is `local` and the tool-enable gate (`isLocalSystemEnabled` = runtime `local`) passes, so it _looks_ like it will run client-side.
+- **Doesn't work**: sending the message as-is. On a cloud-connected desktop, gateway mode is on by default, so the run dispatches to `execServerAgentRuntime` (server/queue path) even for a `local` agent. The client-only tool isn't executable there — the model flails and returns a non-answer (e.g. "browser closed") with no real tool effect. Confirm the path by reading the running op's `type` in `window.__LOBE_STORES.chat().operations` (`execServerAgentRuntime` = server; `executeToolCall` = client).
+- **Works**: set the agent's `chatConfig.disableGatewayMode = true` (via `agentStore.updateAgentChatConfigById(id, { disableGatewayMode: true })`) before sending. The run then goes through `executeToolCall` (client runtime); the composer's runtime chip flips to "Local device" and the client executor runs. The gate (`isLocalSystemEnabled`) and the transport (`disableGatewayMode`) are INDEPENDENT — enabling the tool does not force client execution.
+
+### E19. Desktop has no classic session store — reconfigure the existing agent, don't `createSession`
+
+- **Situation**: wanting a throwaway agent for a real-turn test without polluting the user's agent.
+- **Doesn't work**: `sessionStore.createSession({...})` — the desktop app doesn't use the classic session store (`sessions` is `[]`, `activeId` is `'inbox'`); agents are a server-backed model in `agentStore.agentMap` keyed by `agt_...`. The created session never becomes the active agent.
+- **Works**: back up the active agent's full config (`model`, `provider`, `agencyConfig`, relevant `chatConfig`), reconfigure it in place (`updateAgentConfigById` + `updateAgentChatConfigById`), run the test, then restore every field and clear any injected key-vault entry. Also: `chat.sendMessage` requires `context: { agentId, topicId, isNew }` or it throws `Cannot destructure property 'agentId' of 'context'`. Reads right after an `updateAgent*` can be stale — re-read after \~1.5s to confirm persistence.
+
+### C7. DB-seeded task rows need a `task_`-prefixed id or `resolve()` silently misses them
+
+- **Situation**: seeding a `tasks` row directly in SQL for a router probe, with a
+  hand-written id like `tsk_foo`, then calling a task procedure — it 404s
+  ("Task not found") even though the row exists and the caller is a member.
+- **Doesn't work**: any id not starting with `task_`. `TaskModel.resolve()`
+  (`packages/database/src/models/task.ts:220-223`) only treats the input as a row
+  id when it starts with `task_`; everything else is upper-cased and looked up as
+  a workspace `identifier` (e.g. `T-1`), so `tsk_foo` becomes the identifier
+  lookup `TSK_FOO` → null.
+- **Works**: use the idGenerator prefix (`task_<suffix>`) for seeded ids, or pass
+  the row's `identifier` (`T-<seq>`) to the procedure instead.
+
+### F1. Seeding a shared topic by raw SQL: messages MUST carry `agent_id`, or the share page renders skeletons forever
+
+- **Situation**: fixture-seeding a `/share/t/<id>` page (topics + messages + `topic_shares`
+  rows inserted directly). `share.getSharedTopic` returns fine, but the message list stays on
+  skeletons; `message.getMessages` with `topicShareId` returns `[]`.
+- **Cause**: the client passes `agentId` in the query context and `MessageModel.query` filters
+  on it — messages inserted with `agent_id` NULL are silently excluded (no error anywhere).
+- **Works**: set `agent_id` on every seeded message row (matching the topic's `agent_id`).
+  Probe the endpoint directly before blaming the UI:
+  `/trpc/lambda/message.getMessages?input={"json":{"topicId":..,"topicShareId":..,"agentId":..}}`.
+
+### F2. Seeded share topics also need `topics.agent_id`, or the client never fires the message fetch
+
+- **Situation**: same setup as F1, but the failure is one layer earlier — metadata (title)
+  renders while `message.getMessages` never even appears in network requests.
+- **Doesn't work**: assuming the fetch failed — it was never fired. `useFetchMessages`
+  gates on `!!context.agentId && !!context.topicId`
+  (`src/store/chat/slices/message/actions/query.ts:268`), and the share page passes
+  `agentId: data.agentId ?? ''` — a topic seeded without `agent_id` yields `''` → SWR key
+  is null → no request, silent skeleton (a Case-1 lookalike with no error anywhere).
+- **Works**: seed an `agents` row and set `topics.agent_id` (and `messages.agent_id`)
+  before opening the share page. Verify the fetch actually fired via
+  `agent-browser network requests | grep getMessages`, not by waiting on the UI.
+
+### E15. ✅ Next dev does NOT hot-reload `apps/server/**` — you are testing STALE compiled server code
+
+- **Situation**: verifying a working-tree change inside `apps/server/src/**` (an agent-runtime
+  service, a tool executor, a router) against a `bun run dev` server that was started before the
+  edit. The app behaves normally, the feature simply does nothing.
+- **Doesn't work**: assuming HMR covers it because `@/server/*` maps to `apps/server/src/*` in
+  `tsconfig.json` (source, no `dist`), so it "should" recompile. It does not, at least for large
+  service files. Measured: a `console.error` added at the top of a code path that demonstrably ran
+  (child ops were created, the DB rows appeared) printed **zero** lines across four separate runs;
+  after a dev-server restart, the same line printed on the first run. The whole feature under test
+  had never executed once.
+- **Why this is a trap and not a nuisance**: the failure mode is silent and looks exactly like a
+  logic bug. You will go hunting in your own diff for a fault that is not there.
+- **Works**: after ANY edit under `apps/server/**`, restart the dev server before drawing a
+  conclusion. If a run "should" have hit your code and didn't, prove the server is running your
+  code FIRST — drop a `console.error` on the path and restart — before debugging the code itself.
+
+### E16. ✅ `source`-ing an unquoted JSON env var silently corrupts it (JWKS\_KEY → gateway auth\_failed)
+
+- **Situation**: writing an env file for the local gateway loop with
+  `JWKS_KEY={"keys":[{"kty":"RSA",...}]}` on one line, then `set -a; source that-file`.
+- **Doesn't work**: the shell strips every double quote from an unquoted assignment, so the process
+  receives `{keys:[{kty:RSA,...}]}` — invalid JSON. `getJwksKey()` (`packages/trpc/src/utils/internalJwt.ts:13-20`)
+  throws on `JSON.parse`, `signUserJWT` throws, and the server hands the client an **empty** gateway
+  token. The browser sends `{"token":"","type":"auth"}` and the gateway answers `auth_failed`.
+- **What makes it genuinely deceptive**: `local-gateway-setup.sh` and `local-gateway-probe.mjs` read
+  `JWKS_KEY` out of the file with a **regex**, not by sourcing it — so both are unaffected. The probe
+  cheerfully prints `✅ auth_success` while the real browser path is broken. A green probe is NOT
+  evidence the app's own token works.
+- **Works**: single-quote the value in the env file (`export JWKS_KEY='{"keys":[...]}'`) and prove the
+  round-trip before starting the server:
+  ```bash
+  (source env-file && node -e 'JSON.parse(process.env.JWKS_KEY); console.log("ok")')
+  ```
+  To diagnose an `auth_failed`, hook `ws.send` in the page and read the token the client actually
+  sends — an empty string means the SERVER failed to sign, not that the gateway rejected a signature.
+
+### E17. The chat input silently refuses to send when the agent's model is retired
+
+- **Situation**: driving a real turn (store `sendMessage` or type+Enter). The call resolves, no error
+  is thrown, `activeTopicId` stays `null`, and no `agent_operations` row appears. Nothing in the dev
+  server log — the request is never even issued.
+- **Cause**: the composer shows a small inline warning ("当前模型已下线。请选择其他模型后继续使用。")
+  and disables send. A model id that was valid a while ago (e.g. `deepseek-chat`) can be retired from
+  the model bank while the agent row still points at it.
+- **Works**: read the actually-enabled models out of the store before configuring a fixture agent —
+  `window.__LOBE_STORES.aiInfra().enabledChatModelList` → `[{id: provider, children: [{id: model}]}]` —
+  and pick one from there. Also: a send that "resolves fine but creates no operation" is a UI-gate
+  symptom; **screenshot the composer** instead of re-reading your store call.
+
+### E18. Fresh-worktree `seed-user` dies on `Cannot find module 'bcryptjs'` — NODE\_PATH into .pnpm fixes it
+
+- **Situation**: in a fresh git-worktree install, `init-dev-env.sh seed-user`
+  (which runs `node <<'NODE'` from the repo root) throws MODULE\_NOT\_FOUND for
+  `bcryptjs`, even though `pnpm install` succeeded.
+- **Cause not fully established**: `bcryptjs` exists in `node_modules/.pnpm/`
+  but is not linked at the repo-root `node_modules` top level in that install
+  (`pg` was linked, `bcryptjs` wasn't), so a root-cwd stdin script can't
+  resolve it.
+- **Works**: prefix the call with
+  `NODE_PATH="$PWD/node_modules/.pnpm/bcryptjs@<ver>/node_modules"` (check the
+  exact version dir first). CJS stdin scripts honor NODE\_PATH; seeding then
+  completes normally.
+- Same run also (re)confirmed: `init-dev-env.sh dev` ports are DYNAMIC (e.g.
+  next on 33803, vite on 32459) — never hardcode 3010; re-run
+  `scripts/test-env.sh` after the server is up, it reads the ports-file. And
+  the `os error 35` agent-browser daemon wedge (D8) recovers with
+  `agent-browser close --all` + re-running `setup-auth.sh web-seed`.
+
+### C7. `document.body.innerText` is ALWAYS 0 in this app — probe `#root`, and use textContent to tell a wedge from a blank
+
+- **Situation**: asserting rendered text with `document.body.innerText.includes(...)`. It returns `""` / length 0 even on a fully rendered page, so every text assertion silently fails and reads as "the page is blank".
+- **Works**: probe `document.getElementById('root').innerText`. (Cause not established — some ancestor of `#root` makes body's inner-text computation collapse; `#root` itself is fine.)
+- **Bonus diagnostic**: `innerText` needs layout, `textContent` does not. When `#root` gives `innerText === 0` but `textContent > 0`, the DOM is fine and the RENDERER is not painting (see D16) — as opposed to a genuinely empty DOM, where both are 0.
+
+### D16. Electron renderer compositor wedges after a mid-session Vite dep re-optimize — restart the instance
+
+- **Situation**: partway through a long Electron run the app stops painting: `cdp-screenshot.sh` returns `CAPTURED BUT BLACK`, `#root` `innerText` is 0 while `textContent` still holds the full DOM, and `document.visibilityState` reports `visible` with real `innerWidth/innerHeight`.
+- **Not the cause**: display sleep or Screen Recording permission (`check-screen-recording.sh` passes), and the window is not hidden — CDP capture would survive both (D9/D10).
+- **What precedes it**: the instance log shows Vite re-optimizing (`[vite] Re-optimizing dependencies because vite config has changed`) followed by `Failed to fetch dynamically imported module: .../node_modules/.vite/deps/…`. The renderer keeps its DOM but never composites another frame.
+- **Works**: `electron-dev.sh restart <id>`. `location.reload()` alone does NOT clear it. Login survives the restart (the userData dir is kept).
+
+### D17. Virtua message lists: driving `scrollTop` by hand blanks the conversation pane — use a SMALL fixture instead
+
+- **Situation**: hunting one specific message in a long imported conversation (400+ messages). Stepping `scrollContainer.scrollTop` in a loop to bring it into the virtualizer's window.
+- **Doesn't work**: the virtualizer unmounts the node as you scroll past it (a `TreeWalker` search then reports "not found" on a node that was there a second ago), and forcing `scrollTop` far outside the rendered window leaves the pane **completely blank** — the scroll container itself disappears from the DOM, which reads exactly like a render bug.
+- **Works**: pick a fixture with few messages so the target is on the first screen (for transcript-import tests: scan the corpus for a session with < \~15 messages that still has the feature under test). Cheaper and far more reliable than fighting the virtualizer.
+
+### D18. React controlled checkboxes ignore synthetic MouseEvents — use `agent-browser click <ref>` (trusted CDP input)
+
+- **Situation**: selecting a row in a modal list. `el.click()`, and even a full `pointerdown/mousedown/pointerup/mouseup/click` `dispatchEvent` sequence with correct coordinates, leave `checked === false` and the footer's primary button disabled.
+- **Cause**: the value is React-controlled; synthetic events are `isTrusted: false` and the component's state never updates.
+- **Works**: `agent-browser snapshot -i` for the ref, then `agent-browser click <ref>` — it goes through CDP `Input.dispatchMouseEvent`, which the page sees as a real user click. The same snapshot also tells you when a row is `[disabled]` (i.e. the app is deliberately refusing the selection), which a coordinate-click would never reveal.
+
+### E20. Killing the dev server mid-write corrupts `.next/dev` — every route 404s and `/` ↔ `/signin` ping-pong
+
+- **Situation**: after `init-dev-env.sh clean` (or any kill) and a restart, the whole app is broken: `/` 302s to `/signin`, `/signin` 307s back to `/` (`ERR_TOO_MANY_REDIRECTS` in the browser, `redirect count exceeded` in the dev server's own prewarm), and even API routes like `/api/auth/sign-in/email` return the app-router not-found. It looks like an auth/OIDC misconfiguration.
+- **Cause**: a corrupt Turbopack build in `.next/dev` — the route manifest is gone, so every path falls through to `GlobalNotFound`, whose redirect collides with the middleware's.
+- **Works**: `rm -rf .next` then restart. Diagnose it in one step: if `/signin` does not return 200, the routes are not compiled — stop debugging auth.
+
+### E21. ✅ WORKS — a QStash-protected workflow endpoint can't be curl'd; publish through local QStash to get a signed delivery
+
+- **Situation**: driving a cron-style workflow handler under `/api/workflows/**` (e.g. a dispatcher you want to fire on demand instead of waiting for its schedule).
+- **Doesn't work**: `curl -X POST <app>/api/workflows/<...>` → `{"error":"Invalid signature"}` / HTTP 401. The `qstashAuth` middleware verifies the Upstash signature whenever `QSTASH_CURRENT_SIGNING_KEY` is set — and `init-dev-env.sh` exports it, so the local env DOES verify. (Do not "fix" this by unsetting the key: you would then be testing an unauthenticated path that production doesn't have.)
+- **Works**: start local QStash (`init-dev-env.sh qstash`) and publish to the endpoint with the QStash client — QStash signs the delivery, so the handler sees exactly the production shape:
+  ```ts
+  // must live INSIDE the repo (a script under /tmp cannot resolve @upstash/qstash)
+  import { Client } from '@upstash/qstash';
+  const client = new Client({ baseUrl: process.env.QSTASH_URL!, token: process.env.QSTASH_TOKEN! });
+  await client.publishJSON({
+    body: { dryRun: false },
+    url: `${process.env.APP_URL}/api/workflows/<path>`,
+  });
+  ```
+  Run it with `eval "$(init-dev-env.sh env)" && bunx tsx ./scripts/<probe>.mts`, then read the outcome from **DB side effects**, not the HTTP body — QStash swallows the response. (A claim/lease row, a status transition, or new message rows are all observable; the handler's JSON return is not.)
+- **Time-travel a schedule instead of waiting**: for a "runs at T" feature, `UPDATE ... SET metadata = jsonb_set(metadata, '{...,runAt}', '"<past ISO>"')` and then fire the dispatcher. Cheaper and more deterministic than sleeping until the real due time.
+
+### E22. Local dev env has no `JWKS_KEY` — every hetero agent run dies at `signOperationJwt`
+
+- **Situation**: a real Claude Code / Codex run in the local no-`.env` env fails immediately with `Failed to sign operation JWT for hetero agent` (`apps/server/src/services/aiAgent/index.ts`). Nothing in the UI explains it; the topic just fails.
+- **Cause**: `signOperationJwt` → `getSigningKey()` → `getJwksKey()` needs the `JWKS_KEY` RSA JWK, and `init-dev-env.sh` does not export one.
+- **Works**: the repo ships a generator — `JWKS_KEY="$(node scripts/generate-oidc-jwk.mjs)" ./.agents/skills/agent-testing/scripts/init-dev-env.sh dev`. Must be present at dev-server **start** (it is read from `process.env`), so a running server has to be restarted.
+- **Note the failure is downstream-honest**: with `JWKS_KEY` set, the run proceeds and then fails at the hetero _sandbox_ (`Hetero sandbox spawn failed / unauthorized`) unless the agent has a real Claude Code token. Those are two different walls — don't read the second as the first.
+
+### D19. A hidden zero-size duplicate of the composer sits at (0,0) — `querySelector` grabs IT, not the visible one
+
+- **Situation**: driving the chat composer. `document.querySelector('[contenteditable]')` reads back `""` right after a successful `fill`, and `svg.lucide-plus` → `.closest('button')` resolves to a button whose click does nothing.
+- **Cause (measured, not guessed)**: the page renders a SECOND, hidden copy of the composer subtree at `x:0, y:0, width:0` — including its own contenteditable and its own action-bar buttons. It is first in DOM order, so every `querySelector` singular lookup picks the phantom. The real one is the second match. Cause of the duplicate not established (likely a measurement/offscreen render), but the fingerprint is unambiguous: a `getBoundingClientRect()` of all-zeros.
+- **Doesn't work**: `document.querySelector('[contenteditable]')`, `document.querySelector('svg.lucide-plus')` — both silently target the phantom. A `fill` that reports `✓ Done` can still leave the visible box empty-looking, and a click on the phantom button is a no-op with no error. This burned a full round chasing a "menu won't open" regression that did not exist.
+- **Works — always disambiguate by geometry or by an identifying attribute**:
+  ```js
+  // enumerate, never singular-select
+  [...document.querySelectorAll('[contenteditable]')]
+    .filter(e => e.getBoundingClientRect().width > 0)[0]
+  // or target by the component's own aria-label (survives DOM order)
+  [...document.querySelectorAll('[role=button],button')]
+    .find(b => b.getAttribute('aria-label') === '<the tooltip text>')
+  ```
+  Tag the resolved element with a `data-probe` attribute and drive it with `agent-browser click '[data-probe=...]'` (trusted CDP input, D18).
+- **Corollary**: the phantom also owns the tooltip text of whatever component it duplicates, so an `innerText`/aria grep can "find" a control that the user cannot see. Assert on `getBoundingClientRect()` before believing a control is present.
+### C8. ✅ An agent-browser session can silently LOSE its seeded cookies — a 401, not `document.cookie`, is the signal
+
+- **Situation**: verifying an owner-only affordance (a link the server renders only for the
+  report's author). The page rendered without it, and the bundle came back `isOwner: false`
+  even though the row's `userId` matched the seeded user — which reads exactly like a bug in
+  the ownership check.
+- **Doesn't work**: `document.cookie` as the auth probe. Better Auth's session cookie is
+  **httpOnly**, so `document.cookie` is legitimately `[]` on a fully authenticated page —
+  `cookieCount: 0` proves nothing either way.
+- **Doesn't work**: trusting `setup-auth.sh web-seed`'s success line for the rest of the run.
+  It verified the session at `/`; the session can still be empty later (this run's page had
+  also drifted to `about:blank` at one point — see D14).
+- **Works**: probe the SERVER, not the document — call any authed procedure from the page and
+  read the status. `401` = no session reached the server; `200` = you are really signed in.
+  ```js
+  const r = await fetch(
+    base +
+      '/trpc/lambda/user.getUserState?input=' +
+      encodeURIComponent(JSON.stringify({ json: {} })),
+    { credentials: 'include' },
+  );
+  r.status; // 401 → re-seed; 200 → the session is live
+  ```
+  Recover with `agent-browser close --all` + `setup-auth.sh web-seed`, then re-open the route.
+  After re-seeding, the same bundle returned `isOwner: true` with the owner-only link rendered —
+  the code was correct all along.
+- **Why it matters**: an auth-scoped assertion (owner-only / permission-gated UI) fails
+  IDENTICALLY whether the gate is broken or the session is missing. Always establish that the
+  session is live (a 200 from an authed procedure) BEFORE concluding the gate is wrong —
+  otherwise you publish a false bug against your own change.
+
+### E23. In zsh, a loop variable named `path` overwrites the command search path
+
+- **Situation**: parsing a Netscape cookie jar with `while read ... path ...` and then invoking
+  browser commands inside the loop. The first iteration succeeds at assigning the fields, but the
+  next executable fails with `command not found`.
+- **Cause**: zsh exposes `path` as a special array tied to `PATH`; assigning the cookie path field
+  (usually `/`) replaces the process command search path.
+- **Works**: name the field `cookie_path` (and similarly avoid other zsh special parameter names),
+  then pass it to the cookie command. This is a shell failure, not an auth or browser failure.
+
+### E24. Vite throws `EMFILE` — terminate Agent Testing and ask the user for help
+
+- **Situation**: an isolated frontend-only Vite surface exits at startup with `EMFILE: too many open files, watch`, while the intended port is free and the shell can successfully create thousands of `fs.watch` handles in a control process.
+- **Likely causes (not established)**: multiple LobeHub Cloud worktrees or clones are running file watchers; or a previously used workspace still has watchers owned by a surviving terminal process or a VS Code window, even after its visible terminal was closed.
+- **Required action**: immediately terminate Agent Testing, report the observed `EMFILE`, and ask the user to inspect and clean up other worktrees, terminal processes, or VS Code windows. Do not kill user-owned processes, close editor windows, change Vite watch mode, fall back to a one-shot static build, or publish a Verify report from a degraded surface.

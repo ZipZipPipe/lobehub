@@ -21,20 +21,19 @@ import {
   HeterogeneousAgentSessionErrorCode,
 } from '@lobechat/electron-client-ipc';
 import type { AskUserBridge } from '@lobechat/heterogeneous-agents/askUser';
-import { AskUserMcpServer } from '@lobechat/heterogeneous-agents/askUser';
-import type {
-  AgentContentBlock,
-  HeteroExecImageRef,
+import type { McpToolResult } from '@lobechat/heterogeneous-agents/builtinMcp';
+import { LobeBuiltinMcpServer } from '@lobechat/heterogeneous-agents/builtinMcp';
+import type { HeteroExecImageRef } from '@lobechat/heterogeneous-agents/protocol';
+import {
+  buildHeteroExecStdinPayload,
+  buildHeterogeneousPrompt,
 } from '@lobechat/heterogeneous-agents/protocol';
-import { buildHeteroExecStdinPayload } from '@lobechat/heterogeneous-agents/protocol';
 import type { AgentStreamEvent, UsageData } from '@lobechat/heterogeneous-agents/spawn';
 import {
   AgentStreamPipeline,
   buildAgentInput,
   ClaudeAgentSdkSession,
   createFileStoreImageUploader,
-  materializeImageToPath,
-  normalizeImage,
   readCodexSessionModel,
   resolveCliSpawnPlan,
   resolveCodexInitialModel,
@@ -44,6 +43,7 @@ import { app as electronApp, BrowserWindow } from 'electron';
 import { HETERO_AGENT_FILES_DIR, HETERO_AGENT_TRACING_DIR } from '@/const/heteroAgent';
 import { detectHeterogeneousCliCommand } from '@/modules/binaries';
 import { getHeterogeneousAgentDriver } from '@/modules/heterogeneousAgent';
+import { buildBrowserMcpTools } from '@/modules/heterogeneousAgent/browserMcpTools';
 import { fetchClaudeCodeQuota } from '@/modules/heterogeneousAgent/claudeCodeQuota';
 import { fetchCodexQuota } from '@/modules/heterogeneousAgent/codexQuota';
 import { createLambdaFileStorePort } from '@/modules/heterogeneousAgent/fileStorePort';
@@ -54,6 +54,7 @@ import type {
 import { buildProxyEnv } from '@/modules/networkProxy/envBuilder';
 import { createLogger } from '@/utils/logger';
 
+import BrowserControlCtr from './BrowserControlCtr';
 import { ControllerModule, IpcMethod } from './index';
 import RemoteServerConfigCtr from './RemoteServerConfigCtr';
 
@@ -134,6 +135,8 @@ interface StartSessionParams {
   env?: Record<string, string>;
   /** Session ID to resume (for multi-turn) */
   resumeSessionId?: string;
+  /** Run claude-code prompts through the Claude Agent SDK instead of CLI spawn (lab preference) */
+  useClaudeCodeSdk?: boolean;
 }
 
 interface StartSessionResult {
@@ -141,6 +144,11 @@ interface StartSessionResult {
 }
 
 interface SendPromptParams {
+  /**
+   * Agent this run belongs to. Binds the op to its in-app browser session
+   * (`agent:<agentId>`) so the browser MCP tools act on the right webview.
+   */
+  agentId?: string;
   /** Image attachments to include in the prompt (downloaded from url, cached by id) */
   imageList?: HeterogeneousAgentImageAttachment[];
   /**
@@ -232,6 +240,7 @@ interface AgentSession {
   resumeSessionId?: string;
   sdkSession?: ClaudeAgentSdkSession;
   sessionId: string;
+  useClaudeCodeSdk?: boolean;
   verifiedModel?: string;
   verifiedModelContextWindow?: number;
   verifiedModelProvider?: string;
@@ -275,9 +284,11 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
    * fire many ops over its lifetime).
    */
   private opIdToIntervention = new Map<string, InterventionSlot>();
+  /** Op → agent binding for browser MCP tool session resolution. */
+  private opIdToAgentId = new Map<string, string>();
   /** Lazy single MCP server, started on first claude-code prompt. */
-  private askUserMcpServer?: AskUserMcpServer;
-  private askUserMcpStartPromise?: Promise<AskUserMcpServer>;
+  private builtinMcpServer?: LobeBuiltinMcpServer;
+  private builtinMcpStartPromise?: Promise<LobeBuiltinMcpServer>;
 
   private get remoteServerConfigCtr() {
     return this.app.getController(RemoteServerConfigCtr);
@@ -544,6 +555,10 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
     return this.buildCliMissingError(session);
   }
 
+  /**
+   * Global env override (`LOBE_CLAUDE_CODE_SDK`) for the SDK runtime; the
+   * per-user Labs toggle arrives per session as `session.useClaudeCodeSdk`.
+   */
   private get isClaudeCodeSdkLabEnabled(): boolean {
     return CLAUDE_CODE_SDK_LAB_ENABLED_VALUES.has(
       String(process.env.LOBE_CLAUDE_CODE_SDK ?? '').toLowerCase(),
@@ -775,23 +790,29 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
    * the same listener. Concurrent first-callers de-dupe via the in-flight
    * promise so we don't bind two ports.
    */
-  private async ensureAskUserMcpServerStarted(): Promise<AskUserMcpServer> {
-    if (this.askUserMcpServer) return this.askUserMcpServer;
-    if (!this.askUserMcpStartPromise) {
-      this.askUserMcpStartPromise = (async () => {
-        const server = new AskUserMcpServer();
+  private async ensureBuiltinMcpServerStarted(): Promise<LobeBuiltinMcpServer> {
+    if (this.builtinMcpServer) return this.builtinMcpServer;
+    if (!this.builtinMcpStartPromise) {
+      this.builtinMcpStartPromise = (async () => {
+        const server = new LobeBuiltinMcpServer({
+          // In-app browser control tools ride the same per-op MCP server so
+          // CC can drive the browser sidebar (LOBE-11712 M3, hetero path).
+          extraTools: buildBrowserMcpTools((operationId, apiName, args) =>
+            this.runBrowserMcpTool(operationId, apiName, args),
+          ),
+        });
         await server.start();
-        this.askUserMcpServer = server;
+        this.builtinMcpServer = server;
         logger.info('AskUserQuestion MCP server started:', server.url);
         return server;
       })().catch((err) => {
         // Reset so a later sendPrompt can retry; surface the error.
-        this.askUserMcpStartPromise = undefined;
+        this.builtinMcpStartPromise = undefined;
         logger.error('Failed to start AskUserQuestion MCP server:', err);
         throw err;
       });
     }
-    return this.askUserMcpStartPromise;
+    return this.builtinMcpStartPromise;
   }
 
   /**
@@ -802,9 +823,11 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
    */
   private async setupInterventionForOp(
     operationId: string,
+    agentId?: string,
   ): Promise<{ bridge: AskUserBridge; cleanup: () => Promise<void>; tmpConfigPath: string }> {
-    const server = await this.ensureAskUserMcpServerStarted();
+    const server = await this.ensureBuiltinMcpServerStarted();
     const bridge = server.registerOperation(operationId);
+    if (agentId) this.opIdToAgentId.set(operationId, agentId);
     const tmpConfigPath = path.join(os.tmpdir(), `lobe-cc-mcp-${operationId}.json`);
 
     // `alwaysLoad: true` is the undocumented CC flag that promotes our
@@ -828,15 +851,60 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
     const cleanup = async () => {
       // Unregistering on the server cancels all bridge pendings AND closes
       // the events iterator (cancelAll fires from within unregisterOperation).
-      this.askUserMcpServer?.unregisterOperation(operationId);
+      this.builtinMcpServer?.unregisterOperation(operationId);
       await slot.pumpDone;
       this.opIdToIntervention.delete(operationId);
+      this.opIdToAgentId.delete(operationId);
       await unlink(tmpConfigPath).catch(() => {
         /* file may already be gone if app crashed mid-prompt */
       });
     };
 
     return { bridge, cleanup, tmpConfigPath };
+  }
+
+  /**
+   * Execute one in-app browser api call on behalf of a CC MCP tool. Forwards
+   * through `BrowserControlCtr.runGatewayToolCall` — the same funnel cloud
+   * gateway calls use — so the renderer-side `browserExecutor` (webview
+   * mount, snapshot refs, cursor overlay) stays the single source of truth.
+   */
+  private async runBrowserMcpTool(
+    operationId: string,
+    apiName: string,
+    args: Record<string, unknown>,
+  ): Promise<McpToolResult> {
+    const agentId = this.opIdToAgentId.get(operationId);
+    if (!agentId) {
+      return {
+        content: [
+          {
+            text: 'The in-app browser is not available for this run (no agent binding). Continue without it.',
+            type: 'text',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const result = await this.app
+      .getController(BrowserControlCtr)
+      .runGatewayToolCall(apiName, { ...args, __agentId: agentId });
+
+    const text =
+      result.content ?? result.error?.message ?? (result.success ? 'OK' : 'Browser action failed');
+    const content: McpToolResult['content'] = [{ text, type: 'text' }];
+
+    // Screenshot: hand the image back as an MCP image block so CC can
+    // actually see the page (unlike the homogeneous runtime's text-only echo).
+    if (apiName === 'screenshot') {
+      const dataUrl = (result.state as { dataUrl?: string } | undefined)?.dataUrl;
+      const match =
+        typeof dataUrl === 'string' ? dataUrl.match(/^data:(image\/[\w.+-]+);base64,(.+)$/) : null;
+      if (match) content.push({ data: match[2], mimeType: match[1], type: 'image' });
+    }
+
+    return { content, isError: !result.success };
   }
 
   // ─── File cache ───
@@ -846,82 +914,20 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
   }
 
   /**
-   * Convert a desktop image attachment list into shared content blocks. Each
-   * attachment's id is preserved as the cache key so repeated prompts hit the
-   * same on-disk entries.
-   */
-  private toImageContentBlocks(
-    imageList: HeterogeneousAgentImageAttachment[],
-  ): AgentContentBlock[] {
-    return imageList.map((image) => ({
-      source: { id: image.id, type: 'url', url: image.url },
-      type: 'image',
-    }));
-  }
-
-  /**
    * Build a Claude Code stream-json user message with text + base64 images.
-   * Delegates to the shared `buildAgentInput`; the desktop wrapper exists only
-   * to preserve the helper signature consumed by existing drivers.
+   * Semantic context is assembled by the shared prompt engine before the
+   * provider-specific serializer runs.
    */
   private async buildStreamJsonInput(
     prompt: string,
     imageList: HeterogeneousAgentImageAttachment[] = [],
     systemContext?: string,
   ): Promise<string> {
-    const blocks: AgentContentBlock[] = [];
-    if (systemContext && systemContext.length > 0)
-      blocks.push({ text: systemContext, type: 'text' });
-    if (prompt && prompt.length > 0) blocks.push({ text: prompt, type: 'text' });
-    blocks.push(...this.toImageContentBlocks(imageList));
-
-    const plan = await buildAgentInput('claude-code', blocks, { cacheDir: this.fileCacheDir });
+    const promptInput = buildHeterogeneousPrompt({ imageList, prompt, systemContext });
+    const plan = await buildAgentInput('claude-code', promptInput, {
+      cacheDir: this.fileCacheDir,
+    });
     return plan.stdin;
-  }
-
-  /**
-   * Materialize image attachments into stable filesystem paths for path-mode
-   * agents (Codex `--image <file>`). Fails the prompt if any image cannot be
-   * fetched / decoded — partially-attached prompts confuse the agent more
-   * than they help.
-   */
-  private async resolveCliImagePaths(
-    imageList: HeterogeneousAgentImageAttachment[] = [],
-  ): Promise<string[]> {
-    if (imageList.length === 0) return [];
-
-    const cacheDir = this.fileCacheDir;
-    const results = await Promise.allSettled(
-      imageList.map(async (image) => {
-        const normalized = await normalizeImage(
-          { id: image.id, type: 'url', url: image.url },
-          { cacheDir },
-        );
-        return materializeImageToPath(normalized, cacheDir);
-      }),
-    );
-
-    const imagePaths: string[] = [];
-    const failures: string[] = [];
-
-    for (const [index, result] of results.entries()) {
-      const imageId = imageList[index]?.id ?? `image-${index + 1}`;
-
-      if (result.status === 'fulfilled') {
-        imagePaths.push(result.value);
-        continue;
-      }
-
-      const message = this.getErrorMessage(result.reason) || 'Unknown error';
-      logger.error(`Failed to materialize image ${imageId} for CLI:`, result.reason);
-      failures.push(`${imageId}: ${message}`);
-    }
-
-    if (failures.length > 0) {
-      throw new Error(`Failed to attach image(s) to CLI: ${failures.join('; ')}`);
-    }
-
-    return imagePaths;
   }
 
   // ─── IPC methods ───
@@ -945,6 +951,7 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
       env: params.env,
       sessionId,
       resumeSessionId: params.resumeSessionId,
+      useClaudeCodeSdk: params.useClaudeCodeSdk,
     });
 
     logger.info('Session created:', { agentType, sessionId });
@@ -972,7 +979,10 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
       throw new Error(preflightError.message);
     }
 
-    if (session.agentType === 'claude-code' && this.isClaudeCodeSdkLabEnabled) {
+    if (
+      session.agentType === 'claude-code' &&
+      (session.useClaudeCodeSdk || this.isClaudeCodeSdkLabEnabled)
+    ) {
       return this.sendPromptWithClaudeSdk(params, session);
     }
 
@@ -981,7 +991,7 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
     // into `--mcp-config`. Codex / future agents skip this entirely.
     const intervention =
       session.agentType === 'claude-code'
-        ? await this.setupInterventionForOp(params.operationId).catch((err) => {
+        ? await this.setupInterventionForOp(params.operationId, params.agentId).catch((err) => {
             logger.warn('Failed to set up AskUserQuestion bridge — proceeding without it:', err);
             return undefined;
           })
@@ -994,18 +1004,29 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
     let spawnEnv: NodeJS.ProcessEnv;
     try {
       const driver = getHeterogeneousAgentDriver(session.agentType);
+      const promptInput = buildHeterogeneousPrompt({
+        imageList: params.imageList,
+        prompt: params.prompt,
+        systemContext: params.systemContext,
+      });
       spawnPlan = await driver.buildSpawnPlan({
         args: session.args,
         helpers: {
-          buildClaudeStreamJsonInput: (prompt, imageList) =>
-            this.buildStreamJsonInput(prompt, imageList, params.systemContext),
-          resolveCliImagePaths: (imageList) => this.resolveCliImagePaths(imageList),
+          buildAgentInput: async (agentType, input) => {
+            try {
+              return await buildAgentInput(agentType, input, { cacheDir: this.fileCacheDir });
+            } catch (error) {
+              logger.error('Failed to prepare heterogeneous agent input:', error);
+              throw new Error(
+                `Failed to attach image(s) to CLI: ${this.getErrorMessage(error) || 'Unknown error'}`,
+                { cause: error },
+              );
+            }
+          },
         },
-        imageList: params.imageList ?? [],
         mcpConfigPath: intervention?.tmpConfigPath,
-        prompt: params.prompt,
+        promptInput,
         resumeSessionId: session.agentSessionId,
-        systemContext: params.systemContext,
       });
 
       // Fall back to the user's Desktop so the process never inherits
@@ -1655,7 +1676,7 @@ export default class HeterogeneousAgentCtr extends ControllerModule {
       // CC's stdio close races shutdown we'd leave the MCP server bound to
       // a port. Stopping it here cancels every still-pending bridge with
       // `session_ended` and closes the listener.
-      void this.askUserMcpServer?.stop().catch((err) => {
+      void this.builtinMcpServer?.stop().catch((err) => {
         logger.warn('AskUserQuestion MCP server stop error:', err);
       });
     });

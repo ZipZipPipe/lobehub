@@ -7,6 +7,24 @@
 
 ---
 
+## Case 18 — Treating a status badge as proof that the error message rendered
+
+**Wrong approach**: marking an error-state UI case as passed because the platform page showed
+the `Failed` badge, while the screenshot only contained an unrelated configuration reminder
+and did not show the error alert or its translated message.
+
+**Why it's wrong**: the badge proves only that a failed runtime state reached the page. It does
+not prove that `errorCode` was translated and presented to the user, which is the core assertion
+of an error-message verification.
+
+**What it breaks**: a report can claim that users receive an actionable explanation while its
+visual evidence shows no explanation at all.
+
+**Correct approach**: for an error-presentation case, visually require all three signals in the
+same screenshot: the target platform, the failed status, and the error alert containing the
+expected user-facing message. Any unrelated warning or setup reminder does not satisfy the
+error-message assertion.
+
 ## Case 1 — Judging `passed` from heuristics instead of looking at the screenshot
 
 **Wrong approach**: after navigating to a surface, deciding "renders fine /
@@ -130,10 +148,32 @@ before from after.
 and it takes another round to re-explain.
 
 **Correct approach**: never ship a raw stale/before screenshot as standalone
-evidence. If a contrast helps, build ONE labeled before→after composite (e.g. sharp:
-crop the region from each, add a "BEFORE …/AFTER …" header bar, place side by side)
-and attach that single image. Evidence for a passed case = the after state (or a
-clearly-labeled comparison), full stop.
+evidence. When a contrast helps, use the report format's **native comparison pairing**
+— attach both raw screenshots and tag them with a shared `comparison` id, and the
+verify page renders them side by side under Before / After headings
+([report.md](./report.md#L64-78)):
+
+```json
+"evidence": [
+  { "path": "assets/before.png", "comparison": { "id": "layout", "role": "before" } },
+  { "path": "assets/after.png", "comparison": { "id": "layout", "role": "after" } }
+]
+```
+
+**Do NOT hand-compose the two shots into one image with sharp** (an earlier version of
+this note told you to, and an agent duly shipped stacked red/green banner images — the
+user asked why the report ignored the spec). The page owns the labeling; a composite
+also bakes in a fixed layout, can't be zoomed per side, and duplicates the heading the
+page already draws. Evidence for a passed case = the after state, or a `comparison`
+pair, full stop.
+
+Two more traps in the same area:
+
+- **One evidence item per case, not the same image reused across cases.** Attaching the
+  same before/after pair to two different cases makes the report look padded and leaves
+  the second case with no evidence of its own claim.
+- A group needs **exactly one `before` and one `after`** — an incomplete group silently
+  degrades to ordinary (unlabeled) evidence, i.e. straight back into this bug.
 
 ## Case 6 — `app://renderer` desktop instance runs the STALE built bundle, not working-tree code
 
@@ -427,3 +467,93 @@ live branch, measure the target URL/bundle, and use that path if it renders curr
 code. Only keep a harness as supporting evidence; the primary UI evidence must come
 from the product surface, or the report must clearly fail/block after every known
 path is measured.
+
+---
+
+## Case 17 — Using a fixed timeout to arbitrate competing nested popovers
+
+**Wrong approach**: when a row-level hover popover competes with a nested action
+popover, closing the hover surface and suppressing it for an arbitrary number of
+milliseconds.
+
+**Why it's wrong**: pointer travel time varies. After the timeout expires, the hover
+surface can reopen while the action menu is still active and consume the interaction.
+
+**What it breaks**: menu actions become intermittently unclickable; destructive
+actions can disappear before their confirmation surface opens.
+
+**Correct approach**: coordinate both surfaces through explicit shared state. Keep
+the hover surface disabled for the complete lifetime of the nested action popover,
+then restore it only after that popover closes.
+
+---
+
+## Case 19 — Coordinator hand-driving a broken UI flow instead of re-delegating
+
+**Wrong approach**: after a delegated UI-verification subagent is killed mid-case,
+the coordinator takes over and drives the remaining flow inline — dozens of small
+browser commands (probe, reload, sign-in retries, dialog step-through), plus a deep
+root-cause dig into a flapping shared dependency, all in the main loop.
+
+**Why it's wrong**: the coordinator's per-step latency and context cost are far
+higher than a subagent's, and inline grinding turns one recoverable failure into a
+long visible stall. Root-causing an env flake (a shared cache/DB rejecting
+connections) is also not the goal of the test run — a disposable local replacement
+gets the case unblocked in one step.
+
+**What it breaks**: the user watches minutes of micro-steps with no case progress
+and loses confidence; total wall-clock and token spend balloon for zero extra
+evidence value.
+
+**Correct approach**: when a delegated case dies, repackage the _remaining_ steps
+into a fresh, tightly-scoped subagent prompt (include everything already learned:
+working recipes, seeded fixtures, exact remaining assertions). Timebox any
+environment rabbit hole to a couple of probes, then switch to a disposable local
+substitute (e.g. spin up a local instance and override the connection env var for
+the test server) instead of diagnosing shared infrastructure.
+
+---
+
+## Case 20 — Calling a server-side permission change "no UI surface" and shipping an API-transcript-only report
+
+**Wrong approach**: for a change that only edits TRPC routers (tightening who may
+mutate a shared resource), classifying the run as backend-only and publishing a
+verify report whose evidence is exclusively curl/API probe transcripts. The user
+opened the report and asked "完全没有截图吗？".
+
+**Why it's wrong**: a permission tightening IS a UI-visible state — the blocked
+user still sees the edit/delete affordances and now gets a rejection (error toast /
+failed action) when clicking them. "The diff touches no .tsx file" does not mean
+"no UI surface"; the UI surface is the product behavior the change alters, not the
+files it edits.
+
+**What it breaks**: the report cannot show what a real blocked user experiences
+(is the rejection surfaced comprehensibly? silently swallowed? a raw error?), and
+it misses UX follow-ups the screenshot would expose (e.g. affordances that should
+be hidden/disabled for users who will always be rejected).
+
+**Correct approach**: for any authorization/permission change, drive the REAL UI
+as the blocked role and screenshot the rejection state (and the allowed role's
+success state) in addition to API probes. If the rejection renders as a raw or
+missing error message, report that as a finding instead of leaving it undiscovered.
+
+---
+
+## Case 21 — Turning a feature verification into an unbounded dev-environment repair
+
+**Wrong approach**: after the normal product surface fails to boot, repeatedly modify
+shared dev configuration, reinstall the entire workspace, and investigate unrelated
+dependency/context problems before running any assertion for the feature under test.
+
+**Why it's wrong**: environment readiness is a gate, not the test goal. A workaround
+that changes shared configuration can also make the verification less representative,
+while an open-ended repair loop produces no feature evidence.
+
+**What it breaks**: the user waits through a long sequence of setup experiments, the
+working tree gains unrelated edits, and the run still has no reportable test result.
+
+**Correct approach**: follow only recovery paths already documented by this skill. If the
+observed failure mode is not covered, stop the test immediately, revert any experimental
+changes, summarize the exact checks and evidence collected, and ask the user for help before
+continuing. Do not repair the environment, switch surfaces, or invent a fallback without user
+direction.
