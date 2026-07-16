@@ -185,19 +185,19 @@ const currentAgentTTSVoice =
     let currentVoice;
     switch (ttsService) {
       case 'openai': {
-        currentVoice = voice.openai || (VoiceList.openaiVoiceOptions?.[0].value as string);
+        currentVoice = voice?.openai || (VoiceList.openaiVoiceOptions?.[0].value as string);
         break;
       }
       case 'edge': {
-        currentVoice = voice.edge || (voiceList.edgeVoiceOptions?.[0].value as string);
+        currentVoice = voice?.edge || (voiceList.edgeVoiceOptions?.[0].value as string);
         break;
       }
       case 'microsoft': {
-        currentVoice = voice.microsoft || (voiceList.microsoftVoiceOptions?.[0].value as string);
+        currentVoice = voice?.microsoft || (voiceList.microsoftVoiceOptions?.[0].value as string);
         break;
       }
       case 'elevenlabs': {
-        currentVoice = voice.elevenlabs || 'OEyxkK9dZHAF59ZRc5c2';
+        currentVoice = voice?.elevenlabs || 'OEyxkK9dZHAF59ZRc5c2';
         break;
       }
     }

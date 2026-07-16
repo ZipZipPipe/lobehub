@@ -10,7 +10,7 @@ const QualitySelect = memo(() => {
 
   const options =
     enumValues?.map((quality) => ({
-      label: t(`config.quality.options.${quality}`),
+      label: t(`config.quality.options.${quality}` as any),
       value: quality,
     })) ?? [];
 

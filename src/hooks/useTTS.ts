@@ -70,7 +70,7 @@ export const useTTS = (content: string, config?: TTSConfig) => {
       useSelectedTTS = useMicrosoftSpeech;
       options = {
         api: {
-          serviceUrl: API_ENDPOINTS.microsoft,
+          serviceUrl: API_ENDPOINTS.tts('microsoft'),
         },
         options: {
           voice: currentVoice,

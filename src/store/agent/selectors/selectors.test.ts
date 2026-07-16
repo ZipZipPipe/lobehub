@@ -542,7 +542,7 @@ describe('agentSelectors', () => {
         },
       });
 
-      expect(agentSelectors.currentAgentTTSVoice(state)).toBe('nova');
+      expect(agentSelectors.currentAgentTTSVoice('en-US')(state)).toBe('nova');
     });
 
     it('should return default voice when no voice specified', () => {
@@ -555,7 +555,20 @@ describe('agentSelectors', () => {
         },
       });
 
-      expect(agentSelectors.currentAgentTTSVoice(state)).toBe('alloy');
+      expect(agentSelectors.currentAgentTTSVoice('en-US')(state)).toBe('alloy');
+    });
+
+    it('should return elevenlabs voice with default fallback', () => {
+      const state = createState({
+        activeAgentId: 'agent-1',
+        agentMap: {
+          'agent-1': {
+            tts: { ttsService: 'elevenlabs', voice: {} },
+          },
+        },
+      });
+
+      expect(agentSelectors.currentAgentTTSVoice('en-US')(state)).toBe('OEyxkK9dZHAF59ZRc5c2');
     });
   });
 
