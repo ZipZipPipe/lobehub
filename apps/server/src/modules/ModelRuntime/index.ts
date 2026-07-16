@@ -455,18 +455,14 @@ export const initModelRuntimeFromDB = async (
         ? ({
             ...globalProviderConfig,
             ...providerConfig,
-            config: {
-              ...(globalProviderConfig.config || {}),
-              ...(providerConfig.config || {}),
-            },
             fetchOnClient: providerConfig.fetchOnClient ?? globalProviderConfig.fetchOnClient,
             keyVaults: {
-              ...(globalProviderConfig.keyVaults || {}),
-              ...(providerConfig.keyVaults || {}),
+              ...globalProviderConfig.keyVaults,
+              ...providerConfig.keyVaults,
             },
             settings: {
-              ...(globalProviderConfig.settings || {}),
-              ...(providerConfig.settings || {}),
+              ...globalProviderConfig.settings,
+              ...providerConfig.settings,
             },
           } as typeof providerConfig)
         : globalProviderConfig;

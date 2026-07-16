@@ -9,12 +9,17 @@ vi.mock('@/app/(backend)/middleware/auth', () => ({
 
 const routeOptions = { params: Promise.resolve({}) };
 
-const createRequest = (model = 'eleven_v3') =>
+// Mirrors the payload `useOpenAITTS` sends when a serviceUrl is configured:
+// `{ input, options: { model, voice } }`, not a flattened shape.
+const createRequest = (options: { model?: string; voice?: string } = {}) =>
   new Request('https://test.com/webapi/tts/elevenlabs', {
     body: JSON.stringify({
       input: 'Hello from ElevenLabs',
-      model,
-      voice: 'OEyxkK9dZHAF59ZRc5c2',
+      options: {
+        model: 'eleven_v3',
+        voice: 'OEyxkK9dZHAF59ZRc5c2',
+        ...options,
+      },
     }),
     headers: { 'Content-Type': 'application/json' },
     method: 'POST',
@@ -27,6 +32,25 @@ afterEach(() => {
 });
 
 describe('ElevenLabs TTS route', () => {
+  it('rejects a payload without a voice id', async () => {
+    vi.stubEnv('ELEVENLABS_API_KEY', 'test-api-key');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = new Request('https://test.com/webapi/tts/elevenlabs', {
+      body: JSON.stringify({ input: 'Hello from ElevenLabs', options: {} }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    });
+    const response = await POST(request, routeOptions);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'Missing ElevenLabs voice id in payload options.',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('requires an ElevenLabs API key', async () => {
     vi.stubEnv('ELEVENLABS_API_KEY', '');
     const fetchMock = vi.fn();

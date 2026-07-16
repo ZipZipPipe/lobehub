@@ -3,18 +3,32 @@ import { createSpeechResponse } from '@/server/utils/createSpeechResponse';
 
 const ELEVENLABS_BASE = 'https://api.elevenlabs.io/v1/text-to-speech';
 
+/**
+ * Shape sent by `useOpenAITTS` (`@lobehub/tts/react`) when a `serviceUrl` is
+ * configured: the OpenAITTSPayload is forwarded verbatim, with `model` and
+ * `voice` nested under `options` — not flattened.
+ */
 interface ElevenLabsTTSPayload {
   input: string;
-  model: string;
-  voice: string;
+  options?: {
+    model?: string;
+    voice?: string;
+  };
 }
 
 export const POST = checkAuth(async (req: Request) => {
   const payload = (await req.json()) as ElevenLabsTTSPayload;
 
+  const voiceId = payload.options?.voice;
+  if (!voiceId) {
+    return new Response(
+      JSON.stringify({ error: 'Missing ElevenLabs voice id in payload options.' }),
+      { headers: { 'Content-Type': 'application/json' }, status: 400 },
+    );
+  }
+
   // Resolve API key: env var first, then the provider-specific header.
-  const apiKey =
-    process.env.ELEVENLABS_API_KEY || req.headers.get('x-elevenlabs-api-key') || '';
+  const apiKey = process.env.ELEVENLABS_API_KEY || req.headers.get('x-elevenlabs-api-key') || '';
 
   if (!apiKey) {
     return new Response(
@@ -33,7 +47,7 @@ export const POST = checkAuth(async (req: Request) => {
     'tts-1-hd': 'eleven_multilingual_v2',
     'gpt-4o-mini-tts': 'eleven_multilingual_v2',
   };
-  const modelId = modelIdMap[payload.model] || 'eleven_v3';
+  const modelId = modelIdMap[payload.options?.model ?? ''] || 'eleven_v3';
 
   const elevenLabsBody = {
     model_id: modelId,
@@ -41,25 +55,22 @@ export const POST = checkAuth(async (req: Request) => {
     voice_settings: {
       similarity_boost: 0.75,
       stability: 0.5,
-      style: 0.0,
+      style: 0,
       use_speaker_boost: true,
     },
   };
 
   return createSpeechResponse(
     async () => {
-      const response = await fetch(
-        `${ELEVENLABS_BASE}/${payload.voice}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'xi-api-key': apiKey,
-            Accept: 'audio/mpeg',
-          },
-          body: JSON.stringify(elevenLabsBody),
+      const response = await fetch(`${ELEVENLABS_BASE}/${voiceId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'xi-api-key': apiKey,
+          'Accept': 'audio/mpeg',
         },
-      );
+        body: JSON.stringify(elevenLabsBody),
+      });
 
       if (!response.ok) {
         const errText = await response.text();
