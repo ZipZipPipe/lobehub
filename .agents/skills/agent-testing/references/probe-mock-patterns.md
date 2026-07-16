@@ -293,6 +293,31 @@ Re-tested end-to-end against the running dev server. The previous claim ("blocks
   ```
   (zsh does not word-split unquoted vars — inline the `--cdp` flags, don't stash them in `$AB`.)
 
+### A10. ⚠️ `git checkout -- <file>` to revert an injection DESTROYS the branch's uncommitted changes in that file
+
+- **Situation**: A4/A6/A8/E10 all end with "revert with `git checkout -- <file>`". That is only safe
+  when the file was **clean** before the injection. When you are verifying a branch that has
+  **uncommitted working-tree changes** (the common case for a pre-PR review), and your probe lands in
+  one of those same modified files, `git checkout --` resets it to **HEAD** — silently wiping the very
+  feature edits you were sent to verify, not just your probe.
+- **Measured**: injecting a one-line probe into a component that the branch had already modified
+  (uncommitted), then `git checkout -- <file>`, reverted the file to its committed version. The
+  branch's uncommitted edits (a changed selector + a title fallback) were gone, and the file no longer
+  matched what the user asked to test. Nothing warns you — the probe residue check
+  (`grep -rn AGENT-TEST`) comes back clean either way, because your marker is gone too.
+- **Works — snapshot the file yourself before injecting, restore from the snapshot:**
+  ```bash
+  cp <file> /tmp/probe-backup-$(basename <file>)     # BEFORE the edit
+  # ... inject, HMR, capture ...
+  cp /tmp/probe-backup-$(basename <file>) <file>     # restore — preserves uncommitted work
+  ```
+  Then prove the restore is exact: `git diff -- <file>` must show the SAME blob hash as before the
+  probe (`index <old>..<new>` — the right-hand hash is the working-tree blob), and
+  `grep -rn AGENT-TEST` must be empty. Check `git status --short` before you start so you know which
+  files are dirty; for a dirty file, `git checkout --` is never the revert.
+- **Corollary**: `git stash` has the same failure shape (it takes the branch's edits with it). If you
+  must use git to revert, scope it to a file you have confirmed is clean.
+
 ---
 
 ## B. Cache / stale state that MASKS the failure
@@ -368,6 +393,23 @@ Re-tested end-to-end against the running dev server. The previous claim ("blocks
 - The cache persists to **two durable tiers** (`src/libs/swr/localStorageProvider.ts`):
   IndexedDB for the big collections and localStorage for small shells. That is why B1's
   cold-load recipe clears localStorage, sessionStorage, IndexedDB **and** the Cache API.
+
+### B4. Component-local `useState` seeded from a cached list item does NOT reset when fresh data arrives — re-seeded fixtures render stale flags
+
+- **Situation**: verifying an "unread → click → read" flag on a list row whose component
+  initializes local state from the item (`useState(Boolean(item.readAt))`). The fixture was
+  re-seeded in the DB with the flag cleared (`read_at` NULL, confirmed by SQL), yet on reload
+  one row rendered as already-read.
+- **Cause (measured)**: the SWR persisted cache (B3's IndexedDB tier) hydrates the list first
+  with the PREVIOUS round's item (flag set, because an earlier run had clicked it). `useState`
+  captures that initial value; when the fresh server response (flag clear) replaces the SWR
+  data, the row does not remount (same React key = same item id), so the stale local state
+  sticks. No amount of waiting fixes it.
+- **Works**: for any assertion on an initial-render flag that flows through `useState(init)`,
+  force a clean first frame by deleting only the SWR IndexedDB database (`lobehub-local-data`)
+  and reloading — login survives (the session cookie is not touched), unlike B1's full clear.
+  Verify the DB value separately with SQL so a stale render is attributed to cache, not to the
+  change under test.
 
 ---
 
@@ -994,7 +1036,7 @@ agents. Set` `agentRules: false` `in next.config to disable.` and leaves the wor
   overrides the ignore, or call `/usr/bin/grep` directly. Before asserting "X exists nowhere",
   re-run the search with an explicit path into the dependency tree.
 
-### E14. Electron `will-attach-webview` params carry NO custom attributes — identity via data-\* never arrives
+### E25. Electron `will-attach-webview` params carry NO custom attributes — identity via data-\* never arrives
 
 - **Situation**: a main-process controller needs to know WHICH renderer feature a mounting
   `<webview>` belongs to (e.g. a per-conversation session id), and the renderer put it in a
@@ -1097,7 +1139,7 @@ nodeintegration, plugins, disablewebsecurity, allowpopups, preload, …`). The h
   before opening the share page. Verify the fetch actually fired via
   `agent-browser network requests | grep getMessages`, not by waiting on the UI.
 
-### E15. ✅ Next dev does NOT hot-reload `apps/server/**` — you are testing STALE compiled server code
+### E26. ✅ Next dev does NOT hot-reload `apps/server/**` — you are testing STALE compiled server code
 
 - **Situation**: verifying a working-tree change inside `apps/server/src/**` (an agent-runtime
   service, a tool executor, a router) against a `bun run dev` server that was started before the
@@ -1114,7 +1156,7 @@ nodeintegration, plugins, disablewebsecurity, allowpopups, preload, …`). The h
   conclusion. If a run "should" have hit your code and didn't, prove the server is running your
   code FIRST — drop a `console.error` on the path and restart — before debugging the code itself.
 
-### E16. ✅ `source`-ing an unquoted JSON env var silently corrupts it (JWKS\_KEY → gateway auth\_failed)
+### E27. ✅ `source`-ing an unquoted JSON env var silently corrupts it (JWKS\_KEY → gateway auth\_failed)
 
 - **Situation**: writing an env file for the local gateway loop with
   `JWKS_KEY={"keys":[{"kty":"RSA",...}]}` on one line, then `set -a; source that-file`.
@@ -1134,7 +1176,7 @@ nodeintegration, plugins, disablewebsecurity, allowpopups, preload, …`). The h
   To diagnose an `auth_failed`, hook `ws.send` in the page and read the token the client actually
   sends — an empty string means the SERVER failed to sign, not that the gateway rejected a signature.
 
-### E17. The chat input silently refuses to send when the agent's model is retired
+### E28. The chat input silently refuses to send when the agent's model is retired
 
 - **Situation**: driving a real turn (store `sendMessage` or type+Enter). The call resolves, no error
   is thrown, `activeTopicId` stays `null`, and no `agent_operations` row appears. Nothing in the dev
@@ -1147,7 +1189,7 @@ nodeintegration, plugins, disablewebsecurity, allowpopups, preload, …`). The h
   and pick one from there. Also: a send that "resolves fine but creates no operation" is a UI-gate
   symptom; **screenshot the composer** instead of re-reading your store call.
 
-### E18. Fresh-worktree `seed-user` dies on `Cannot find module 'bcryptjs'` — NODE\_PATH into .pnpm fixes it
+### E29. Fresh-worktree `seed-user` dies on `Cannot find module 'bcryptjs'` — NODE\_PATH into .pnpm fixes it
 
 - **Situation**: in a fresh git-worktree install, `init-dev-env.sh seed-user`
   (which runs `node <<'NODE'` from the repo root) throws MODULE\_NOT\_FOUND for
@@ -1166,7 +1208,7 @@ nodeintegration, plugins, disablewebsecurity, allowpopups, preload, …`). The h
   the `os error 35` agent-browser daemon wedge (D8) recovers with
   `agent-browser close --all` + re-running `setup-auth.sh web-seed`.
 
-### C7. `document.body.innerText` is ALWAYS 0 in this app — probe `#root`, and use textContent to tell a wedge from a blank
+### C10. `document.body.innerText` is ALWAYS 0 in this app — probe `#root`, and use textContent to tell a wedge from a blank
 
 - **Situation**: asserting rendered text with `document.body.innerText.includes(...)`. It returns `""` / length 0 even on a fully rendered page, so every text assertion silently fails and reads as "the page is blank".
 - **Works**: probe `document.getElementById('root').innerText`. (Cause not established — some ancestor of `#root` makes body's inner-text computation collapse; `#root` itself is fine.)
@@ -1237,6 +1279,7 @@ nodeintegration, plugins, disablewebsecurity, allowpopups, preload, …`). The h
   ```
   Tag the resolved element with a `data-probe` attribute and drive it with `agent-browser click '[data-probe=...]'` (trusted CDP input, D18).
 - **Corollary**: the phantom also owns the tooltip text of whatever component it duplicates, so an `innerText`/aria grep can "find" a control that the user cannot see. Assert on `getBoundingClientRect()` before believing a control is present.
+
 ### C8. ✅ An agent-browser session can silently LOSE its seeded cookies — a 401, not `document.cookie`, is the signal
 
 - **Situation**: verifying an owner-only affordance (a link the server renders only for the
@@ -1283,3 +1326,73 @@ nodeintegration, plugins, disablewebsecurity, allowpopups, preload, …`). The h
 - **Situation**: an isolated frontend-only Vite surface exits at startup with `EMFILE: too many open files, watch`, while the intended port is free and the shell can successfully create thousands of `fs.watch` handles in a control process.
 - **Likely causes (not established)**: multiple LobeHub Cloud worktrees or clones are running file watchers; or a previously used workspace still has watchers owned by a surviving terminal process or a VS Code window, even after its visible terminal was closed.
 - **Required action**: immediately terminate Agent Testing, report the observed `EMFILE`, and ask the user to inspect and clean up other worktrees, terminal processes, or VS Code windows. Do not kill user-owned processes, close editor windows, change Vite watch mode, fall back to a one-shot static build, or publish a Verify report from a degraded surface.
+
+### D20. ✅ Main-process `WebContentsView` pages are their own CDP page targets — they hijack target selection, AND they are the best pool probe
+
+- **Situation**: verifying an in-app browser whose pages are owned by the MAIN process as
+  `WebContentsView`s (not renderer `<webview>` guests — that is E16/D15, a different shape).
+- **Doesn't work**: assuming any tool that "just connects to the CDP port" lands on the app.
+  Every live page shows up in `/json/list` as its own `type: page` target, so both
+  `agent-browser` and `scripts/cdp-screenshot.sh` can silently attach to a _web page the app
+  is hosting_ instead of the app itself. Measured: `cdp-screenshot.sh` reported
+  `targetUrl: https://example.com/` and wrote that page's pixels while the intended evidence
+  was the app window; an `agent-browser get url` on the same port hung.
+- **Works — pin the target by URL prefix.** Raw CDP, pick the target whose `url` starts with
+  `app://renderer`, and evaluate against that:
+  ```js
+  const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const target = list.find((t) => t.type === 'page' && t.url.startsWith('app://renderer'));
+  new WebSocket(target.webSocketDebuggerUrl); // → Runtime.evaluate
+  ```
+- **Works — the same property is the cheapest page-pool probe there is.** One live page ==
+  one `page` target, so `/json/list` filtered to non-`app://` URLs _is_ the pool's contents.
+  Use it to assert per-session isolation (N sessions → N coexisting pages, and a page that
+  should have survived an action is still listed) without adding any IPC or store probe:
+  ```bash
+  curl -s --noproxy '*' http://127.0.0.1: < cdp > /json/list \
+    | python3 -c "import json,sys; print([t['url'] for t in json.load(sys.stdin) if t['type']=='page'])"
+  ```
+- **Pixels still need an OS capture.** A `WebContentsView` does not composite into the host
+  page's `Page.captureScreenshot`, so app-window evidence that must _show the embedded page_
+  has to come from `capture-app-window.sh` (macOS `screencapture -l <windowid>`), which does
+  not require bringing the window to the front.
+
+### C9. A component-scoped "consumed" ref is not a one-shot guard once the component can remount
+
+- **Situation**: a persisted store field carries a one-shot request (`{ nonce, url }`) and the
+  consuming component guards against re-consumption with a `useRef` holding the last nonce.
+- **Why it silently breaks**: the ref dies with the component. Any change that starts remounting
+  the consumer (e.g. giving it a `key` that now varies per topic/session) resurrects the guard as
+  `undefined`, so a request that is still sitting in _persisted_ state is re-consumed on every
+  remount — and, on a fresh boot, once more. The symptom looks nothing like the cause: a page the
+  agent had just loaded gets navigated to a URL from days ago.
+- **Works**: retire the request in the store the moment it is consumed, so the one-shot is one-shot
+  across mounts and restarts. Watch the merge semantics — if the store patches with lodash `merge`,
+  clearing with `undefined` is a **no-op** and the field must be set to `null`.
+- **Test for it**: assert the field is `null` (not `undefined`) after the consume action; a test that
+  only checks "the request was acted on" passes in both the broken and fixed versions.
+
+### E30. ✅ "Failed to fetch dynamically imported module" points at the WRONG file — the failure is downstream
+
+- **Situation**: the SPA renders as a Case-1 blank page; console names a dynamic-import route module.
+- **Doesn't work**: investigating only the named module. It may return 200 because the actual failure
+  is in its transitive import graph; changing `?t=` values are ordinary HMR invalidation.
+- **Works**: take and read a screenshot. Vite's HMR overlay contains the real transform/import error.
+  After a rebase or pull, refresh dependencies and restart before treating the blank SPA as a code bug.
+
+### C11. Persisted SWR cache serves a STALE agent config after a direct DB write
+
+- **Situation**: seeding `agents.agency_config` or `agents.model` directly in Postgres, then using
+  the app to drive an assertion.
+- **Doesn't work**: reload or `internal_refreshAgentConfig`; IndexedDB/localStorage can retain the
+  previous config and make a fixture issue look like a product regression.
+- **Works**: cold-load by clearing browser storage/caches, re-seed auth, reopen, and assert the
+  fixture in `__LOBE_STORES.agent().agentMap[id]` before testing downstream behavior.
+
+### E31. Web agent turns run the CLIENT runtime — no `agent_operations` row will appear
+
+- **Situation**: driving a real web turn and polling `agent_operations` for the run.
+- **Doesn't work**: waiting for a server operation when the web surface dispatched the client runtime.
+- **Works**: use client observables (`messages.model`, thread ids, and chat-store operations) for web;
+  use CLI/server execution and `agent_operations` for the server runtime. A change affecting both paths
+  needs evidence from both paths.

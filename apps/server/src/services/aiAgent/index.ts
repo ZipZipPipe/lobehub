@@ -137,6 +137,10 @@ import {
 } from '@/server/services/agentSignal/featureGate';
 import { shouldSuppressSignal } from '@/server/services/agentSignal/suppressSignal';
 import { ComposioService } from '@/server/services/composio';
+import {
+  buildLastSyncedAtMap,
+  scheduleStaleConnectorToolsRefresh,
+} from '@/server/services/connector/refresh';
 import { deviceGateway } from '@/server/services/deviceGateway';
 import { getScopedOnlineDevices } from '@/server/services/deviceGateway/scopedDevices';
 import { DocumentService } from '@/server/services/document';
@@ -1213,7 +1217,10 @@ export class AiAgentService {
     // documents stay keyed on `resolvedAgentId`.
     const persistAgentId = appContext?.agentSignal?.agentId ?? resolvedAgentId;
 
-    // Apply per-call model/provider overrides (e.g. from task.config)
+    // Apply per-call model/provider overrides. Sources include task.config and
+    // the callSubAgent spawn site, which resolves the sub-agent's default model
+    // from the parent agent's `agencyConfig.subagent` and passes it explicitly —
+    // so this execution path never has to special-case sub-agents.
     if (modelOverride) agentConfig.model = modelOverride;
     if (providerOverride) agentConfig.provider = providerOverride;
 
@@ -1597,7 +1604,7 @@ export class AiAgentService {
       !!botContext,
     );
 
-    // 3.5. Hetero-agent early exit — Claude Code / Codex / OpenClaw / Hermes agents bypass the
+    // 3.5. Hetero-agent early exit — local CLI and remote platform agents bypass the
     // server-side LLM pipeline.  After topic + message creation we hand off to
     // the device gateway (desktop) or cloud sandbox, which will push events
     // back via `heteroIngest` / `heteroFinish` (claude-code / codex) or
@@ -1605,11 +1612,11 @@ export class AiAgentService {
     //
     // Detection: prefer agencyConfig.heterogeneousProvider.type (set by the UI),
     // fall back to model field for backwards compatibility.
-    const HETERO_AGENT_MODELS = new Set<string>(['claude-code', 'codex']);
+    const HETERO_AGENT_MODELS = new Set<string>(['amp', 'claude-code', 'codex']);
     const heteroProviderType = agentConfig.agencyConfig?.heterogeneousProvider?.type;
     const isHeteroAgent = !!heteroProviderType || HETERO_AGENT_MODELS.has(model);
     const heteroType = (heteroProviderType ?? model) as
-      'claude-code' | 'codex' | 'hermes' | 'openclaw';
+      'amp' | 'claude-code' | 'codex' | 'hermes' | 'openclaw';
 
     // ── Shared turn setup (runs for BOTH hetero and normal agents) ──────────
     // Everything up to and including persisting the turn is identical for both
@@ -1889,7 +1896,7 @@ export class AiAgentService {
           ? runAttachments.imageList.map((image) => ({ id: image.id, url: image.url }))
           : undefined;
       const heteroExecArgs =
-        heteroType === 'claude-code' || heteroType === 'codex'
+        heteroType === 'amp' || heteroType === 'claude-code' || heteroType === 'codex'
           ? buildHeteroExecArgs(
               agentConfig.agencyConfig?.heterogeneousProvider?.type === heteroType
                 ? agentConfig.agencyConfig.heterogeneousProvider
@@ -2070,7 +2077,7 @@ export class AiAgentService {
           };
         }
       } else {
-        // Local CLI hetero (claude-code / codex) — fork between device dispatch
+        // Local CLI hetero (Amp / Claude Code / Codex) — fork between device dispatch
         // and cloud sandbox via the shared execution plan:
         //   - requestedDeviceId (topic-level override) always wins
         //   - executionTarget 'device' → dispatch to boundDeviceId (errors if unset)
@@ -2118,6 +2125,7 @@ export class AiAgentService {
           isHetero: true,
           clientExecutionAvailable: false,
           requestedDeviceId,
+          sandboxExecutionAvailable: heteroType !== 'amp',
           trigger: requestTriggerMetadata?.trigger,
         });
 
@@ -2129,7 +2137,9 @@ export class AiAgentService {
               agentId: resolvedAgentId,
               assistantMessageId: assistantMessageRecord.id,
               detail:
-                'No device bound. Pick a device in the Execution Device switcher, or switch to Cloud sandbox.',
+                heteroType === 'amp'
+                  ? 'No device bound. Pick a local or connected device in the Execution Device switcher.'
+                  : 'No device bound. Pick a device in the Execution Device switcher, or switch to Cloud sandbox.',
               message: 'No bound device for hetero agent',
               operationId,
               topicId,
@@ -2230,7 +2240,34 @@ export class AiAgentService {
             };
           }
         } else {
-          // Cloud sandbox path — only for local CLI agents (claude-code / codex).
+          if (heteroType === 'amp') {
+            const message =
+              'Amp requires a local or connected device; cloud sandbox execution is not supported.';
+            await this.finalizeHeteroDispatchError({
+              agentId: resolvedAgentId,
+              assistantMessageId: assistantMessageRecord.id,
+              detail: message,
+              message,
+              operationId,
+              topicId,
+            });
+            return {
+              agentId: resolvedAgentId,
+              assistantMessageId: assistantMessageRecord.id,
+              autoStarted: false,
+              createdAt: new Date().toISOString(),
+              error: message,
+              message,
+              operationId,
+              status: 'error',
+              success: false,
+              timestamp: new Date().toISOString(),
+              topicId,
+              userMessageId: userMessageRecord?.id ?? parentMessageId ?? '',
+            };
+          }
+
+          // Cloud sandbox path — only for sandbox-provisioned local CLI agents.
           // Remote agents (openclaw / hermes) always require a bound device.
           // Lazy-loaded on purpose: `sandboxRunner` pulls the sandbox-service graph
           // (which eagerly touches server-only ModelRuntime env at module init), so
@@ -2500,6 +2537,28 @@ export class AiAgentService {
           : [];
 
       connectorManifests = buildConnectorManifests(connectorsMcp, connectorTools);
+
+      // Auto-refresh stale connector tool lists in the background so upstream MCP
+      // tool changes propagate without the user manually re-syncing — the freshness
+      // the connectors migration lost from the old plugin system. Reuses the tools
+      // just fetched as the last-sync marker (no extra query), HTTP-only, throttled,
+      // and deferred via after() so it adds no latency to this run. Wrapped
+      // defensively: it is a pure optimization and must never break the agent run.
+      try {
+        // The background sync decrypts stored OAuth/bearer credentials to auth
+        // against the MCP server, so it needs a gatekeeper-backed model — the
+        // same `connectorGateKeeper` used above. `this.connectorModel` has none,
+        // which would decrypt to null and make an authed connector 401 → error.
+        const refreshConnectorModel = connectorGateKeeper
+          ? new ConnectorModel(this.db, this.userId, this.workspaceId, connectorGateKeeper)
+          : this.connectorModel;
+        scheduleStaleConnectorToolsRefresh(connectorsMcp, buildLastSyncedAtMap(connectorTools), {
+          connectorModel: refreshConnectorModel,
+          connectorToolModel: this.connectorToolModel,
+        });
+      } catch (err) {
+        log('execAgent: failed to schedule connector tool refresh (ignored): %O', err);
+      }
 
       // Only connectors that ACTUALLY produced a manifest (enabled + with synced
       // tools) replace a same-named plugin. Deriving the set from connectorsMcp
@@ -4035,6 +4094,11 @@ export class AiAgentService {
     this.execAgentThreadRun(params, {
       isSubAgent: true,
       logScope: 'execVirtualSubAgent',
+      // Sub-agent model is resolved at the spawn site (callSubAgent runner) from
+      // the parent agent's `agencyConfig.subagent` and threaded through here as an
+      // explicit override, so execAgent never re-reads the parent config.
+      model: params.model,
+      provider: params.provider,
       resumeParentOnComplete: true,
     });
 
@@ -4242,6 +4306,14 @@ export class AiAgentService {
       isSubAgent: boolean;
       logScope: 'execSubAgent' | 'execVirtualSubAgent';
       /**
+       * Explicit model/provider override for the spawned run. The callSubAgent
+       * spawn site resolves the sub-agent model from the parent agent's config
+       * and passes it here; left undefined for group members (they keep their
+       * own model).
+       */
+      model?: string;
+      provider?: string;
+      /**
        * Marks the run's orchestration role on its operation metadata. Isolated
        * group members pass `'member'` so the inactivity-watchdog abandon path can
        * tell them apart from genuine `callSubAgent` children — both share
@@ -4360,8 +4432,11 @@ export class AiAgentService {
       appContext,
       autoStart: true,
       hooks,
+      // Explicit sub-agent model override resolved at the spawn site.
+      model: options.model,
       parentOperationId,
       prompt: instruction,
+      provider: options.provider,
       trigger: inheritedTrigger,
       userInterventionConfig: { approvalMode: 'headless' },
     });

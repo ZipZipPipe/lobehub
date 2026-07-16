@@ -213,6 +213,12 @@ export const briefKeys = {
   list: def('brief:list', (isLogin: boolean) => ['brief:list', isLogin]),
 };
 
+// ---- home inbox ---------------------------------------------------------
+export const homeInboxKeys = {
+  /** Account-wide topics powering the home inbox (running + unread + needs-input). */
+  topics: def('home:inboxTopics', (isLogin: boolean) => ['home:inboxTopics', isLogin]),
+};
+
 // ---- agent config / available / search ----------------------------------
 // (agentKeys.list defined above)
 export const agentConfigKeys = {
@@ -705,6 +711,10 @@ export const messengerKeys = {
 
 // ---- verify (deliverable judging) ---------------------------------------
 export const verifyKeys = {
+  acceptanceBundle: def('verify:acceptanceBundle', (acceptanceId: string) => [
+    'verify:acceptanceBundle',
+    acceptanceId,
+  ]),
   criteria: def('verify:criteria', () => ['verify:criteria']),
   instruction: def('verify:instruction', (documentId: string) => [
     'verify:instruction',

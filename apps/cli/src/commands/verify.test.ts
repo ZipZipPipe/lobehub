@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -7,9 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   originFromEnv,
+  parseSubjectRef,
   planFromResult,
   registerVerifyCommand,
   reportEvidence,
+  subjectFromEnv,
+  subjectFromResult,
   surfacesFromResult,
 } from './verify';
 
@@ -411,6 +414,20 @@ describe('planFromResult — plan item normalization', () => {
     expect(item.verifierConfig).toEqual({ expected: 'the file exists', method: 'tail the log' });
   });
 
+  it('normalizes a per-item surface and drops one that names no surface', () => {
+    const items = planFromResult({
+      plan: [
+        { id: '1', surface: 'electron', title: 'tray dedupe' },
+        { id: '2', surface: 'unit', title: 'model test' },
+        { id: '3', title: 'no surface' },
+      ],
+    })!;
+
+    expect(items[0].verifierConfig).toEqual({ surface: 'desktop' });
+    expect(items[1].verifierConfig).toEqual({});
+    expect(items[2].verifierConfig).toEqual({});
+  });
+
   it('keys items by the same id the cases use, so results pair back to them', () => {
     const items = planFromResult({ plan: [{ id: 'case-a', title: 'a' }, { title: 'b' }] })!;
 
@@ -421,15 +438,136 @@ describe('planFromResult — plan item normalization', () => {
     expect(planFromResult({ plan: [{ id: '1' }] })).toEqual([]);
   });
 
-  it('distinguishes "no plan field" from "an empty plan", so a re-ingest can CLEAR a stale one', () => {
-    // Absent → undefined → `updateRun` omits it → whatever is stored stays.
+  it('distinguishes "no plan field" from an explicitly empty plan', () => {
+    // Absent → undefined: this snapshot did not declare a plan.
     expect(planFromResult({})).toBeUndefined();
 
-    // Present but empty → `[]` → the stored plan is overwritten with nothing.
-    // Without this, re-ingesting a reused report dir whose plan was emptied
-    // would leave the PREVIOUS round's plan attached, and every one of its items
-    // would render as "not run" against a report that never planned them.
+    // Present but empty → `[]`: this snapshot explicitly planned no checks.
     expect(planFromResult({ plan: [] })).toEqual([]);
+  });
+});
+
+describe('verify ingest-report — every run is an immutable acceptance round', () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let dir: string;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockGetTrpcClient.mockResolvedValue(mockTrpcClient);
+    const verify = mockTrpcClient.verify as Record<string, any>;
+    verify.createRun = { mutate: vi.fn().mockResolvedValue({ id: 'run-new' }) };
+    verify.updateRun = { mutate: vi.fn() };
+    verify.upsertReport = { mutate: vi.fn().mockResolvedValue({}) };
+    mockTrpcClient.acceptance = {
+      attachRun: { mutate: vi.fn() },
+      ensure: { mutate: vi.fn().mockResolvedValue({ id: 'acceptance-1' }) },
+    };
+
+    dir = mkdtempSync(path.join(tmpdir(), 'lh-ingest-'));
+    writeFileSync(path.join(dir, 'result.json'), JSON.stringify({ cases: [] }));
+    process.env.LOBEHUB_TOPIC_ID = 'topic-1';
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    delete process.env.LOBEHUB_TOPIC_ID;
+    rmSync(dir, { force: true, recursive: true });
+  });
+
+  const run = async (args: string[]) => {
+    const program = new Command();
+    program.exitOverride();
+    registerVerifyCommand(program);
+    await program.parseAsync(['node', 'lh', 'verify', ...args]);
+  };
+
+  it('creates a fresh run and binds it to the current topic acceptance', async () => {
+    const verify = mockTrpcClient.verify as Record<string, any>;
+
+    await run(['ingest-report', dir, '--json']);
+
+    expect(verify.updateRun.mutate).not.toHaveBeenCalled();
+    expect(verify.createRun.mutate).toHaveBeenCalled();
+    expect(mockTrpcClient.acceptance.ensure.mutate).toHaveBeenCalledWith({
+      requirement: undefined,
+      subjectId: 'topic-1',
+      subjectType: 'topic',
+    });
+    expect(mockTrpcClient.acceptance.attachRun.mutate).toHaveBeenCalledWith({
+      acceptanceId: 'acceptance-1',
+      verifyRunId: 'run-new',
+    });
+  });
+
+  it('creates another run when the same report directory is ingested again', async () => {
+    const verify = mockTrpcClient.verify as Record<string, any>;
+    verify.createRun.mutate
+      .mockResolvedValueOnce({ id: 'run-first' })
+      .mockResolvedValueOnce({ id: 'run-second' });
+
+    await run(['ingest-report', dir, '--json']);
+    await run(['ingest-report', dir, '--json']);
+
+    expect(verify.createRun.mutate).toHaveBeenCalledTimes(2);
+    expect(mockTrpcClient.acceptance.attachRun.mutate).toHaveBeenNthCalledWith(1, {
+      acceptanceId: 'acceptance-1',
+      verifyRunId: 'run-first',
+    });
+    expect(mockTrpcClient.acceptance.attachRun.mutate).toHaveBeenNthCalledWith(2, {
+      acceptanceId: 'acceptance-1',
+      verifyRunId: 'run-second',
+    });
+  });
+});
+
+describe('parseSubjectRef / subjectFromResult — acceptance subject', () => {
+  it('parses the closed set of type:id references', () => {
+    expect(parseSubjectRef('task:task_123')).toEqual({
+      subjectId: 'task_123',
+      subjectType: 'task',
+    });
+    expect(parseSubjectRef('topic:tpc_abc')).toEqual({
+      subjectId: 'tpc_abc',
+      subjectType: 'topic',
+    });
+    expect(parseSubjectRef('document:doc_1')).toEqual({
+      subjectId: 'doc_1',
+      subjectType: 'document',
+    });
+  });
+
+  it('rejects unknown types and malformed references', () => {
+    expect(parseSubjectRef('release:rel_1')).toBeNull();
+    expect(parseSubjectRef('task:')).toBeNull();
+    expect(parseSubjectRef('task_123')).toBeNull();
+    expect(parseSubjectRef(undefined)).toBeNull();
+  });
+
+  it('keeps an id containing colons intact (splits on the FIRST colon only)', () => {
+    expect(parseSubjectRef('topic:tpc:odd:id')).toEqual({
+      subjectId: 'tpc:odd:id',
+      subjectType: 'topic',
+    });
+  });
+
+  it('reads result.json subject in both string and object shapes', () => {
+    expect(subjectFromResult({ subject: 'task:task_9' })).toEqual({
+      ref: { subjectId: 'task_9', subjectType: 'task' },
+    });
+    expect(
+      subjectFromResult({
+        subject: { id: 'tpc_1', requirement: 'no regressions', type: 'topic' },
+      }),
+    ).toEqual({
+      ref: { subjectId: 'tpc_1', subjectType: 'topic' },
+      requirement: 'no regressions',
+    });
+  });
+
+  it('returns null on a malformed subject field instead of guessing', () => {
+    expect(subjectFromResult({})).toBeNull();
+    expect(subjectFromResult({ subject: 'nonsense' })).toBeNull();
+    expect(subjectFromResult({ subject: { id: 'x' } })).toBeNull();
   });
 });
 
@@ -469,5 +607,25 @@ describe('originFromEnv — in-app provenance', () => {
     delete process.env.LOBEHUB_OPERATION_ID;
 
     expect(originFromEnv()).toBeUndefined();
+  });
+});
+
+describe('subjectFromEnv — default topic acceptance', () => {
+  const saved = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it('binds an in-app run to its authoring topic', () => {
+    process.env.LOBEHUB_TOPIC_ID = 'tpc_1';
+
+    expect(subjectFromEnv()).toEqual({ subjectId: 'tpc_1', subjectType: 'topic' });
+  });
+
+  it('requires an explicit subject outside a topic', () => {
+    delete process.env.LOBEHUB_TOPIC_ID;
+
+    expect(subjectFromEnv()).toBeNull();
   });
 });

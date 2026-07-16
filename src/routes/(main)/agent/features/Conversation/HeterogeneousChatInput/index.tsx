@@ -20,9 +20,10 @@ import { ChatInput } from '@/features/Conversation';
 import { contextSelectors, useConversationStore } from '@/features/Conversation/store';
 import WideScreenContainer from '@/features/WideScreenContainer';
 import { resolveExecutionTarget } from '@/helpers/executionTarget';
+import { useEffectiveAgencyConfig } from '@/hooks/useEffectiveAgencyConfig';
 import { useRemoteAgentDeviceGuard } from '@/hooks/useRemoteAgentDeviceGuard';
 import { useAgentStore } from '@/store/agent';
-import { agentByIdSelectors, agentSelectors } from '@/store/agent/selectors';
+import { agentByIdSelectors } from '@/store/agent/selectors';
 import { useChatStore } from '@/store/chat';
 
 import HeteroControlBar from './HeteroControlBar';
@@ -46,7 +47,7 @@ const leftActions: ActionKeys[] = [];
  * block, no oversized 24px icon) so the guard stays a compact strip instead of
  * eating a chunk of the conversation area.
  */
-const GuardBanner = memo<{ action: ReactNode; hint?: string; title: string }>(
+const GuardBanner = memo<{ action?: ReactNode; hint?: string; title: string }>(
   ({ title, hint, action }) => (
     <WideScreenContainer>
       <Flexbox align={'center'} paddingBlock={'0 8px'} paddingInline={12}>
@@ -89,9 +90,14 @@ const HeterogeneousChatInput = memo(() => {
   const params = useParams<{ aid: string }>();
   const navigate = useNavigate();
 
-  const agencyConfig = useAgentStore(
-    (s) => agentSelectors.getAgentConfigById(agentId)(s)?.agencyConfig,
-  );
+  // Effective config = shared row + this member's per-agent device override
+  // (LOBE-11689) — the raw shared `agencyConfig` may carry another member's
+  // device pick, which would drive the guard/model-selector gates off the
+  // wrong machine.
+  // While the preference is loading, the merged config may still reflect only
+  // the shared row — hold the input closed (below) instead of gating device
+  // runs off a value that can flip once the override arrives.
+  const { agencyConfig, isPreferenceLoading } = useEffectiveAgencyConfig(agentId);
   const providerType = agencyConfig?.heterogeneousProvider?.type;
   const isWorkspaceAgent = useAgentStore(agentByIdSelectors.isWorkspaceAgentById(agentId));
   const executionTarget = resolveExecutionTarget(agencyConfig, {
@@ -100,6 +106,7 @@ const HeterogeneousChatInput = memo(() => {
     workspaceScoped: isWorkspaceAgent,
   });
   const isRemoteAgent = !!providerType && isRemoteHeterogeneousType(providerType);
+  const ampDeviceSelectionRequired = providerType === 'amp' && executionTarget === 'none';
 
   // The model + thinking-effort selector only applies to local-CLI providers
   // (claude-code / codex) and only when this surface actually dispatches the run.
@@ -189,7 +196,11 @@ const HeterogeneousChatInput = memo(() => {
   };
 
   const renderCloudConfigGuard = () => {
-    if (isDeviceExecution || isConfigured) return null;
+    // Until the override loads, `isDeviceExecution` may be a false negative —
+    // don't flash the cloud-config prompt for what turns out to be a device run.
+    if (isPreferenceLoading || ampDeviceSelectionRequired || isDeviceExecution || isConfigured) {
+      return null;
+    }
 
     return (
       <GuardBanner
@@ -204,13 +215,32 @@ const HeterogeneousChatInput = memo(() => {
     );
   };
 
+  const renderAmpDeviceGuard = () => {
+    if (!ampDeviceSelectionRequired) return null;
+
+    return (
+      <GuardBanner
+        hint={t('heteroAgent.executionTarget.ampSandboxUnsupported')}
+        title={t('platformAgent.deviceGuard.noDevice.title')}
+      />
+    );
+  };
+
   // Device execution doesn't use the cloud sandbox, so it doesn't need cloud
-  // credentials — only the sandbox path gates on `isConfigured`.
-  const inputDisabled = (!isConfigured && !isDeviceExecution) || deviceBlocked;
-  const hasGuard = deviceBlocked || (!isConfigured && !isDeviceExecution);
+  // credentials — only the sandbox path gates on `isConfigured`. While the
+  // workspace preference loads, keep send disabled: the effective target isn't
+  // known yet, so neither guard can vouch for the run.
+  const inputDisabled =
+    isPreferenceLoading ||
+    ampDeviceSelectionRequired ||
+    (!isConfigured && !isDeviceExecution) ||
+    deviceBlocked;
+  const hasGuard =
+    ampDeviceSelectionRequired || deviceBlocked || (!isConfigured && !isDeviceExecution);
 
   return (
     <Flexbox>
+      {renderAmpDeviceGuard()}
       {renderCloudConfigGuard()}
       {renderDeviceGuard()}
       <ChatInput

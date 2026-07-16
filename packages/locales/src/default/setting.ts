@@ -13,6 +13,8 @@ export default {
   'agentImport.modal.knowledgeNotice': 'Knowledge bindings and files are not copied yet.',
   'agentImport.success': 'Agent copied to {{name}}.',
   'agentImport.title': 'Copy to Workspace',
+  'agentConnectorUsage.goToAgent': 'Go to agent',
+  'agentConnectorUsage.label': 'Used by agent',
   'accountDeletion.cancelButton': 'Cancel Deletion',
   'accountDeletion.cancelConfirmTitle': 'Cancel account deletion request?',
   'accountDeletion.cancelFailed': 'Failed to cancel deletion request',
@@ -714,11 +716,14 @@ export default {
   'settingAgent.agentTools.pickerEmpty': 'No user connectors available to add',
   'settingAgent.agentTools.priorityHint': 'Run priority',
   'settingAgent.agentTools.priorityTooltip':
-    'When identifiers collide, the Agent tool overrides the User tool at runtime (Agent > Workspace > Personal).',
+    'When tools share a name, the agent-exclusive tool runs first at runtime; your user tools come next.',
+  'settingAgent.agentTools.priorityTooltipWorkspace':
+    'When tools share a name, this agent-scoped tool runs first at runtime; the workspace user tools are the fallback.',
   'settingAgent.agentTools.removeOwnedConfirm':
     'Delete this agent-exclusive connector? Its credentials will be removed.',
   'settingAgent.agentTools.tabAgent': 'Agent Tools',
   'settingAgent.agentTools.tabUser': 'User Tools',
+  'settingAgent.agentTools.tabWorkspace': 'Workspace Tools',
   'settingAgent.runtimeConfig.title': 'Model & Tools',
   'settingAgent.submit': 'Update Agent',
   'settingAgent.tag.desc': 'Agent tags will be displayed in the Agent Community',
@@ -902,6 +907,7 @@ export default {
   'settingModel.params.panel.historyLimit': 'Limit History Messages',
   'settingModel.params.panel.openness': 'Openness',
   'settingModel.params.panel.responseLength': 'Limit Response Length',
+  'settingModel.params.panel.subAgentModel': 'Sub-Agent Model',
   'settingModel.params.panel.tab': 'Params',
   'settingModel.params.panel.title': 'Chat Parameter Settings',
   'settingModel.params.panel.topicDivergence': 'Topic Divergence',
@@ -915,6 +921,8 @@ export default {
   'settingModel.reasoningEffort.options.low': 'Low',
   'settingModel.reasoningEffort.options.medium': 'Medium',
   'settingModel.reasoningEffort.title': 'Reasoning Effort',
+  'settingModel.subAgentModel.desc':
+    'The default model used by sub-agents this agent spawns. Sub-agents run on a lightweight model by default instead of inheriting this agent’s main model.',
   'settingModel.submit': 'Update Model Settings',
   'settingModel.temperature.desc':
     'The higher the value, the more creative and imaginative the responses; the lower the value, the more rigorous the responses.',
@@ -1074,6 +1082,7 @@ export default {
     'Select a voice for the current agent, different TTS services support different voices',
   'settingTTS.voice.preview': 'Voice Preview',
   'settingTTS.voice.title': 'Text-to-Speech Voice',
+  'skillGroup.agentConnectors': 'Agent Connectors',
   'skillGroup.builtinSkills': 'Built-in Skills',
   'skillGroup.builtinTools': 'Built-in Tools',
   'skillGroup.communityConnectors': 'OAuth Connectors',
@@ -1384,6 +1393,9 @@ When I am ___, I need ___
   'workspace.billingPage.billing.autoRenewOffOnDate': 'Ends on {{date}}',
   'workspace.billingPage.billing.autoRenewOn': 'Auto-renew on',
   'workspace.billingPage.billing.autoRenewOnDate': 'Renews on {{date}}',
+  'workspace.billingPage.billing.payOnceValidUntil': 'Valid until {{date}}',
+  'workspace.billingPage.billing.payOnceSummaryLine':
+    '{{duration}} plan · purchased {{start}} · valid until {{date}}',
   'workspace.billingPage.billing.banner.cancelledDesc':
     'Cancellation scheduled. Your subscription stops renewing at the end of the current billing cycle — the workspace then falls back to Free.',
   'workspace.billingPage.billing.banner.cancelledTitle': 'Subscription pending cancellation',
@@ -1482,6 +1494,10 @@ When I am ___, I need ___
   'workspace.billingPage.billing.change.preview': '{{seats}} seats · {{interval}} billing preview',
   'workspace.billingPage.billing.change.purchasedSeats': 'Prepaid extra seats',
   'workspace.billingPage.billing.change.purchasedSeatsWithMax': 'Prepaid seats (max {{max}} seats)',
+  'workspace.billingPage.billing.change.payOnceRemainingExceeds':
+    "The remaining value of your current plan exceeds the new plan's price, so it cannot be upgraded yet.",
+  'workspace.billingPage.billing.change.payOnceUpgradeInvalid':
+    'One-time upgrades require a higher tier or a longer duration.',
   'workspace.billingPage.billing.change.memberLimitReached':
     'This workspace currently has {{count}} billable members. Remove members or change them to {{viewerRole}} before reducing seats further.',
   'workspace.billingPage.billing.change.seatReductionHint':
@@ -1502,12 +1518,16 @@ When I am ___, I need ___
   'workspace.billingPage.billing.upgradePlanModal.currentSeatsLine': 'Current / total seats',
   'workspace.billingPage.billing.upgradePlanModal.decreaseSeats': 'Decrease seats',
   'workspace.billingPage.billing.upgradePlanModal.increaseSeats': 'Increase seats',
+  'workspace.billingPage.billing.upgradePlanModal.purchasedSeatFloorSummary':
+    'You already have {{count}} purchased extra seats — this change cannot go below that.',
   'workspace.billingPage.billing.upgradePlanModal.memberSeatSummary':
     'This workspace has {{members}} billable members. At least {{count}} extra seats are required.',
   'workspace.billingPage.billing.upgradePlanModal.noChargeToday': 'No charge today',
   'workspace.billingPage.billing.upgradePlanModal.paymentMethodFallback': 'Current payment method',
   'workspace.billingPage.billing.upgradePlanModal.seatLimitReached':
     'Current plan supports up to {{maxSeats}} seats.',
+  'workspace.billingPage.billing.upgradePlanModal.payOnceSeatCheckout':
+    'You will be redirected to checkout to pay the prorated seat fee for the remaining period.',
   'workspace.billingPage.billing.upgradePlanModal.paymentMethodLabel': 'Payment method',
   'workspace.billingPage.billing.upgradePlanModal.proratedCharge':
     'A prorated charge will be applied immediately to your current payment method.',
@@ -1584,6 +1604,7 @@ When I am ___, I need ___
   'workspace.billingPage.billing.manage.cancelItem': 'Cancel Subscription',
   'workspace.billingPage.billing.manage.cta': 'Manage',
   'workspace.billingPage.billing.manage.downgradeItem': 'Downgrade',
+  'workspace.billingPage.billing.manage.payOnceUpgradeItem': 'Upgrade plan',
   'workspace.billingPage.billing.manage.resumeItem': 'Resume subscription',
   'workspace.billingPage.billing.manage.switchToYearlyItem': 'Switch to yearly',
   'workspace.billingPage.billing.monthlyFeeLabel': '/ month',
@@ -1792,12 +1813,22 @@ When I am ___, I need ___
     'For small teams getting started with workspace collaboration',
   'workspace.billingPage.plans.headerNote.active':
     'You are on the {{plan}} plan. If you have any questions or would like further support with your plan, <contact>contact us</contact>',
+  'workspace.billingPage.plans.headerNote.payOnce':
+    'You are on the {{plan}} plan ({{duration}}), valid until {{date}}. If you have any questions or would like further support with your plan, <contact>contact us</contact>',
   'workspace.billingPage.plans.headerNote.renewing':
     'You are on the {{plan}} plan, renewing {{date}}. If you have any questions or would like further support with your plan, <contact>contact us</contact>',
   'workspace.billingPage.plans.manageSeatsLink': 'Manage seats',
   'workspace.billingPage.plans.modelsHint': 'Estimated messages from the shared pool',
   'workspace.billingPage.plans.modelsTitle': 'Featured models',
   'workspace.billingPage.plans.perMonth': '/ month',
+  'workspace.billingPage.plans.payOnceChangeUnsupported':
+    'One-time plans cannot be downgraded or cancelled. You can switch plans after the current period ends.',
+  'workspace.billingPage.plans.payOnceSeatOption': '+${{seatFee}} / seat',
+  'workspace.billingPage.plans.seatPriceCaptionYearly': '${{seatFee}}/seat/year',
+  'workspace.billingPage.plans.payOncePurchaseNotice':
+    'One-time payments do not auto-renew. You can upgrade or add seats at any time, while downgrades wait until the current period ends. Please confirm your selection.',
+  'workspace.billingPage.plans.payOnceUpgradeNotice':
+    'The upgrade takes effect immediately — the remaining value of your current plan is credited against the new one-time fee at checkout.',
   'workspace.billingPage.plans.pendingChangeCta': 'Change scheduled',
   'workspace.billingPage.plans.popularTag': 'Recommended',
   'workspace.billingPage.plans.priceProCaption': 'Platform fee · billed monthly',
@@ -2612,6 +2643,8 @@ When I am ___, I need ___
   'workspace.wizard.step2.billing.totalMonthHint': 'Platform fee today · includes 3 seats',
   'workspace.wizard.step2.chargeDisclosure':
     'Confirming creates this workspace on {{plan}} and charges ${{fee}} now, plus any applicable taxes. The subscription renews on the selected {{interval}} cycle until you cancel.',
+  'workspace.wizard.step2.chargeDisclosurePayOnce':
+    'Confirming creates this workspace on {{plan}} and charges a one-time fee of ${{fee}} for {{duration}}, plus any applicable taxes. It does not auto-renew — you can upgrade or add seats at any time, while downgrades wait until the period ends.',
   'workspace.wizard.step2.confirmPurchase': 'Confirm purchase',
   'workspace.wizard.step2.createFailed': 'Failed to create workspace',
   'workspace.wizard.step2.details.description': "See what's included in your selected plan.",
