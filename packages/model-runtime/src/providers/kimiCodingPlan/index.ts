@@ -19,7 +19,7 @@ const KIMI_MODEL_MAX_OUTPUT: Record<string, number> = {
 };
 
 // Helpers for message normalization (shared with Moonshot provider)
-const isKimiK3Model = (model: string) => model === 'k3';
+const isKimiK3Model = (model: string) => model === 'kimi-k3';
 const isKimiK25Model = (model: string) => model === 'kimi-k2.5' || model === 'k2p5';
 const isKimiNativeThinkingModel = (model: string) =>
   isKimiK3Model(model) || model.startsWith('kimi-k2-thinking');

@@ -116,7 +116,7 @@ describe('LobeKimiCodingPlanAI', () => {
       it('should use the conservative default for Kimi K3 when max_tokens is not specified', async () => {
         await instance.chat({
           messages: [{ content: 'Hello', role: 'user' }],
-          model: 'k3',
+          model: 'kimi-k3',
         });
 
         const payload = getLastRequestPayload();
@@ -127,7 +127,7 @@ describe('LobeKimiCodingPlanAI', () => {
         await instance.chat({
           messages: [{ content: 'Hello', role: 'user' }],
           max_tokens: 32_768,
-          model: 'k3',
+          model: 'kimi-k3',
         });
 
         const payload = getLastRequestPayload();
@@ -246,7 +246,7 @@ describe('LobeKimiCodingPlanAI', () => {
       it('should use K3 reasoning effort without K2 thinking or sampling params', async () => {
         await instance.chat({
           messages: [{ content: 'Hello', role: 'user' }],
-          model: 'k3',
+          model: 'kimi-k3',
           reasoning_effort: 'medium',
           temperature: 0.5,
           thinking: { budget_tokens: 2048, type: 'disabled' },
@@ -296,7 +296,7 @@ describe('LobeKimiCodingPlanAI', () => {
             { content: 'Response', role: 'assistant' },
             { content: 'Follow-up', role: 'user' },
           ],
-          model: 'k3',
+          model: 'kimi-k3',
         });
 
         const payload = getLastRequestPayload();
