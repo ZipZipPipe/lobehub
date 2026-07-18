@@ -19,11 +19,21 @@ const KIMI_MODEL_MAX_OUTPUT: Record<string, number> = {
 };
 
 // Helpers for message normalization (shared with Moonshot provider)
+const isKimiK3Model = (model: string) => model === 'k3';
 const isKimiK25Model = (model: string) => model === 'kimi-k2.5' || model === 'k2p5';
-const isKimiNativeThinkingModel = (model: string) => model.startsWith('kimi-k2-thinking');
+const isKimiNativeThinkingModel = (model: string) =>
+  isKimiK3Model(model) || model.startsWith('kimi-k2-thinking');
 const isEmptyContent = (content: any) =>
   content === '' || content === null || content === undefined;
 const hasValidReasoning = (reasoning: any) => reasoning?.content && !reasoning?.signature;
+
+const resolveKimiK3ReasoningEffort = (
+  effort: ChatStreamPayload['reasoning_effort'],
+): 'high' | 'low' | 'max' | undefined => {
+  if (effort === 'low') return 'low';
+  if (effort === 'medium' || effort === 'high') return 'high';
+  if (effort === 'xhigh' || effort === 'max') return 'max';
+};
 
 const getK25Params = (isThinkingEnabled: boolean) => ({
   temperature: isThinkingEnabled ? 1 : 0.6,
@@ -70,6 +80,7 @@ const buildKimiCodingPlanAnthropicPayload = async (
   const resolvedMaxTokens = payload.max_tokens ?? KIMI_MODEL_MAX_OUTPUT[payload.model] ?? 8192;
 
   const isK25 = isKimiK25Model(payload.model);
+  const isK3 = isKimiK3Model(payload.model);
   const isNativeThinking = isKimiNativeThinkingModel(payload.model);
   const isThinkingEnabled = isNativeThinking || (isK25 && payload.thinking?.type !== 'disabled');
 
@@ -78,6 +89,26 @@ const buildKimiCodingPlanAnthropicPayload = async (
     max_tokens: resolvedMaxTokens,
     messages: normalizeMessagesForAnthropic(payload.messages, isThinkingEnabled),
   });
+
+  // K3 reasoning is always enabled. It does not accept the K2 thinking-budget
+  // parameter or sampling controls, and uses top-level reasoning_effort instead.
+  // Kimi Code maps medium/high to high and xhigh/max to max; omitting the field
+  // keeps the service default of max.
+  if (isK3) {
+    const {
+      output_config: _outputConfig,
+      temperature: _temperature,
+      thinking: _thinking,
+      top_p: _topP,
+      ...k3Payload
+    } = basePayload;
+    const reasoningEffort = resolveKimiK3ReasoningEffort(payload.reasoning_effort);
+
+    return {
+      ...k3Payload,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    } as Anthropic.MessageCreateParams;
+  }
 
   if (!isK25 && !isNativeThinking) return basePayload;
 
@@ -104,7 +135,7 @@ export const params = createAnthropicCompatibleParams({
   debug: {
     chatCompletion: () => process.env.DEBUG_KIMI_CODING_PLAN_CHAT_COMPLETION === '1',
   },
-  models: async ({ client }) => {
+  models: async () => {
     const { kimicodingplan } = await import('model-bank');
     return processMultiProviderModelList(
       kimicodingplan.map((m: { id: string }) => ({ id: m.id })),

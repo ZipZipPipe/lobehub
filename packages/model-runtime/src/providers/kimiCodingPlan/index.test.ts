@@ -113,6 +113,27 @@ describe('LobeKimiCodingPlanAI', () => {
         expect(payload.max_tokens).toBe(65_536);
       });
 
+      it('should use the conservative default for Kimi K3 when max_tokens is not specified', async () => {
+        await instance.chat({
+          messages: [{ content: 'Hello', role: 'user' }],
+          model: 'k3',
+        });
+
+        const payload = getLastRequestPayload();
+        expect(payload.max_tokens).toBe(8192);
+      });
+
+      it('should respect user-provided max_tokens for Kimi K3', async () => {
+        await instance.chat({
+          messages: [{ content: 'Hello', role: 'user' }],
+          max_tokens: 32_768,
+          model: 'k3',
+        });
+
+        const payload = getLastRequestPayload();
+        expect(payload.max_tokens).toBe(32_768);
+      });
+
       it('should use default 8192 for unknown models', async () => {
         await instance.chat({
           messages: [{ content: 'Hello', role: 'user' }],
@@ -221,6 +242,24 @@ describe('LobeKimiCodingPlanAI', () => {
         const payload = getLastRequestPayload();
         expect(payload.thinking).toBeUndefined();
       });
+
+      it('should use K3 reasoning effort without K2 thinking or sampling params', async () => {
+        await instance.chat({
+          messages: [{ content: 'Hello', role: 'user' }],
+          model: 'k3',
+          reasoning_effort: 'medium',
+          temperature: 0.5,
+          thinking: { budget_tokens: 2048, type: 'disabled' },
+          top_p: 0.8,
+        });
+
+        const payload = getLastRequestPayload();
+        expect(payload.reasoning_effort).toBe('high');
+        expect(payload.thinking).toBeUndefined();
+        expect(payload.temperature).toBeUndefined();
+        expect(payload.top_p).toBeUndefined();
+        expect(payload.output_config).toBeUndefined();
+      });
     });
 
     describe('message normalization for thinking', () => {
@@ -237,6 +276,27 @@ describe('LobeKimiCodingPlanAI', () => {
             { content: 'Follow-up', role: 'user' },
           ],
           model: 'kimi-k2-thinking',
+        });
+
+        const payload = getLastRequestPayload();
+        const assistantMessage = payload.messages.find(
+          (message: any) => message.role === 'assistant',
+        );
+
+        expect(assistantMessage?.content).toEqual([
+          { type: 'thinking', thinking: ' ' },
+          { type: 'text', text: 'Response' },
+        ]);
+      });
+
+      it('should force thinking block on assistant messages for Kimi K3', async () => {
+        await instance.chat({
+          messages: [
+            { content: 'Hello', role: 'user' },
+            { content: 'Response', role: 'assistant' },
+            { content: 'Follow-up', role: 'user' },
+          ],
+          model: 'k3',
         });
 
         const payload = getLastRequestPayload();

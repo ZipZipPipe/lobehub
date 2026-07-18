@@ -1,8 +1,32 @@
 import { type AIChatModelCard } from '../types/aiModel';
 
-// ref: https://platform.moonshot.ai/docs
+// ref: https://www.kimi.com/code/docs/kimi-code/models.html
 
 const kimiCodingPlanChatModels: AIChatModelCard[] = [
+  {
+    abilities: {
+      functionCall: true,
+      reasoning: true,
+      structuredOutput: true,
+      video: true,
+      vision: true,
+    },
+    contextWindowTokens: 262_144,
+    description:
+      'Kimi K3 is the most capable Kimi model available through Kimi Code, with strong coding, long-horizon agent, visual understanding, and deep reasoning capabilities.',
+    displayName: 'Kimi K3',
+    enabled: true,
+    family: 'kimi',
+    generation: 'kimi-k3',
+    id: 'k3',
+    organization: 'Moonshot',
+    releasedAt: '2026-07-16',
+    settings: {
+      disabledParams: ['frequency_penalty', 'presence_penalty', 'temperature', 'top_p'],
+      extendParams: ['reasoningEffort'],
+    },
+    type: 'chat',
+  },
   {
     abilities: {
       functionCall: true,

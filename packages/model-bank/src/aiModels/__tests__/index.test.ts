@@ -104,6 +104,24 @@ describe('xAI models', () => {
   });
 });
 
+describe('Kimi Code models', () => {
+  it('includes Kimi K3 with the fork-specific 256K context limit', () => {
+    const model = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.providerId === ModelProvider.KimiCodingPlan && m.id === 'k3',
+    );
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        contextWindowTokens: 262_144,
+        enabled: true,
+        providerId: ModelProvider.KimiCodingPlan,
+        type: 'chat',
+      }),
+    );
+    expect(model?.maxOutput).toBeUndefined();
+  });
+});
+
 describe('knowledgeCutoff backfill', () => {
   it('fills knowledgeCutoff from the canonical map for builtin models', () => {
     const fable = LOBE_DEFAULT_MODEL_LIST.find(

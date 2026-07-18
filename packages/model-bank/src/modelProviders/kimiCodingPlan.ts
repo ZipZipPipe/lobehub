@@ -1,15 +1,15 @@
 import type { ModelProviderCard } from '@/types/llm';
 
-// ref: https://platform.moonshot.ai/docs
+// ref: https://www.kimi.com/code/docs/kimi-code/models.html
 const KimiCodingPlan: ModelProviderCard = {
   chatModels: [],
   checkModel: 'kimi-k2.5',
   description:
-    'Kimi Code from Moonshot AI provides access to Kimi models including K2.5 for coding tasks.',
+    'Kimi Code from Moonshot AI provides subscription access to Kimi models including K3 for coding tasks.',
   disableBrowserRequest: true,
   id: 'kimicodingplan',
   modelList: { showModelFetcher: false },
-  modelsUrl: 'https://platform.moonshot.ai/docs',
+  modelsUrl: 'https://www.kimi.com/code/docs/kimi-code/models.html',
   name: 'Kimi Code',
   settings: {
     disableBrowserRequest: true,
@@ -24,7 +24,7 @@ const KimiCodingPlan: ModelProviderCard = {
     showDeployName: true,
     showModelFetcher: false,
   },
-  url: 'https://platform.moonshot.ai',
+  url: 'https://www.kimi.com/code',
 };
 
 export default KimiCodingPlan;
