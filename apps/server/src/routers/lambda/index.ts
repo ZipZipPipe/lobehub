@@ -62,6 +62,7 @@ import { messageRouter } from './message';
 import { messengerRouter } from './messenger';
 import { notebookRouter } from './notebook';
 import { notificationRouter } from './notification';
+import { oauthAppRouter } from './oauthApp';
 import { oauthDeviceFlowRouter } from './oauthDeviceFlow';
 import { pluginRouter } from './plugin';
 import { pushTokenRouter } from './pushToken';
@@ -82,6 +83,7 @@ import { userMemoryRouter } from './userMemory';
 import { verifyRouter } from './verify';
 import { videoRouter } from './video';
 import { webBrowsingRouter } from './webBrowsing';
+import { workRouter } from './work';
 import { workspaceUserSettingsRouter } from './workspaceUserSettings';
 
 export const lambdaRouter = router({
@@ -132,6 +134,7 @@ export const lambdaRouter = router({
   messenger: messengerRouter,
   notebook: notebookRouter,
   notification: notificationRouter,
+  oauthApp: oauthAppRouter,
   oauthDeviceFlow: oauthDeviceFlowRouter,
   plugin: pluginRouter,
   pushToken: pushTokenRouter,
@@ -151,6 +154,7 @@ export const lambdaRouter = router({
   verify: verifyRouter,
   video: videoRouter,
   webBrowsing: webBrowsingRouter,
+  work: workRouter,
   workspace: workspaceRouter,
   workspaceAuditLog: workspaceAuditLogRouter,
   workspaceCreds: workspaceCredsRouter,

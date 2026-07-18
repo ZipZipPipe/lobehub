@@ -19,6 +19,11 @@ export {
   type UploadHeterogeneousImage,
 } from './agentStreamPipeline';
 export {
+  classifyHeteroProcessFailure,
+  type ClassifyHeteroProcessFailureParams,
+  isHeteroStatusGuideErrorData,
+} from './classifyProcessFailure';
+export {
   buildClaudeSdkUserMessageFromStreamJson,
   ClaudeAgentSdkSession,
   type ClaudeAgentSdkSessionOptions,

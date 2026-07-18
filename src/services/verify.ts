@@ -1,4 +1,6 @@
 import type {
+  AcceptanceCheckReviewAction,
+  AcceptanceReviewAnnotation,
   VerifierType,
   VerifyCheckItem,
   VerifyEvidence,
@@ -18,6 +20,9 @@ import type {
 import { lambdaClient } from '@/libs/trpc/client';
 
 export type AcceptanceBundle = Awaited<ReturnType<typeof lambdaClient.acceptance.getBundle.query>>;
+export type AcceptanceListItem = Awaited<
+  ReturnType<typeof lambdaClient.acceptance.list.query>
+>[number];
 
 /** Editable fields of a single delivery-check criterion. */
 export interface UpdateCriterionValue {
@@ -136,11 +141,54 @@ export class VerifyService {
   getAcceptanceBundle = (id: string): Promise<AcceptanceBundle> =>
     lambdaClient.acceptance.getBundle.query({ id });
 
+  listAcceptances = (): Promise<AcceptanceListItem[]> => lambdaClient.acceptance.list.query();
+
   acceptDelivery = (id: string, comment?: string) =>
     lambdaClient.acceptance.accept.mutate({ comment, id });
 
   rejectDelivery = (id: string, comment: string) =>
     lambdaClient.acceptance.reject.mutate({ comment, id });
+
+  /**
+   * The user's verdict on individual union checks — accept settles a check for
+   * good; reject records feedback the next round reads. A group "accept all"
+   * is the same call with many ids.
+   */
+  reviewChecks = (input: {
+    action: AcceptanceCheckReviewAction;
+    annotations?: AcceptanceReviewAnnotation[];
+    checkItemIds: string[];
+    comment?: string;
+    fileIds?: string[];
+    id: string;
+  }) => lambdaClient.acceptance.reviewChecks.mutate(input);
+
+  /**
+   * Feedback addressed to a check group (business category) — for concerns
+   * that belong to no single check yet must reach the next round.
+   */
+  addGroupFeedback = (input: {
+    category: string;
+    comment: string;
+    fileIds?: string[];
+    id: string;
+  }) => lambdaClient.acceptance.addGroupFeedback.mutate(input);
+
+  /**
+   * Dispatch the repair prompt straight into the acceptance's origin
+   * conversation — a user message that triggers the agent, the same callback
+   * channel remote hetero runs (`lh notify`) use.
+   */
+  dispatchAcceptanceRepair = (input: { agentId?: string; content: string; topicId: string }) =>
+    lambdaClient.agentNotify.notify.mutate({
+      agentId: input.agentId,
+      content: input.content,
+      role: 'user',
+      topicId: input.topicId,
+    });
+
+  /** Stamp the aggregate `repairing` after the send-back dispatch. */
+  markAcceptanceRepairing = (id: string) => lambdaClient.acceptance.markRepairing.mutate({ id });
 
   // ---- per-run plan ----
   getVerifyState = (operationId: string): Promise<VerifyStateResponse | null> =>

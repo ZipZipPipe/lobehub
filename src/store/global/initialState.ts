@@ -63,7 +63,7 @@ export enum SettingsTabs {
   Common = 'common',
   Connector = 'connector',
   Credits = 'credits',
-  Creds = 'creds',
+  Creds = 'credential',
   Devices = 'devices',
   Hotkey = 'hotkey',
   /** @deprecated Use ServiceModel instead */
@@ -72,6 +72,7 @@ export enum SettingsTabs {
   Memory = 'memory',
   Messenger = 'messenger',
   Notification = 'notification',
+  OAuthApps = 'oauth-apps',
   // business
   Plans = 'plans',
   Profile = 'profile',

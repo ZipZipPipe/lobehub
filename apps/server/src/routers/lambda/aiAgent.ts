@@ -475,6 +475,13 @@ const HeteroFinishSchema = z.object({
   agentType: z.enum(['amp', 'claude-code', 'codex']),
   error: z
     .object({
+      /**
+       * Structured status-guide error for process-level failures (CLI not
+       * installed, auth required) — the CLI's `classifyHeteroProcessFailure`
+       * output. Persisted verbatim as the `ChatMessageError.body` so the
+       * client renders the dedicated guide.
+       */
+      body: z.record(z.string(), z.unknown()).optional(),
       message: z.string(),
       type: z.string(),
     })
@@ -763,6 +770,11 @@ export const aiAgentRouter = router({
         agentId,
         appContext,
         autoStart,
+        // Propagate the originating request's client IP / user agent into the run
+        // so downstream LLM-call metadata can carry them for auditing and spend
+        // attribution. These are server-derived from the tRPC context and are
+        // intentionally not part of the client-passable input schema.
+        clientIp: ctx.clientIp ?? undefined,
         deviceId,
         existingMessageIds,
         fileIds,
@@ -777,6 +789,7 @@ export const aiAgentRouter = router({
         selectedToolIds,
         slug,
         trigger: trigger ?? RequestTrigger.Chat,
+        userAgent: ctx.userAgent ?? undefined,
         userInterventionConfig,
       });
     } catch (error: any) {

@@ -39,7 +39,12 @@ export interface HeterogeneousIngestParams {
 
 export interface HeterogeneousFinishParams {
   agentType: HeterogeneousAgentType;
-  error?: { message: string; type: string };
+  /**
+   * CLI-reported failure. `body`, when present, is the structured status-guide
+   * error (`agentType` + `code` + details) persisted verbatim as the
+   * `ChatMessageError.body`.
+   */
+  error?: { body?: Record<string, unknown>; message: string; type: string };
   operationId: string;
   result: HeterogeneousFinishResult;
   /**
@@ -145,10 +150,24 @@ export class HeterogeneousAgentService {
       throw err;
     }
 
-    // Sequential publish preserves stepIndex ordering — Redis XADD itself is
-    // serialized but awaiting in-order avoids interleaving with concurrent
-    // ingest batches sharing the same operationId.
-    for (const event of events) {
+    // Publish only events not yet delivered to the stream. The publish gate
+    // (`publishedKeys`, peer of the persistence dedupe) makes a BatchIngester
+    // retry invisible to live subscribers: a batch that fully succeeded but
+    // lost its tRPC response republishes nothing, while one that died
+    // mid-publish resumes from the first unpublished event — each event is
+    // latched only after its own XADD succeeds. Sequential publish preserves
+    // stepIndex ordering — Redis XADD itself is serialized but awaiting
+    // in-order avoids interleaving with concurrent ingest batches sharing the
+    // same operationId.
+    const unpublished = this.persistenceHandler.filterUnpublishedEvents(operationId, events);
+    if (unpublished.length < events.length) {
+      log(
+        'heteroIngest: skip %d already-published events op=%s',
+        events.length - unpublished.length,
+        operationId,
+      );
+    }
+    for (const event of unpublished) {
       // Each event already carries operationId; pass through unchanged so the
       // wire shape on the WS side is identical to gateway-driven runs.
       await this.streamEventManager.publishStreamEvent(operationId, {
@@ -156,15 +175,18 @@ export class HeterogeneousAgentService {
         stepIndex: event.stepIndex,
         type: event.type,
       });
+      this.persistenceHandler.markEventPublished(operationId, event);
     }
 
     // Accumulate the execution-trace snapshot LAST. The recorder has no
     // per-event idempotency, so it must run only after every step that can throw
     // and trigger a BatchIngester retry of this same batch — otherwise a publish
     // failure above would re-fold these events and double-count the snapshot.
-    // It's the final statement and best-effort (never throws), so it folds each
-    // batch exactly once (on the attempt that gets this far).
-    await this.traceRecorder.appendBatch(operationId, events);
+    // Gating on the publish gate also skips the pure-redelivery batch (full
+    // success whose response was lost), which would otherwise double-fold here.
+    if (unpublished.length > 0) {
+      await this.traceRecorder.appendBatch(operationId, events);
+    }
   }
 
   async heteroFinish(params: HeterogeneousFinishParams): Promise<void> {
@@ -184,7 +206,11 @@ export class HeterogeneousAgentService {
     // accumulated content / reasoning that the in-stream `agent_runtime_end`
     // already wrote (no-op when state is clean), persists the CLI's native
     // session id for next-turn resume, and frees the per-operation memory.
-    await this.persistenceHandler.finish({ error, operationId, result, sessionId });
+    // `topicId` lets finish() bootstrap state for a run that failed before
+    // producing any stream event (spawn ENOENT / auth-on-stderr): the terminal
+    // error must be written HERE, before the `agent_runtime_end` publish below
+    // triggers the client's message refetch.
+    await this.persistenceHandler.finish({ error, operationId, result, sessionId, topicId });
 
     // Always emit a terminal `agent_runtime_end` so renderer subscribers shut
     // down even if the CLI stream missed it (process killed mid-flight,

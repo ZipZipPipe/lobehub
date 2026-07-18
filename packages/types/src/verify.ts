@@ -99,9 +99,95 @@ export interface AcceptanceConfig {
   verifyRubricId?: string;
 }
 
+/**
+ * A file the user attached to their feedback (an uploaded/pasted screenshot),
+ * resolved to a display URL. The stored form is a bare `fileId` on the decision
+ * detail; this is the enriched view the acceptance page renders, produced by the
+ * bundle read (which resolves the id to a signed URL as the aggregate's owner).
+ */
+export interface AcceptanceAttachment {
+  id: string;
+  /** Original file name, when known. */
+  name?: string;
+  /** Resolved (possibly signed) URL — null when the file no longer resolves. */
+  url: string | null;
+}
+
+/**
+ * User feedback addressed to a check GROUP (business category) rather than any
+ * single check — the "this concern doesn't belong to a check I could reject"
+ * channel. Stored on the round it judges ({@link VerifyRunDecisionDetail});
+ * this is the derived view the acceptance page consumes, with `roundIndex`
+ * read off that run, so the check-reject staleness rule (consumed once a
+ * newer round lands) applies structurally.
+ */
+export interface AcceptanceGroupFeedback {
+  /** Attachments backing the feedback, resolved to URLs by the bundle read. */
+  attachments?: AcceptanceAttachment[];
+  /** The group's category label ('' targets the uncategorized bucket). */
+  category: string;
+  comment: string;
+  /** When the feedback was written (ISO 8601). */
+  createdAt: string;
+  /** Uploaded/pasted screenshots backing the feedback (FKs to files). */
+  fileIds?: string[];
+  /** The round the feedback was addressed to — its run's own round index. */
+  roundIndex: number;
+}
+
+/** One group-scoped feedback entry as stored on a round's decision detail. */
+export type VerifyRunGroupFeedbackEntry = Omit<AcceptanceGroupFeedback, 'roundIndex'>;
+
 /** Generic acceptance extension bag for cross-subject state we have not modeled yet. */
 export interface AcceptanceMetadata {
   [key: string]: unknown;
+}
+
+/**
+ * The user's per-check verdict on the acceptance union. `accept` is sticky —
+ * an accepted check stays settled across later rounds; `reject` binds to the
+ * round it was made on and becomes iteration history once a newer round lands.
+ */
+export type AcceptanceCheckReviewAction = 'accept' | 'reject';
+
+/**
+ * A user-drawn region on one evidence image, in coordinates normalized to the
+ * image box (0–1) so the overlay renders at any display size.
+ */
+export interface AcceptanceReviewAnnotation {
+  /** The note attached to this region. */
+  comment?: string;
+  /** The evidence row (`verify_evidence.id`) the region was drawn on. */
+  evidenceId: string;
+  rect: { height: number; width: number; x: number; y: number };
+}
+
+/**
+ * Provenance + feedback behind a user's decision on one check result
+ * (`verify_check_results.user_decision_detail`) — the check-level mirror of
+ * {@link VerifyRunDecisionDetail}. The `user_decision` verb stays the queryable
+ * field; this bag carries the note, the circled evidence regions, and who/when,
+ * so richer feedback never needs new columns.
+ */
+export interface VerifyCheckDecisionDetail {
+  /** Regions circled on the check's evidence images, each with its own note. */
+  annotations?: AcceptanceReviewAnnotation[];
+  /** Free-form feedback — for a reject, the re-tasking input of the next round. */
+  comment?: string;
+  /** When the decision was made (ISO 8601). */
+  decidedAt?: string;
+  /** Who made the decision (user id) — set when it may differ from the row owner. */
+  decidedBy?: string;
+  /** Uploaded/pasted screenshots backing the reject (FKs to files). */
+  fileIds?: string[];
+  /**
+   * The acceptance round that was CURRENT when the decision was made. A
+   * carried-forward check's result row belongs to an older round, so the
+   * result's own round cannot arbitrate staleness — a reject stands until a
+   * round NEWER than this lands, regardless of which round produced the
+   * judged evidence.
+   */
+  roundIndex?: number;
 }
 
 /**
@@ -135,9 +221,12 @@ export type VerifyRunSource = 'agent' | 'agent-testing';
  * records what *produced* the run): `scenario` drives how the report renders its
  * scope header and scenario-specific detail. Open-ended — new scenarios add a
  * value here plus their own {@link VerifyRunContext} shape.
- * - coding: verifying a software change (branch / commit / surfaces under test).
+ * - coding:   verifying a software change (branch / commit / surfaces under test).
+ * - writing:  verifying a written deliverable (manuscript / chapters / documents).
+ * - research: verifying a research deliverable (question / sources / claims).
+ * - generic:  any other delivery — no modeled scope; context is an open bag.
  */
-export type VerifyRunScenario = 'coding';
+export type VerifyRunScenario = 'coding' | 'writing' | 'research' | 'generic';
 
 /**
  * The product surface a check was exercised on — *where* it ran, never *what
@@ -173,6 +262,14 @@ export interface VerifyRunDecisionDetail {
   decidedBy?: string;
   /** Attachments backing the decision (annotated screenshots, etc.) — FKs to files. */
   fileIds?: string[];
+  /**
+   * Group-scoped review feedback addressed to THIS round — concerns that
+   * belong to no single check (whose checks may well be accepted) yet must
+   * reach the next round. Lives here, not on the acceptance aggregate, so a
+   * round carries its own feedback (and takes it along when deleted) and
+   * staleness falls out of the round chain.
+   */
+  groupFeedback?: VerifyRunGroupFeedbackEntry[];
 }
 
 /**
@@ -218,15 +315,75 @@ export interface VerifyCodingScope {
 }
 
 /**
+ * Writing-scenario scope: what manuscript this round verified. Every field is
+ * optional — the viewer renders whatever the round recorded.
+ */
+export interface VerifyWritingScope {
+  /** Chapters covered by this round (delivered so far / in this batch). */
+  chapters?: number;
+  /** Documents holding the deliverable under verification. */
+  documentIds?: string[];
+  /** Entry point / command exercised, e.g. "lh doc export". */
+  entry?: string;
+  /** Genre / form of the work, e.g. "长篇小说". */
+  genre?: string;
+  /** When the round was executed (ISO 8601) — distinct from ingest time. */
+  testedAt?: string;
+  /** Word count of the manuscript under verification. */
+  wordCount?: number;
+  /** Title of the work under verification. */
+  work?: string;
+}
+
+/** One source backing a research deliverable. */
+export interface VerifyResearchSource {
+  title?: string;
+  url?: string;
+}
+
+/**
+ * Research-scenario scope: what question the deliverable answers and what it
+ * stands on.
+ */
+export interface VerifyResearchScope {
+  /** Entry point / command exercised. */
+  entry?: string;
+  /** The research question the deliverable answers. */
+  question?: string;
+  /** Count of distinct sources consulted (when listing them all is too long). */
+  sourceCount?: number;
+  /** Key sources backing the deliverable. */
+  sources?: VerifyResearchSource[];
+  /** When the round was executed (ISO 8601) — distinct from ingest time. */
+  testedAt?: string;
+  /** Time range the research covers, e.g. "2024–2026". */
+  timeRange?: string;
+}
+
+/**
+ * Catch-all scope for scenarios without a modeled shape yet. An open bag on
+ * purpose: the server stores non-coding context as-is, so a new scenario can
+ * ship its own scope fields without a server change.
+ */
+export interface VerifyGenericScope {
+  [key: string]: unknown;
+  /** Entry point / command exercised. */
+  entry?: string;
+  /** When the round was executed (ISO 8601) — distinct from ingest time. */
+  testedAt?: string;
+}
+
+/**
  * The scenario's context — its scope/provenance, discriminated by the run's
- * `scenario`. Kept in one jsonb (not columns) so each scenario can carry its own
- * shape and the viewer can render per scenario without a migration. Today only
- * `coding`; as scenarios grow this becomes a union (`VerifyCodingScope | …`).
+ * `scenario` (a sibling column, so the shapes need no inline discriminant).
+ * Kept in one jsonb (not columns) so each scenario can carry its own shape and
+ * the viewer can render per scenario without a migration.
  *
- * Distinct from a future generic `metadata` bag (reserved for cross-scenario
+ * Distinct from the generic `metadata` bag (reserved for cross-scenario
  * extension) — `context` is specifically the active scenario's input.
  */
-export type VerifyRunContext = VerifyCodingScope;
+export type VerifyRunContext =
+  VerifyCodingScope | VerifyWritingScope | VerifyResearchScope | VerifyGenericScope;
 
 export interface VerifyInteractionCostOperators {
   H?: number;
