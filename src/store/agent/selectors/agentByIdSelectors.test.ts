@@ -198,13 +198,46 @@ describe('agentByIdSelectors', () => {
         },
       });
 
-      expect(agentByIdSelectors.getAgentTTSVoiceById('agent-1')(state)).toBe('nova');
+      expect(agentByIdSelectors.getAgentTTSVoiceById('agent-1', 'en-US')(state)).toBe('nova');
     });
 
-    it('falls back to a default voice when the agent config is missing', () => {
+    it('returns the configured ElevenLabs voice', () => {
+      const state = createState({
+        agentMap: {
+          'agent-1': {
+            tts: {
+              ttsService: 'elevenlabs',
+              voice: { elevenlabs: 'elevenlabs-voice', openai: 'alloy' },
+            },
+          },
+        },
+      });
+
+      expect(agentByIdSelectors.getAgentTTSVoiceById('agent-1', 'en-US')(state)).toBe(
+        'elevenlabs-voice',
+      );
+    });
+
+    it('falls back to the default ElevenLabs voice', () => {
+      const state = createState({
+        agentMap: {
+          'agent-1': {
+            tts: { ttsService: 'elevenlabs', voice: { openai: 'alloy' } },
+          },
+        },
+      });
+
+      expect(agentByIdSelectors.getAgentTTSVoiceById('agent-1', 'en-US')(state)).toBe(
+        'OEyxkK9dZHAF59ZRc5c2',
+      );
+    });
+
+    it('uses the default TTS service voice when the agent config is missing', () => {
       const state = createState({ agentMap: {} });
 
-      expect(agentByIdSelectors.getAgentTTSVoiceById('missing')(state)).toBe('alloy');
+      expect(agentByIdSelectors.getAgentTTSVoiceById('missing', 'en-US')(state)).toBe(
+        'OEyxkK9dZHAF59ZRc5c2',
+      );
     });
   });
 

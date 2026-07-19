@@ -177,32 +177,33 @@ const currentAgentTTS = (s: AgentStoreState): LobeAgentTTSConfig => {
   return config?.tts || DEFAUTT_AGENT_TTS_CONFIG;
 };
 
+export const resolveAgentTTSVoice = (tts: LobeAgentTTSConfig, lang: string): string => {
+  const { voice, ttsService } = tts;
+  const voiceList = new VoiceList(lang);
+
+  switch (ttsService) {
+    case 'openai': {
+      return voice?.openai || (VoiceList.openaiVoiceOptions?.[0].value as string) || 'alloy';
+    }
+    case 'edge': {
+      return voice?.edge || (voiceList.edgeVoiceOptions?.[0].value as string) || 'alloy';
+    }
+    case 'microsoft': {
+      return voice?.microsoft || (voiceList.microsoftVoiceOptions?.[0].value as string) || 'alloy';
+    }
+    case 'elevenlabs': {
+      return voice?.elevenlabs || 'OEyxkK9dZHAF59ZRc5c2';
+    }
+    default: {
+      return 'alloy';
+    }
+  }
+};
+
 const currentAgentTTSVoice =
   (lang: string) =>
-  (s: AgentStoreState): string => {
-    const { voice, ttsService } = currentAgentTTS(s);
-    const voiceList = new VoiceList(lang);
-    let currentVoice;
-    switch (ttsService) {
-      case 'openai': {
-        currentVoice = voice?.openai || (VoiceList.openaiVoiceOptions?.[0].value as string);
-        break;
-      }
-      case 'edge': {
-        currentVoice = voice?.edge || (voiceList.edgeVoiceOptions?.[0].value as string);
-        break;
-      }
-      case 'microsoft': {
-        currentVoice = voice?.microsoft || (voiceList.microsoftVoiceOptions?.[0].value as string);
-        break;
-      }
-      case 'elevenlabs': {
-        currentVoice = voice?.elevenlabs || 'OEyxkK9dZHAF59ZRc5c2';
-        break;
-      }
-    }
-    return currentVoice || 'alloy';
-  };
+  (s: AgentStoreState): string =>
+    resolveAgentTTSVoice(currentAgentTTS(s), lang);
 
 const currentEnabledKnowledge = (s: AgentStoreState) => {
   const knowledgeBases = currentAgentKnowledgeBases(s);

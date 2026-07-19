@@ -14,7 +14,7 @@ import { resolveTargetDeviceId } from '@/helpers/agentWorkingDirectory';
 import { globalAgentContextManager } from '@/helpers/GlobalAgentContextManager';
 
 import { type AgentStoreState } from '../initialState';
-import { agentSelectors } from './selectors';
+import { agentSelectors, resolveAgentTTSVoice } from './selectors';
 
 /**
  * Selectors that get agent config by agentId parameter.
@@ -53,9 +53,9 @@ const getAgentTTSById =
     agentSelectors.getAgentConfigById(agentId)(s)?.tts || DEFAUTT_AGENT_TTS_CONFIG;
 
 const getAgentTTSVoiceById =
-  (agentId: string) =>
+  (agentId: string, lang: string) =>
   (s: AgentStoreState): string =>
-    getAgentTTSById(agentId)(s).voice?.openai || 'alloy';
+    resolveAgentTTSVoice(getAgentTTSById(agentId)(s), lang);
 
 const getAgentConfigErrorById =
   (agentId: string) =>
