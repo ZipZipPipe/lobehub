@@ -10,7 +10,9 @@ import type {
   ChatVideoItem,
   CreateMessageParams,
   DBMessageItem,
+  HeterogeneousToolStateSnapshot,
   IThreadType,
+  MessageMetadata,
   MessagePluginItem,
   ModelRankItem,
   ModelUsage,
@@ -667,12 +669,46 @@ export class MessageModel {
           .leftJoin(messageTranslates, eq(messageTranslates.id, messages.id))
           .leftJoin(messageTTS, eq(messageTTS.id, messages.id))
           .leftJoin(users, eq(users.id, messages.userId))
-          .orderBy(asc(messages.createdAt))
+          // Page from the NEWEST messages, not the oldest. `desc` + limit/offset
+          // fetches the most recent `pageSize` rows, so a topic with more than
+          // `pageSize` mainline messages keeps its latest turns (including the
+          // final answer) instead of silently dropping them — the previous
+          // `asc + limit` truncated exactly the newest batch, which is the worst
+          // possible slice for a chat transcript. The page is reversed back to
+          // ascending immediately below, so every downstream consumer is
+          // unaffected; only *which* rows are fetched changed. See LOBE-12011.
+          .orderBy(desc(messages.createdAt), desc(messages.id))
           .limit(pageSize)
           .offset(offset),
       { current, pageSize },
     );
     logTiming(timing, 'db.message.queryWithWhere.baseSelect:rows', { rowCount: result.length });
+
+    // Restore ascending (createdAt, id) order so downstream assembly — the
+    // MessageGroup time window, work-summary anchoring, and the final merge sort —
+    // behaves exactly as before the newest-first fetch above.
+    result.reverse();
+
+    // When the newest page is truncated (it filled `pageSize`), its oldest rows
+    // may sit mid-round. The renderer roots a slice at a single parent, so a slice
+    // cut inside a round can strand sibling chains and drop them from the screen.
+    // Align the lower boundary to a round start — a mainline `user` message — so
+    // the slice is one contiguous chain. Never trim to empty: an oversized single
+    // round with no user message in view is kept whole (the proper fix for those
+    // is lazy step loading). Thread queries pass no `topicId` and are untouched.
+    //
+    // Scope: this only serves the single "most recent page" load (`current === 0`),
+    // which is the only page the chat read path ever requests — `current`/`pageSize`
+    // offset paging is dead code here (the very premise of LOBE-12011). The trim is
+    // deliberately NOT offset-exact: the rows it drops from page 0 also fall outside
+    // page 1's `offset = pageSize` window, so a hypothetical offset walk would skip
+    // them. That is acceptable because nothing offset-walks this path; loading older
+    // history is round-cursor based (see the follow-up), which supersedes offset
+    // paging entirely and closes that gap by construction.
+    if (topicId && current === 0 && result.length >= pageSize) {
+      const firstRoundStart = result.findIndex((message) => message.role === 'user');
+      if (firstRoundStart > 0) result.splice(0, firstRoundStart);
+    }
 
     const messageIds = result.map((message) => message.id as string);
 
@@ -2573,7 +2609,9 @@ export class MessageModel {
    * This is used by onboarding analytics to reconstruct successful assistant
    * creation results before the topic is moved into inbox.
    */
-  listMessagePluginsByTopic = async (topicId: string): Promise<MessagePluginItem[]> => {
+  listMessagePluginsByTopic = async (
+    topicId: string,
+  ): Promise<Array<MessagePluginItem & { metadata?: MessageMetadata }>> => {
     const rows = await this.db
       .select({
         apiName: messagePlugins.apiName,
@@ -2583,6 +2621,7 @@ export class MessageModel {
         id: messagePlugins.id,
         identifier: messagePlugins.identifier,
         intervention: messagePlugins.intervention,
+        metadata: messages.metadata,
         state: messagePlugins.state,
         toolCallId: messagePlugins.toolCallId,
         type: messagePlugins.type,
@@ -2601,6 +2640,7 @@ export class MessageModel {
       id: row.id,
       identifier: row.identifier ?? undefined,
       intervention: row.intervention ?? undefined,
+      metadata: row.metadata ?? undefined,
       state: row.state ?? undefined,
       toolCallId: row.toolCallId ?? undefined,
       type: row.type ?? 'default',
@@ -2616,33 +2656,79 @@ export class MessageModel {
     id: string,
     params: {
       content?: string;
+      heterogeneousToolState?: HeterogeneousToolStateSnapshot;
       metadata?: Record<string, any>;
       pluginError?: any;
       pluginState?: Record<string, any>;
     },
-  ): Promise<{ success: boolean }> => {
-    const { content, metadata, pluginState, pluginError } = params;
+  ): Promise<{ applied: boolean; snapshotSeq?: number; success: boolean }> => {
+    const { content, heterogeneousToolState, metadata, pluginState, pluginError } = params;
 
     // `undefined` while no branch has looked for the row yet; see `update` above
     // for why a write that matches nothing must not report success.
     let matchedRow: boolean | undefined;
+    let applied = true;
+    let snapshotSeq: number | undefined;
 
     try {
       await this.db.transaction(async (trx) => {
+        let existingMetadata: Record<string, any> | undefined;
+
+        if (metadata !== undefined || heterogeneousToolState !== undefined) {
+          const baseQuery = trx
+            .select({ metadata: messages.metadata })
+            .from(messages)
+            .where(and(eq(messages.id, id), this.ownership()))
+            .limit(1);
+          const [existingMessage] = heterogeneousToolState
+            ? await baseQuery.for('update')
+            : await baseQuery;
+
+          matchedRow = !!existingMessage;
+          if (!existingMessage) return;
+
+          existingMetadata = (existingMessage.metadata ?? {}) as Record<string, any>;
+
+          if (heterogeneousToolState) {
+            const currentOperationId = existingMetadata.heterogeneousToolStateOperationId;
+            const rawCurrentSeq = existingMetadata.heterogeneousToolStateSeq;
+            const currentSeq =
+              currentOperationId === heterogeneousToolState.operationId &&
+              typeof rawCurrentSeq === 'number' &&
+              Number.isFinite(rawCurrentSeq)
+                ? rawCurrentSeq
+                : 0;
+
+            if (heterogeneousToolState.snapshotSeq <= currentSeq) {
+              applied = false;
+              snapshotSeq = currentSeq;
+              return;
+            }
+
+            snapshotSeq = heterogeneousToolState.snapshotSeq;
+          }
+        }
+
         // Update messages table (content, metadata)
-        if (content !== undefined || metadata !== undefined) {
+        if (
+          content !== undefined ||
+          metadata !== undefined ||
+          heterogeneousToolState !== undefined
+        ) {
           const messageUpdateData: Record<string, any> = {};
 
           if (content !== undefined) {
             messageUpdateData.content = content;
           }
 
-          if (metadata !== undefined) {
-            // Need to merge with existing metadata
-            const existingMessage = await trx.query.messages.findFirst({
-              where: and(eq(messages.id, id), this.ownership()),
-            });
-            messageUpdateData.metadata = merge(existingMessage?.metadata || {}, metadata);
+          if (metadata !== undefined || heterogeneousToolState !== undefined) {
+            const mergedMetadata = merge(existingMetadata || {}, metadata || {});
+            messageUpdateData.metadata = heterogeneousToolState
+              ? merge(mergedMetadata, {
+                  heterogeneousToolStateOperationId: heterogeneousToolState.operationId,
+                  heterogeneousToolStateSeq: heterogeneousToolState.snapshotSeq,
+                })
+              : mergedMetadata;
           }
 
           if (Object.keys(messageUpdateData).length > 0) {
@@ -2670,7 +2756,9 @@ export class MessageModel {
             const pluginUpdateData: Record<string, any> = {};
 
             if (pluginState !== undefined) {
-              pluginUpdateData.state = merge(pluginItem.state || {}, pluginState);
+              pluginUpdateData.state = heterogeneousToolState
+                ? pluginState
+                : merge(pluginItem.state || {}, pluginState);
             }
 
             if (pluginError !== undefined) {
@@ -2683,19 +2771,21 @@ export class MessageModel {
                 .set(pluginUpdateData)
                 .where(and(eq(messagePlugins.id, id), this.pluginsOwnership()));
             }
+          } else if (heterogeneousToolState) {
+            throw new Error(`No tool plugin matched id ${id}`);
           }
         }
       });
 
       if (matchedRow === false) {
         console.error(`Update tool message error: no tool message matched id ${id}`);
-        return { success: false };
+        return { applied: false, success: false };
       }
 
-      return { success: true };
+      return { applied, snapshotSeq, success: true };
     } catch (error) {
       console.error('Update tool message error:', error);
-      return { success: false };
+      return { applied: false, success: false };
     }
   };
 
