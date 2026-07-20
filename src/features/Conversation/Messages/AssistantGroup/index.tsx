@@ -19,6 +19,7 @@ import { agentGroupSelectors } from '@/store/agentGroup/selectors';
 import { useGlobalStore } from '@/store/global';
 import { useUserStore } from '@/store/user';
 import {
+  authSelectors,
   labPreferSelectors,
   userGeneralSettingsSelectors,
   userProfileSelectors,
@@ -34,6 +35,8 @@ import {
 } from '../../store';
 import { getOperationFinalRootId } from '../../store/slices/data/workSummaries';
 import InterruptedHint from '../Assistant/components/InterruptedHint';
+import ExtraContainer from '../components/Extras/ExtraContainer';
+import TTS from '../components/Extras/TTS';
 import Usage from '../components/Extras/Usage';
 import MessageBranch from '../components/MessageBranch';
 import {
@@ -95,6 +98,7 @@ const GroupMessage = memo<GroupMessageProps>(
       model,
       provider,
       branch,
+      extra,
       metadata,
       signalCallbacks,
       taskCompletions,
@@ -147,6 +151,10 @@ const GroupMessage = memo<GroupMessageProps>(
     const interrupted = groupInterrupted || blockInterrupted;
 
     const isDevMode = useUserStore((s) => userGeneralSettingsSelectors.config(s).isDevMode);
+    const isLogin = useUserStore(authSelectors.isLogin);
+    const isGroupGenerating = useConversationStore(
+      messageStateSelectors.isAssistantGroupItemGenerating(id),
+    );
     const enableProcessFold = useUserStore(labPreferSelectors.enableFoldFinishedTurn);
     const addReaction = useConversationStore((s) => s.addReaction);
     const removeReaction = useConversationStore((s) => s.removeReaction);
@@ -284,6 +292,16 @@ const GroupMessage = memo<GroupMessageProps>(
         {interrupted && <InterruptedHint />}
         {isDevMode && model && (
           <Usage model={model} performance={performance} provider={provider!} usage={usage} />
+        )}
+        {isLogin && contentId && extra?.tts && (
+          <ExtraContainer>
+            <TTS
+              content={lastAssistantMsg?.content || ''}
+              id={id}
+              loading={isGroupGenerating}
+              {...extra.tts}
+            />
+          </ExtraContainer>
         )}
         {footerRender}
         {reactions.length > 0 && (

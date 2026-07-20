@@ -11,13 +11,15 @@ import {
   type MessageActionSlot,
 } from '../../components/MessageActionBar';
 
-const DEFAULT_BAR_WITH_TOOLS: MessageActionSlot[] = ['delAndRegenerate', 'copy'];
-const DEFAULT_BAR: MessageActionSlot[] = ['edit', 'copy'];
+const DEFAULT_BAR_WITH_TOOLS: MessageActionSlot[] = ['delAndRegenerate', 'copy', 'tts'];
+const DEFAULT_BAR: MessageActionSlot[] = ['edit', 'copy', 'tts'];
 const DEFAULT_MENU: MessageActionSlot[] = [
   'edit',
   'copy',
   'branching',
   'collapse',
+  'divider',
+  'tts',
   'divider',
   'share',
   'select',
