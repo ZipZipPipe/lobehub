@@ -189,6 +189,8 @@ export const useChatItemContextMenu = ({
         copy,
         collapseAction,
         divider,
+        tts,
+        divider,
         share,
         divider,
         regenerate,
