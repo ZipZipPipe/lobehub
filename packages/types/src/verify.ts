@@ -91,7 +91,23 @@ export interface AcceptanceVisualRender {
  * a topic-level override, or a document acceptance rule, so it lives with the
  * generic aggregate rather than only in task types.
  */
+/**
+ * One user-authored acceptance criterion in a subject's standing checklist
+ * (e.g. the topic acceptance tray). Every item is judged by the verify agent;
+ * `method` is the optional "how to check" note.
+ */
+export interface AcceptanceChecklistItem {
+  id: string;
+  method?: string;
+  name: string;
+}
+
 export interface AcceptanceConfig {
+  /**
+   * The subject's standing, user-editable acceptance checklist (topic tray).
+   * Persisted here so it lives with the verify aggregate, not in client storage.
+   */
+  checklist?: AcceptanceChecklistItem[];
   enabled?: boolean;
   maxIterations?: number;
   verifierAgentId?: string;
@@ -244,7 +260,7 @@ export type VerifySurface = 'web' | 'desktop' | 'cli' | 'mobile' | 'bot';
 
 /** The medium of a captured evidence artifact. */
 export type VerifyEvidenceType =
-  'screenshot' | 'gif' | 'video' | 'text' | 'dom_snapshot' | 'transcript';
+  'screenshot' | 'gif' | 'video' | 'text' | 'markdown' | 'dom_snapshot' | 'transcript';
 
 /** Who / what captured an evidence artifact (provenance). */
 export type VerifyEvidenceCapturedBy = 'agent-browser' | 'cdp' | 'cli' | 'program' | 'llm_judge';

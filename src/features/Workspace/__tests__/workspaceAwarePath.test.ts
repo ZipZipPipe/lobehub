@@ -21,7 +21,6 @@ describe('buildWorkspaceAwarePath', () => {
       '/acme/community/agent/jailbreak',
     );
     expect(buildWorkspaceAwarePath('/group/group-1', 'acme')).toBe('/acme/group/group-1');
-    expect(buildWorkspaceAwarePath('/fleet', 'acme')).toBe('/acme/fleet');
   });
 
   it('prefixes deep agent and evaluation paths used by cross-page navigation', () => {
@@ -87,7 +86,6 @@ describe('buildWorkspaceAwarePath', () => {
     expect(buildWorkspaceAwarePath('/settings/devices', 'acme')).toBe('/acme/settings/devices');
     expect(buildWorkspaceAwarePath('/settings/audit-log', 'acme')).toBe('/acme/settings/audit-log');
     expect(buildWorkspaceAwarePath('/settings/storage', 'acme')).toBe('/acme/settings/storage');
-    expect(buildWorkspaceAwarePath('/settings/messenger', 'acme')).toBe('/acme/settings/messenger');
     expect(buildWorkspaceAwarePath('/settings/credential', 'acme')).toBe(
       '/acme/settings/credential',
     );
@@ -108,6 +106,7 @@ describe('buildWorkspaceAwarePath', () => {
     expect(buildWorkspaceAwarePath('/settings/profile', 'acme')).toBe('/settings/profile');
     expect(buildWorkspaceAwarePath('/settings/llm', 'acme')).toBe('/settings/llm');
     expect(buildWorkspaceAwarePath('/settings/memory', 'acme')).toBe('/settings/memory');
+    expect(buildWorkspaceAwarePath('/settings/messenger', 'acme')).toBe('/settings/messenger');
     expect(buildWorkspaceAwarePath('/settings/referral', 'acme')).toBe('/settings/referral');
     expect(buildWorkspaceAwarePath('/settings/system-tools', 'acme')).toBe(
       '/settings/system-tools',

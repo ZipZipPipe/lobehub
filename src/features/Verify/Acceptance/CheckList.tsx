@@ -29,6 +29,7 @@ import {
   Images,
   MessageSquareText,
   MessageSquareX,
+  PartyPopper,
   Repeat,
   XCircle,
 } from 'lucide-react';
@@ -41,6 +42,11 @@ import {
   EvidenceComparisonCard,
   readEvidenceComparison,
 } from '../components/EvidenceComparisonCard';
+import {
+  CollapsibleMarkdownEvidence,
+  EvidenceFileCard,
+  markdownTextEvidenceTypes,
+} from '../components/MarkdownEvidence';
 import { AnnotatedImage } from './Annotation';
 import { AttachmentThumbs } from './attachments';
 import { openCheckRejectModal } from './CheckRejectModal';
@@ -169,6 +175,27 @@ const styles = createStaticStyles(({ css }) => ({
 
     background: ${cssVar.colorBgContainer};
   `,
+  // The finish-line icon pops in — a small beat of delight the plain empty
+  // state never earned. Plays once, on the transition into the celebration.
+  celebrateIcon: css`
+    @keyframes acceptance-celebrate-pop {
+      0% {
+        transform: scale(0.6);
+        opacity: 0;
+      }
+
+      60% {
+        transform: scale(1.15);
+      }
+
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    animation: acceptance-celebrate-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  `,
   groupCard: css`
     overflow: hidden;
     border: 1px solid ${cssVar.colorBorderSecondary};
@@ -292,7 +319,8 @@ const EVIDENCE_BADGES = [
 
 /** A filename is not a caption — only descriptive text renders under the artifact. */
 const isFilename = (value: string | null | undefined) =>
-  !value || /^[\w.-]+\.(?:gif|jpe?g|mp4|png|webm|webp)$/i.test(value);
+  !value ||
+  /^[\w.-]+\.(?:gif|html?|jpe?g|json|log|markdown|md|mp4|png|txt|webm|webp)$/i.test(value);
 
 /**
  * Reserve the image's box before it loads — with the stored intrinsic size the
@@ -409,12 +437,29 @@ const EvidenceList = memo<{ evidence: AcceptanceEvidence[] }>(({ evidence }) => 
               {caption}
             </Flexbox>
           );
+        if (item.content && markdownTextEvidenceTypes.has(item.type))
+          return (
+            <Flexbox gap={4} key={item.id}>
+              <CollapsibleMarkdownEvidence>{item.content}</CollapsibleMarkdownEvidence>
+              {caption}
+            </Flexbox>
+          );
         if (item.content)
           return (
             <Flexbox gap={4} key={item.id}>
               <div className={styles.evidenceText}>{item.content}</div>
               {caption}
             </Flexbox>
+          );
+        if (item.fileUrl && markdownTextEvidenceTypes.has(item.type))
+          return (
+            <EvidenceFileCard
+              markdown
+              description={item.description}
+              fileName={item.fileName}
+              key={item.id}
+              url={item.fileUrl}
+            />
           );
         return null;
       })}
@@ -774,27 +819,21 @@ const CheckRow = memo<{
               <Tag size={'small'}>{t('acceptance.checks.notRequired')}</Tag>
             </Tooltip>
           )}
-        </Flexbox>
-        <Flexbox horizontal align={'center'} gap={6}>
-          {/* An accept on a NON-passed verdict can't merge into the head icon
-              (the failed/uncertain mark must stay visible) — mark it here. */}
-          {reviewState === 'accepted' && check.state !== 'passed' && (
-            <Tooltip
-              title={t('acceptance.review.acceptedNote', {
-                time: dayjs(check.userReview!.createdAt).format('MM-DD HH:mm'),
-              })}
-            >
-              <Icon color={cssVar.colorTextQuaternary} icon={BadgeCheck} size={14} />
-            </Tooltip>
-          )}
+          {/* The verdict pair travels WITH the title, not adrift at the row's
+              far right: the claim you judge and the judgement you give land in
+              one glance, so a long checklist needs no eye round-trip across the
+              row (and no mis-click onto a neighbour's buttons). */}
           {reviewable && reviewState === 'pending' && (
             <Flexbox
               horizontal
               align={'center'}
               className={cx(styles.rowActions, 'acceptance-row-actions')}
               gap={2}
-              // The accept spinner must stay visible after the pointer leaves.
-              style={accepting ? { opacity: 1 } : undefined}
+              style={{
+                // The accept spinner must stay visible after the pointer leaves.
+                ...(accepting ? { opacity: 1 } : undefined),
+                flex: 'none',
+              }}
             >
               <ActionIcon
                 disabled={reviewPending && !accepting}
@@ -815,6 +854,19 @@ const CheckRow = memo<{
                 }}
               />
             </Flexbox>
+          )}
+        </Flexbox>
+        <Flexbox horizontal align={'center'} gap={6}>
+          {/* An accept on a NON-passed verdict can't merge into the head icon
+              (the failed/uncertain mark must stay visible) — mark it here. */}
+          {reviewState === 'accepted' && check.state !== 'passed' && (
+            <Tooltip
+              title={t('acceptance.review.acceptedNote', {
+                time: dayjs(check.userReview!.createdAt).format('MM-DD HH:mm'),
+              })}
+            >
+              <Icon color={cssVar.colorTextQuaternary} icon={BadgeCheck} size={14} />
+            </Tooltip>
           )}
           {EVIDENCE_BADGES.map(({ icon, key, labelKey }) =>
             counts[key] ? (
@@ -911,8 +963,9 @@ const CheckRow = memo<{
           )}
 
           {/* The user's standing feedback hangs right under the evidence it
-              judges. An accept keeps an undo path — the signature line gains a
-              quiet "change to reject" escape, feedback then flows as usual. */}
+              judges. BOTH verdicts keep an undo path — a mis-click is the most
+              likely way either happens, and a send-back the user didn't mean
+              otherwise costs a whole repair round to walk back. */}
           {activeReview &&
             (activeReview.action === 'accept' ? (
               <Flexbox horizontal align={'center'} gap={8}>
@@ -932,7 +985,25 @@ const CheckRow = memo<{
                 )}
               </Flexbox>
             ) : (
-              <FeedbackCard evidenceById={evidenceById} review={activeReview} />
+              <Flexbox gap={6}>
+                <FeedbackCard evidenceById={evidenceById} review={activeReview} />
+                {/* The mirror of the accept escape: take the send-back back.
+                    A fresh accept supersedes the reject, so the check leaves
+                    待修复 and the feedback drops out of the next round's input. */}
+                {reviewable && (
+                  <Flexbox horizontal>
+                    <Button
+                      disabled={reviewPending && !accepting}
+                      loading={accepting}
+                      size={'small'}
+                      type={'text'}
+                      onClick={handleAccept}
+                    >
+                      {t('acceptance.review.revertToAccept')}
+                    </Button>
+                  </Flexbox>
+                )}
+              </Flexbox>
             ))}
 
           {/* Confirm (plain filled) anchors the right edge; reject is the
@@ -1106,20 +1177,43 @@ const CheckList = memo<CheckListProps>(
       .filter((group) => group.rows.length > 0);
 
     // A filter that matches nothing must read as "this bucket is empty", not as
-    // a blank bordered card — each filter gets its own reassuring line.
-    if (groups.length === 0)
+    // a blank bordered card — each filter gets its own reassuring line. But an
+    // EMPTY pending bucket where every check is signed off isn't "nothing here"
+    // — it's the finish line, so it earns a celebration instead of a flat line.
+    if (groups.length === 0) {
+      const allAccepted = filter === 'pending' && isGroupFullyAccepted(checks);
       return (
-        <Flexbox align={'center'} className={styles.emptyCard} justify={'center'}>
-          <Empty
-            icon={CircleDashed}
-            description={t(
-              filter === 'all'
-                ? 'acceptance.checks.empty'
-                : `acceptance.checks.emptyFilter.${filter}`,
-            )}
-          />
+        <Flexbox align={'center'} className={styles.emptyCard} gap={12} justify={'center'}>
+          {allAccepted ? (
+            <>
+              <Icon
+                className={styles.celebrateIcon}
+                color={cssVar.colorSuccess}
+                icon={PartyPopper}
+                size={40}
+              />
+              <Flexbox align={'center'} gap={4}>
+                <Text strong style={{ color: cssVar.colorSuccess, fontSize: 15 }}>
+                  {t('acceptance.checks.allAccepted.title')}
+                </Text>
+                <Text fontSize={13} type={'secondary'}>
+                  {t('acceptance.checks.allAccepted.desc')}
+                </Text>
+              </Flexbox>
+            </>
+          ) : (
+            <Empty
+              icon={CircleDashed}
+              description={t(
+                filter === 'all'
+                  ? 'acceptance.checks.empty'
+                  : `acceptance.checks.emptyFilter.${filter}`,
+              )}
+            />
+          )}
         </Flexbox>
       );
+    }
 
     return (
       <Flexbox className={styles.groupCard}>

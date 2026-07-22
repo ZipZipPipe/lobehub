@@ -1,4 +1,4 @@
-import type { ModelProviderCard } from '@/types/llm';
+import type { ModelProviderCard } from '../types';
 
 // ref: https://www.kimi.com/code/docs/kimi-code/models.html
 const KimiCodingPlan: ModelProviderCard = {

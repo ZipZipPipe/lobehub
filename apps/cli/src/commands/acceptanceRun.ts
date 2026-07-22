@@ -6,8 +6,11 @@ import type { Command } from 'commander';
 import pc from 'picocolors';
 
 import { getTrpcClient } from '../api/client';
+import { resolveServerUrl } from '../settings';
 import { confirm, outputJson, printTable, timeAgo, truncate } from '../utils/format';
 import { log } from '../utils/logger';
+import type { IgnoreResult, LinkResult } from '../utils/skillWiring';
+import { ensureSkillIgnored, linkHarnessSkills } from '../utils/skillWiring';
 import { uploadLocalFile } from '../utils/uploadLocalFile';
 import {
   type Decision,
@@ -42,6 +45,7 @@ import {
 interface InstallOptions {
   dir?: string;
   force?: boolean;
+  gitignore?: boolean;
   json?: boolean | string;
   skill: string;
 }
@@ -76,7 +80,13 @@ async function installAction(options: InstallOptions): Promise<void> {
     written.push(rel);
   }
 
-  const result = { dir: skillDir, skill: bundle.identifier, skipped, written };
+  const link = linkHarnessSkills(baseDir, bundle.identifier);
+  const ignored =
+    options.gitignore === false
+      ? []
+      : ensureSkillIgnored(baseDir, bundle.identifier, link.kind === 'linked');
+
+  const result = { dir: skillDir, ignored, link, skill: bundle.identifier, skipped, written };
   if (options.json !== undefined) {
     outputJson(result, typeof options.json === 'string' ? options.json : undefined);
     return;
@@ -86,6 +96,36 @@ async function installAction(options: InstallOptions): Promise<void> {
   );
   console.log(`  ${written.length} written${skipped.length ? `, ${skipped.length} skipped` : ''}`);
   if (skipped.length > 0) console.log(pc.dim(`  (skipped existing — pass --force to overwrite)`));
+  printWiring(link, ignored);
+}
+
+function printWiring(link: LinkResult, ignored: IgnoreResult[]): void {
+  const arrow = pc.dim('  ↳');
+  switch (link.kind) {
+    case 'linked':
+    case 'linked-single': {
+      console.log(`${arrow} linked ${link.link} → ${pc.dim(link.target)}`);
+      break;
+    }
+    case 'already': {
+      console.log(`${arrow} ${pc.dim(`${link.link} already linked`)}`);
+      break;
+    }
+    case 'skipped': {
+      console.log(`${arrow} ${pc.yellow(`skipped ${link.link}: ${link.reason}`)}`);
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+
+  for (const entry of ignored) {
+    if (entry.kind !== 'added') continue;
+    console.log(
+      `${arrow} ignored ${entry.entry} in ${pc.dim(path.relative(process.cwd(), entry.file))}`,
+    );
+  }
 }
 
 // ── run ──
@@ -283,8 +323,14 @@ async function submitAction(options: SubmitOptions): Promise<void> {
     verdict: options.verdict as any,
     verifyRunId: options.run,
   });
+  const verifyRunId = res.checkResult.verifyRunId ?? options.run;
+  if (!verifyRunId) {
+    log.error('Submitted result did not resolve to a verification run');
+    process.exit(1);
+  }
+  const url = new URL(`/verify/${verifyRunId}`, resolveServerUrl()).toString();
   if (options.json !== undefined) {
-    outputJson(res, typeof options.json === 'string' ? options.json : undefined);
+    outputJson({ ...res, url }, typeof options.json === 'string' ? options.json : undefined);
     return;
   }
   console.log(
@@ -292,6 +338,7 @@ async function submitAction(options: SubmitOptions): Promise<void> {
       `${res.checkResult.verdict ? ` (${res.checkResult.verdict})` : ''}` +
       `${res.evidence.length > 0 ? ` +${res.evidence.length} evidence` : ''}`,
   );
+  console.log(`${pc.bold('report')}: ${url}`);
 }
 
 async function decisionAction(resultId: string, decision: Decision): Promise<void> {
@@ -560,7 +607,10 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
     subjectType: subject.ref.subjectType,
   });
   const acceptanceId = acceptance.id;
-  await client.acceptance.attachRun.mutate({ acceptanceId, verifyRunId: runId });
+  const attached = await client.acceptance.attachRun.mutate({ acceptanceId, verifyRunId: runId });
+  // The chained round's index — `?r=<roundIndex>` on the acceptance URL
+  // deep-links this round's report as the fixed snapshot view.
+  const roundIndex = attached?.roundIndex ?? null;
 
   // 2. Ingest each case as a check result + its evidence. `checkItemId` is
   //    the stable key within this immutable run.
@@ -666,6 +716,7 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
         origin,
         planItems: plan?.length ?? 0,
         pullRequest,
+        roundIndex,
         scenario,
         subject: subject.ref,
         unplanned,
@@ -695,8 +746,12 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
     `${pc.bold('acceptance')}: ${acceptanceId} ${pc.dim(`(${subject.ref.subjectType}:${subject.ref.subjectId})`)}`,
   );
   if (options.open) {
-    console.log(`${pc.bold('open')}: /verify/${runId}`);
+    // The acceptance page is the only link surfaced to users — the raw /verify
+    // page stays internal. `?r=<roundIndex>` is this round's fixed snapshot.
     console.log(`${pc.bold('open acceptance')}: /acceptance/${acceptanceId}`);
+    if (roundIndex !== null) {
+      console.log(`${pc.bold('round snapshot')}: /acceptance/${acceptanceId}?r=${roundIndex}`);
+    }
   }
 }
 
@@ -710,6 +765,7 @@ function withInstallOptions(cmd: Command): Command {
     .option('--dir <path>', 'Target working directory (default: current dir)')
     .option('--skill <id>', 'Skill identifier to pull', 'acceptance')
     .option('--force', 'Overwrite existing skill files')
+    .option('--no-gitignore', 'Do not record the installed skill in .gitignore')
     .option('--json [fields]', 'Output JSON');
 }
 
@@ -822,6 +878,12 @@ export function attachAcceptanceRunCommands(acceptance: Command): void {
         'Install the acceptance skill skeleton into .agents/skills/acceptance (pulled from the server)',
       ),
   ).action(installAction);
+
+  withInstallOptions(
+    acceptance
+      .command('update')
+      .description('Re-pull the acceptance skill, overwriting local files and re-wiring harnesses'),
+  ).action((options: InstallOptions) => installAction({ ...options, force: true }));
 
   const run = acceptance
     .command('run')

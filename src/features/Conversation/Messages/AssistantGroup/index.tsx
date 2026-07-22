@@ -20,7 +20,6 @@ import { useGlobalStore } from '@/store/global';
 import { useUserStore } from '@/store/user';
 import {
   authSelectors,
-  labPreferSelectors,
   userGeneralSettingsSelectors,
   userProfileSelectors,
 } from '@/store/user/selectors';
@@ -155,11 +154,13 @@ const GroupMessage = memo<GroupMessageProps>(
     const isGroupGenerating = useConversationStore(
       messageStateSelectors.isAssistantGroupItemGenerating(id),
     );
-    const enableProcessFold = useUserStore(labPreferSelectors.enableFoldFinishedTurn);
     const addReaction = useConversationStore((s) => s.addReaction);
     const removeReaction = useConversationStore((s) => s.removeReaction);
     const userId = useUserStore(userProfileSelectors.userId)!;
-    const reactions: EmojiReaction[] = metadata?.reactions || [];
+    const reactions = useMemo<EmojiReaction[]>(
+      () => metadata?.reactions || [],
+      [metadata?.reactions],
+    );
 
     const handleReactionClick = useCallback(
       (emoji: string) => {
@@ -170,7 +171,7 @@ const GroupMessage = memo<GroupMessageProps>(
           addReaction(id, emoji);
         }
       },
-      [id, reactions, addReaction, removeReaction],
+      [addReaction, id, reactions, removeReaction, userId],
     );
 
     const isReactionActive = useCallback(
@@ -178,7 +179,7 @@ const GroupMessage = memo<GroupMessageProps>(
         const reaction = reactions.find((r) => r.emoji === emoji);
         return !!reaction && reaction.users.includes(userId);
       },
-      [reactions],
+      [reactions, userId],
     );
 
     const setMessageItemActionElementPortialContext =
@@ -206,7 +207,7 @@ const GroupMessage = memo<GroupMessageProps>(
       } else {
         openChatSettings();
       }
-    }, [isInbox]);
+    }, [isInbox, openChatSettings, toggleSystemRole]);
 
     return (
       <ChatItem
@@ -216,6 +217,15 @@ const GroupMessage = memo<GroupMessageProps>(
         placement={'left'}
         time={createdAt}
         titleAddon={isSupervisor ? <Tag>{t('supervisor.label')}</Tag> : undefined}
+        actionAddon={
+          reactions.length > 0 ? (
+            <ReactionDisplay
+              isActive={isReactionActive}
+              reactions={reactions}
+              onReactionClick={handleReactionClick}
+            />
+          ) : undefined
+        }
         actions={
           !disableEditing && (
             <>
@@ -258,12 +268,14 @@ const GroupMessage = memo<GroupMessageProps>(
         <Flexbox gap={4}>
           {children && children.length > 0 && (
             <Group
+              enableProcessFold
               blocks={children}
               content={lastAssistantMsg?.content}
               contentId={contentId}
+              // Folding a finished turn's process is the default behavior now
+              // (graduated from Labs) — always on for the conversation.
               defaultWorkflowExpandLevel={defaultWorkflowExpandLevel}
               disableEditing={disableEditing}
-              enableProcessFold={enableProcessFold}
               id={id}
               isLatestItem={isLatestItem}
               messageIndex={index}
@@ -304,14 +316,6 @@ const GroupMessage = memo<GroupMessageProps>(
           </ExtraContainer>
         )}
         {footerRender}
-        {reactions.length > 0 && (
-          <ReactionDisplay
-            isActive={isReactionActive}
-            messageId={id}
-            reactions={reactions}
-            onReactionClick={handleReactionClick}
-          />
-        )}
         <Suspense fallback={null}>
           {editing && contentId && <EditState content={lastAssistantMsg?.content} id={contentId} />}
         </Suspense>
