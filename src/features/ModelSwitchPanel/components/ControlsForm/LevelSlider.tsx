@@ -10,6 +10,11 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   label: css`
     cursor: pointer;
 
+    position: absolute;
+    inset-block-start: 0;
+    transform: translateX(-50%);
+
+    width: max-content;
     padding: 0;
     border: none;
 
@@ -18,7 +23,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     line-height: 16px;
     color: ${cssVar.colorTextTertiary};
     text-align: center;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
 
     background: transparent;
 
@@ -35,9 +40,10 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     }
   `,
   labels: css`
-    display: grid;
-    gap: 8px;
-    width: 100%;
+    position: relative;
+    width: calc(100% - 12px);
+    height: 16px;
+    margin-inline: 6px;
   `,
   root: css`
     width: 100%;
@@ -128,6 +134,9 @@ const getMinimumWidth = (levelCount: number, customMinWidth: CSSProperties['minW
     : customMinWidth;
 };
 
+const getLevelPosition = (index: number, levelCount: number) =>
+  levelCount <= 1 ? '50%' : `${(index / (levelCount - 1)) * 100}%`;
+
 const resolveMark = (
   mark: NonNullable<SliderSingleProps['marks']>[number] | undefined,
   fallback: string,
@@ -205,10 +214,7 @@ function LevelSlider<T extends string = string>({
           onChange={handleChange}
         />
       </div>
-      <div
-        className={styles.labels}
-        style={{ gridTemplateColumns: `repeat(${levels.length}, minmax(0, 1fr))` }}
-      >
+      <div className={styles.labels}>
         {options.map((option, index) => {
           const selected = index === sliderValue;
 
@@ -218,8 +224,11 @@ function LevelSlider<T extends string = string>({
               className={cx(styles.label, selected && styles.selectedLabel)}
               disabled={disabled}
               key={option.value}
-              style={option.style}
               type="button"
+              style={{
+                ...option.style,
+                insetInlineStart: getLevelPosition(index, options.length),
+              }}
               onClick={() => {
                 if (disabled) return;
                 setCurrentLevel(option.value);
