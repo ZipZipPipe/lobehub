@@ -35,9 +35,9 @@ export const getMessageError = async (response: Response): Promise<ChatMessageEr
     const body = data.body ?? data;
     const errorType = data.errorType ?? (response.status as ErrorType);
     const bodyMessage = extractErrorMessage(body);
-    const hasBusinessErrorType = Boolean(data.errorType);
-    const shouldPreferBodyMessage =
-      Boolean(bodyMessage) && (!hasBusinessErrorType || (body && typeof body === 'object'));
+    const hasNamedBusinessErrorType =
+      typeof data.errorType === 'string' && Boolean(data.errorType.trim());
+    const shouldPreferBodyMessage = Boolean(bodyMessage) && !hasNamedBusinessErrorType;
 
     chatMessageError = {
       body,
@@ -54,7 +54,8 @@ export const getMessageError = async (response: Response): Promise<ChatMessageEr
     // if not return, then it's a common error
     chatMessageError = {
       message:
-        getTranslatedMessage(`response.${response.status}`) || `Request failed (${response.status})`,
+        getTranslatedMessage(`response.${response.status}`) ||
+        `Request failed (${response.status})`,
       type: response.status as ErrorType,
     };
   }

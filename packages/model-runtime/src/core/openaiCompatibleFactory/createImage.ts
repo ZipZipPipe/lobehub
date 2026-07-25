@@ -77,12 +77,12 @@ async function generateByImageMode(
   if (userInput.size === 'auto') {
     delete userInput.size;
   }
-  
+
   if (model === 'gpt-image-2' || model.startsWith('gpt-image-2')) {
     if (userInput.quality === 'standard') {
       userInput.quality = 'medium';
     }
-  
+
     if (userInput.quality === 'hd') {
       userInput.quality = 'high';
     }
