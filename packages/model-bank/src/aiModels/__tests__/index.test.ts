@@ -115,6 +115,7 @@ describe('Kimi Code models', () => {
         contextWindowTokens: 256_000,
         enabled: true,
         providerId: ModelProvider.KimiCodingPlan,
+        settings: expect.objectContaining({ extendParams: ['kimiK3ReasoningEffort'] }),
         type: 'chat',
       }),
     );

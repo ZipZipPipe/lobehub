@@ -23,7 +23,7 @@ const kimiCodingPlanChatModels: AIChatModelCard[] = [
     releasedAt: '2026-07-16',
     settings: {
       disabledParams: ['frequency_penalty', 'presence_penalty', 'temperature', 'top_p'],
-      extendParams: ['reasoningEffort'],
+      extendParams: ['kimiK3ReasoningEffort'],
     },
     type: 'chat',
   },

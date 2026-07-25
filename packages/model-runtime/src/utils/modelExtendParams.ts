@@ -250,6 +250,10 @@ export const applyModelExtendParams = (ctx: ApplyModelExtendParamsContext): Mode
     extendParams.reasoning_effort = chatConfig.glm5_2ReasoningEffort;
   }
 
+  if (modelExtendParams.includes('kimiK3ReasoningEffort')) {
+    extendParams.reasoning_effort = chatConfig.kimiK3ReasoningEffort ?? 'high';
+  }
+
   if (modelExtendParams.includes('grok4_20ReasoningEffort') && chatConfig.grok4_20ReasoningEffort) {
     extendParams.reasoning_effort = chatConfig.grok4_20ReasoningEffort;
   }
