@@ -168,9 +168,6 @@ const GroupMessage = memo<GroupMessageProps>(
 
     const isDevMode = useUserStore((s) => userGeneralSettingsSelectors.config(s).isDevMode);
     const isLogin = useUserStore(authSelectors.isLogin);
-    const isGroupGenerating = useConversationStore(
-      messageStateSelectors.isAssistantGroupItemGenerating(id),
-    );
     const addReaction = useConversationStore((s) => s.addReaction);
     const removeReaction = useConversationStore((s) => s.removeReaction);
     const userId = useUserStore(userProfileSelectors.userId)!;

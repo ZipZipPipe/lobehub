@@ -2,7 +2,8 @@
 
 import { VoiceList } from '@lobehub/tts';
 import { type FormGroupItemType } from '@lobehub/ui';
-import { Form, Select } from '@lobehub/ui';
+import { Form } from '@lobehub/ui';
+import { Select } from '@lobehub/ui/base-ui';
 import { Form as AntdForm, Switch } from 'antd';
 import isEqual from 'fast-deep-equal';
 import { Mic } from 'lucide-react';
@@ -38,24 +39,18 @@ const { openaiVoiceOptions } = VoiceList;
 const AgentTTS = memo(() => {
   const { t } = useTranslation('setting');
   const [form] = Form.useForm();
-  const voiceList = useGlobalStore((s) => {
-    const locale = globalGeneralSelectors.currentLanguage(s);
-    return (all?: boolean) => new VoiceList(all ? undefined : locale);
-  });
+  const locale = useGlobalStore(globalGeneralSelectors.currentLanguage);
   const config = useStore(selectors.currentTtsConfig, isEqual);
   const [disabled, updateConfig] = useStore((s) => [s.disabled, s.setAgentConfig]);
   const selectedTTSService =
     AntdForm.useWatch([TTS_SETTING_KEY, 'ttsService'], form) ?? config.ttsService;
   const showAllLocaleVoice =
     AntdForm.useWatch([TTS_SETTING_KEY, 'showAllLocaleVoice'], form) ?? config.showAllLocaleVoice;
-  const selectedElevenLabsVoice = AntdForm.useWatch(
-    [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
-    form,
-  );
+  const selectedElevenLabsVoice = AntdForm.useWatch([TTS_SETTING_KEY, 'voice', 'elevenlabs'], form);
 
   const { edgeVoiceOptions, microsoftVoiceOptions } = useMemo(
-    () => voiceList(showAllLocaleVoice),
-    [showAllLocaleVoice],
+    () => new VoiceList(showAllLocaleVoice ? undefined : locale),
+    [locale, showAllLocaleVoice],
   );
 
   useEffect(() => {
@@ -65,10 +60,7 @@ const AgentTTS = memo(() => {
   useEffect(() => {
     if (selectedTTSService !== 'elevenlabs' || selectedElevenLabsVoice) return;
 
-    form.setFieldValue(
-      [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
-      DEFAULT_ELEVENLABS_VOICE,
-    );
+    form.setFieldValue([TTS_SETTING_KEY, 'voice', 'elevenlabs'], DEFAULT_ELEVENLABS_VOICE);
   }, [form, selectedElevenLabsVoice, selectedTTSService]);
 
   const tts: FormGroupItemType = {
@@ -113,9 +105,7 @@ const AgentTTS = memo(() => {
         name: [TTS_SETTING_KEY, 'voice', 'microsoft'],
       },
       {
-        children: (
-          <SelectWithTTSPreview options={elevenLabsVoiceOptions} server={'elevenlabs'} />
-        ),
+        children: <SelectWithTTSPreview options={elevenLabsVoiceOptions} server={'elevenlabs'} />,
         desc: t('settingTTS.voice.desc'),
         divider: false,
         hidden: selectedTTSService !== 'elevenlabs',

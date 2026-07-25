@@ -1,9 +1,8 @@
 import { getMessageError } from '@lobechat/fetch-sse';
 import { type ChatMessageError } from '@lobechat/types';
 import { AudioPlayer } from '@lobehub/tts/react';
-import { type SelectProps } from '@lobehub/ui';
-import { Alert, Button, Flexbox, Highlighter, Select } from '@lobehub/ui';
-import { type RefSelectProps } from 'antd';
+import { Alert, Flexbox, Highlighter } from '@lobehub/ui';
+import { Button, Select, type SelectProps } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,25 +11,24 @@ import { useTTS } from '@/hooks/useTTS';
 import { type TTSServer } from '@/types/agent';
 import { extractErrorMessage, normalizeErrorBody } from '@/utils/extractErrorMessage';
 
-interface SelectWithTTSPreviewProps extends SelectProps {
+interface SelectWithTTSPreviewProps extends SelectProps<string> {
   server: TTSServer;
 }
 
 const SelectWithTTSPreview = ({
-  ref,
   value,
   options,
   server,
   onSelect,
   ...rest
-}: SelectWithTTSPreviewProps & { ref?: React.RefObject<RefSelectProps | null> }) => {
+}: SelectWithTTSPreviewProps) => {
   const [error, setError] = useState<ChatMessageError>();
-  const [voice, setVoice] = useState<string>(value);
+  const [voice, setVoice] = useState<string>((value as string) || '');
   const { t } = useTranslation('welcome');
   const PREVIEW_TEXT = ['Lobe Chat', t('slogan.title'), t('slogan.desc1')].join('. ');
 
   useEffect(() => {
-    setVoice(value as string);
+    setVoice((value as string) || '');
   }, [value]);
 
   const setDefaultError = useCallback(
@@ -92,7 +90,7 @@ const SelectWithTTSPreview = ({
   return (
     <Flexbox gap={8}>
       <Flexbox horizontal align={'center'} gap={8} style={{ width: '100%' }}>
-        <Select options={options} ref={ref} value={value} onSelect={handleSelect} {...rest} />
+        <Select options={options} value={value} onSelect={handleSelect} {...rest} />
         <AudioPlayer
           buttonActive
           allowPause={false}
