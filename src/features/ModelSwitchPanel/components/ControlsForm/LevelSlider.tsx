@@ -10,10 +10,6 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   label: css`
     cursor: pointer;
 
-    position: absolute;
-    inset-block-start: 0;
-    transform: translateX(-50%);
-
     width: max-content;
     padding: 0;
     border: none;
@@ -38,6 +34,15 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
       outline: 1px solid ${cssVar.colorBorder};
       outline-offset: 2px;
     }
+  `,
+  labelAnchor: css`
+    position: absolute;
+    inset-block-start: 0;
+
+    display: grid;
+    place-items: start center;
+
+    width: 0;
   `,
   labels: css`
     position: relative;
@@ -219,23 +224,25 @@ function LevelSlider<T extends string = string>({
           const selected = index === sliderValue;
 
           return (
-            <button
-              aria-current={selected ? 'true' : undefined}
-              className={cx(styles.label, selected && styles.selectedLabel)}
-              disabled={disabled}
+            <span
+              className={styles.labelAnchor}
               key={option.value}
-              type="button"
-              style={{
-                ...option.style,
-                insetInlineStart: getLevelPosition(index, options.length),
-              }}
-              onClick={() => {
-                if (disabled) return;
-                setCurrentLevel(option.value);
-              }}
+              style={{ insetInlineStart: getLevelPosition(index, options.length) }}
             >
-              {option.label}
-            </button>
+              <button
+                aria-current={selected ? 'true' : undefined}
+                className={cx(styles.label, selected && styles.selectedLabel)}
+                disabled={disabled}
+                style={option.style}
+                type="button"
+                onClick={() => {
+                  if (disabled) return;
+                  setCurrentLevel(option.value);
+                }}
+              >
+                {option.label}
+              </button>
+            </span>
           );
         })}
       </div>

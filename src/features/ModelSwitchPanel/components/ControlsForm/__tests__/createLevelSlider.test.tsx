@@ -102,23 +102,23 @@ describe('createLevelSliderComponent', () => {
 
       const { unmount } = render(<TwoLevelSlider value="max" />);
 
-      expect(screen.getByRole('button', { name: 'high' })).toHaveStyle({
+      expect(screen.getByRole('button', { name: 'high' }).parentElement).toHaveStyle({
         insetInlineStart: '0%',
       });
-      expect(screen.getByRole('button', { name: 'max' })).toHaveStyle({
+      expect(screen.getByRole('button', { name: 'max' }).parentElement).toHaveStyle({
         insetInlineStart: '100%',
       });
 
       unmount();
       render(<ThreeLevelSlider value="medium" />);
 
-      expect(screen.getByRole('button', { name: 'low' })).toHaveStyle({
+      expect(screen.getByRole('button', { name: 'low' }).parentElement).toHaveStyle({
         insetInlineStart: '0%',
       });
-      expect(screen.getByRole('button', { name: 'medium' })).toHaveStyle({
+      expect(screen.getByRole('button', { name: 'medium' }).parentElement).toHaveStyle({
         insetInlineStart: '50%',
       });
-      expect(screen.getByRole('button', { name: 'high' })).toHaveStyle({
+      expect(screen.getByRole('button', { name: 'high' }).parentElement).toHaveStyle({
         insetInlineStart: '100%',
       });
     });
