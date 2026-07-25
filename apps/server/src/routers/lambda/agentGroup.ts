@@ -8,6 +8,7 @@ import { AgentModel } from '@/database/models/agent';
 import { ChatGroupModel } from '@/database/models/chatGroup';
 import { ResourcePermissionModel } from '@/database/models/resourcePermission';
 import { UserModel } from '@/database/models/user';
+import { WorkspaceUserSettingsModel } from '@/database/models/workspaceUserSettings';
 import { AgentGroupRepository } from '@/database/repositories/agentGroup';
 import { DEFAULT_RESOURCE_ACCESS_LEVELS, RESOURCE_ACCESS_LEVELS_BY_TYPE } from '@/database/schemas';
 import { type ChatGroupConfig } from '@/database/types/chatGroup';
@@ -21,7 +22,10 @@ import {
   assertCanPerformResourceAction,
   buildResourcePermissionState,
 } from '@/server/services/resourcePermission';
-import { hasWorkspaceScopedPermission } from '@/server/services/workspacePermission';
+import {
+  hasWorkspaceScopedPermission,
+  isWorkspacePrimaryOwner,
+} from '@/server/services/workspacePermission';
 import { TransferErrorCode } from '@/types/transferError';
 
 import { isWorkspaceNonOwner } from './_helpers/assertWorkspaceRowManageable';
@@ -284,6 +288,17 @@ export const agentGroupRouter = router({
         ]);
       }
 
+      // Folder placement is per-member in workspace mode (the shared
+      // `chat_groups.groupId` column is ignored there), so a create-in-folder
+      // must also record the caller's own assignment for the new group.
+      if (ctx.workspaceId && input.groupId) {
+        await new WorkspaceUserSettingsModel(
+          ctx.serverDB,
+          ctx.userId,
+          ctx.workspaceId,
+        ).setSidebarGroupAssignment(group.id, input.groupId);
+      }
+
       return { group, supervisorAgentId };
     }),
 
@@ -379,6 +394,15 @@ export const agentGroupRouter = router({
         ]);
       }
 
+      // Same per-member folder rule as `createGroup` above.
+      if (ctx.workspaceId && input.groupConfig.groupId) {
+        await new WorkspaceUserSettingsModel(
+          ctx.serverDB,
+          ctx.userId,
+          ctx.workspaceId,
+        ).setSidebarGroupAssignment(group.id, input.groupConfig.groupId);
+      }
+
       return { agentIds: memberAgentIds, groupId: group.id, supervisorAgentId };
     }),
 
@@ -459,6 +483,13 @@ export const agentGroupRouter = router({
             ctx.userId,
           ),
         ]);
+        // Folder placement is per-member in workspace mode: keep the copy in
+        // the caller's folder when they had assigned the source group there.
+        await new WorkspaceUserSettingsModel(
+          ctx.serverDB,
+          ctx.userId,
+          ctx.workspaceId,
+        ).copySidebarGroupAssignment(input.groupId, result.groupId);
       }
       return result;
     }),
@@ -634,16 +665,22 @@ export const agentGroupRouter = router({
         });
       }
 
-      // The transfer rehomes member agents and every group conversation — a
-      // non-owner member must not move teammates' rows along with their group.
+      // The transfer rehomes member agents and every group conversation — only
+      // the primary owner may move teammates' rows along with a group;
+      // co-admins and members may not.
       if (
-        isWorkspaceNonOwner(ctx) &&
+        ctx.workspaceId &&
+        !(await isWorkspacePrimaryOwner({
+          db: ctx.serverDB,
+          userId: ctx.userId,
+          workspaceId: ctx.workspaceId,
+        })) &&
         (await ctx.agentGroupRepo.transferHasForeignRows(input.groupId))
       ) {
         throw new TRPCError({
           cause: { data: { code: TransferErrorCode.OwnerOnly } },
           code: 'FORBIDDEN',
-          message: "Only workspace owners can transfer a group carrying others' content",
+          message: "Only the workspace owner can transfer a group carrying others' content",
         });
       }
 

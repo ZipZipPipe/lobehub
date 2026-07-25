@@ -763,6 +763,7 @@ export const messengerKeys = {
     tokenScopeKey,
   ]),
   peek: def('messenger:peek', (randomId: string) => ['messenger:peek', randomId]),
+  pushWindow: def('messenger:pushWindow', (platform: string) => ['messenger:pushWindow', platform]),
 };
 
 // ---- verify (deliverable judging) ---------------------------------------
@@ -813,13 +814,19 @@ export const verifyKeys = {
 export const inboxKeys = {
   notifications: def(
     'inbox:notifications',
-    (cursor: string | undefined, unreadOnly: boolean | undefined) => [
+    // Keyed by context: the server scopes the inbox to the active workspace
+    // (null = personal), so cached pages must never be reused across contexts.
+    (workspaceId: string | null, cursor: string | undefined, unreadOnly: boolean | undefined) => [
       'inbox:notifications',
+      workspaceId,
       cursor,
       unreadOnly,
     ],
   ),
-  unreadCount: def('inbox:unreadCount', () => ['inbox:unreadCount']),
+  unreadCount: def('inbox:unreadCount', (workspaceId: string | null) => [
+    'inbox:unreadCount',
+    workspaceId,
+  ]),
 };
 
 // ---- share (shared topic / page) ----------------------------------------

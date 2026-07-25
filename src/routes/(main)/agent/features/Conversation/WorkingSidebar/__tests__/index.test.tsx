@@ -33,6 +33,8 @@ const effectiveConfig = vi.hoisted(() => ({
   workspaceScoped: false,
 }));
 
+const platform = vi.hoisted(() => ({ isDesktop: true }));
+
 const filesProps = vi.hoisted(() => ({
   current: undefined as { deviceId?: string; workingDirectory: string } | undefined,
 }));
@@ -53,12 +55,20 @@ const paramsSectionState = vi.hoisted(() => ({
   suspend: false,
 }));
 
+const browserPanes = vi.hoisted(() => ({
+  current: [] as {
+    onMetadataChange?: (metadata: { faviconUrl?: string; title: string; url: string }) => void;
+    sessionId: string;
+  }[],
+}));
+
 const localStorageState = vi.hoisted(() => ({
   openTabsByContext: {} as Record<string, string[]>,
   pinnedTabsByAgent: {} as Record<string, string[]>,
 }));
 
 const dropdownMenuState = vi.hoisted(() => ({
+  items: [] as any[],
   onOpenChangeComplete: undefined as ((open: boolean) => void) | undefined,
 }));
 
@@ -100,11 +110,29 @@ vi.mock('../ParamsSection', () => ({
   },
 }));
 vi.mock('../WorksSection', () => ({ default: () => <div /> }));
+vi.mock('../Browser', () => ({
+  default: (props: (typeof browserPanes.current)[number]) => {
+    browserPanes.current.push(props);
+    return <div data-testid={`browser-pane-${props.sessionId}`} />;
+  },
+}));
 vi.mock('../Overview', () => ({
-  default: ({ onOpenTab }: { onOpenTab: (tab: string) => void }) => (
-    <button type="button" onClick={() => onOpenTab('review')}>
-      Open Review from Overview
-    </button>
+  default: ({
+    environmentAvailable,
+    onOpenTab,
+    workingDirectory,
+  }: {
+    environmentAvailable: boolean;
+    onOpenTab: (tab: string) => void;
+    workingDirectory?: string;
+  }) => (
+    <>
+      <button type="button" onClick={() => onOpenTab('review')}>
+        Open Review from Overview
+      </button>
+      {environmentAvailable && <span>Workspace environment</span>}
+      {workingDirectory && <span>{workingDirectory}</span>}
+    </>
   ),
 }));
 
@@ -177,10 +205,24 @@ vi.mock('@/helpers/agentWorkingDirectory', () => ({ resolveTargetDeviceId: () =>
 vi.mock('@/helpers/executionTarget', () => ({
   resolveExecutionTarget: (
     agencyConfig: { executionTarget?: 'device' | 'local' } | undefined,
-    options: { workspaceScoped?: boolean },
-  ) => (options.workspaceScoped ? 'device' : (agencyConfig?.executionTarget ?? 'local')),
+    options: { clientExecutionAvailable: boolean; workspaceScoped?: boolean },
+  ) => {
+    if (options.workspaceScoped) return 'device';
+    const target = agencyConfig?.executionTarget;
+    if (!options.clientExecutionAvailable && target === 'local') return 'sandbox';
+    return target ?? (options.clientExecutionAvailable ? 'local' : 'none');
+  },
 }));
 vi.mock('@/helpers/gatewayMode', () => ({ useIsGatewayModeEnabled: () => false }));
+vi.mock('@/const/version', () => ({
+  get isDesktop() {
+    return platform.isDesktop;
+  },
+}));
+vi.mock('@/store/user', () => ({ useUserStore: () => true }));
+vi.mock('@/store/user/selectors', () => ({
+  labPreferSelectors: { enableInAppBrowser: () => true },
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -231,6 +273,7 @@ vi.mock('@lobehub/ui/base-ui', async () => {
     }) => {
       const [open, setOpen] = useState(false);
       const menuItems = items.flatMap((item) => item.children ?? []);
+      dropdownMenuState.items = items;
       dropdownMenuState.onOpenChangeComplete = onOpenChangeComplete;
 
       return (
@@ -258,6 +301,7 @@ beforeEach(() => {
     return 1;
   });
   businessTabs.current = [];
+  browserPanes.current = [];
   paramsSectionState.suspend = false;
   localStorageState.openTabsByContext = { 'draft:default:none': ['params'] };
   localStorageState.pinnedTabsByAgent = {};
@@ -266,12 +310,14 @@ beforeEach(() => {
   agentStore.rawAgencyConfig = undefined;
   effectiveConfig.agencyConfig = undefined;
   effectiveConfig.workspaceScoped = false;
+  platform.isDesktop = true;
   filesProps.current = undefined;
   reviewState.repoType = undefined;
   reviewState.setRepoType = undefined;
   reviewState.showTree = false;
   reviewState.workingDirectory = undefined;
   dropdownMenuState.onOpenChangeComplete = undefined;
+  dropdownMenuState.items = [];
   globalStore.status.workingSidebarWidth = 360;
   globalStore.status.showRightPanel = true;
   globalStore.status.workingSidebarTab = 'params';
@@ -417,6 +463,21 @@ describe('AgentWorkingSidebar — controlled panel width', () => {
       workingDirectory: '/workspace/project',
     });
   });
+
+  it('does not expose a persisted local workspace when the web client has no local runtime', () => {
+    platform.isDesktop = false;
+    agentStore.activeAgentId = 'agent';
+    effectiveConfig.agencyConfig = { executionTarget: 'local' };
+    reviewState.repoType = 'git';
+    reviewState.workingDirectory = '/Users/me/project';
+    globalStore.status.workingSidebarTab = 'overview';
+
+    render(<AgentWorkingSidebar />);
+
+    expect(screen.queryByText('Workspace environment')).not.toBeInTheDocument();
+    expect(screen.queryByText('/Users/me/project')).not.toBeInTheDocument();
+    expect(filesProps.current).toBeUndefined();
+  });
 });
 
 describe('AgentWorkingSidebar — tab strip', () => {
@@ -545,7 +606,7 @@ describe('AgentWorkingSidebar — tab strip', () => {
       'true',
     );
     expect(
-      screen.queryByRole('button', { name: 'workingPanel.resources' }),
+      screen.queryByRole('button', { name: 'workingPanel.resources.filter.skills' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'workingPanel.works.title' }),
@@ -637,7 +698,7 @@ describe('AgentWorkingSidebar — tab strip', () => {
   it('preserves agent-pinned tabs when closing other tabs', () => {
     agentStore.activeAgentId = 'agent';
     localStorageState.openTabsByContext = {
-      'draft:agent:none': ['resources', 'works', 'params'],
+      'draft:agent:none': ['skills', 'works', 'params'],
     };
     localStorageState.pinnedTabsByAgent = { agent: ['works'] };
     globalStore.status.workingSidebarTab = 'params';
@@ -648,7 +709,7 @@ describe('AgentWorkingSidebar — tab strip', () => {
 
     expect(screen.getByRole('button', { name: 'workingPanel.works.title' })).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'workingPanel.resources' }),
+      screen.queryByRole('button', { name: 'workingPanel.resources.filter.skills' }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'settingModel.params.panel.tab' }),
@@ -670,6 +731,64 @@ describe('AgentWorkingSidebar — tab strip', () => {
 
     expect(screen.getAllByRole('button', { name: 'workingPanel.review.title' })).toHaveLength(1);
     expect(globalStore.setWorkingSidebarTab).toHaveBeenCalledWith('review');
+  });
+
+  it('creates an independent browser tab every time Browser is chosen', async () => {
+    localStorageState.openTabsByContext = {};
+    globalStore.status.workingSidebarTab = 'overview';
+
+    const { container } = render(<AgentWorkingSidebar />);
+    fireEvent.click(screen.getByRole('button', { name: 'workingPanel.openMenu.title' }));
+    fireEvent.click(screen.getByRole('button', { name: 'workingPanel.browser.title' }));
+    await waitFor(() => {
+      expect(container.querySelectorAll('button[data-tab-key^="browser"]')).toHaveLength(1);
+    });
+    fireEvent.click(
+      screen
+        .getAllByRole('button', { name: 'workingPanel.browser.title' })
+        .find((button) => !button.hasAttribute('aria-pressed'))!,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('button[data-tab-key^="browser"]')).toHaveLength(2);
+    });
+    const sessionIds = [...new Set(browserPanes.current.map((pane) => pane.sessionId))];
+    expect(sessionIds).toHaveLength(2);
+    expect(sessionIds).toContain('draft-agent:default');
+    expect(sessionIds.find((id) => id !== 'draft-agent:default')).toMatch(
+      /^draft-agent:default:tab:/,
+    );
+  });
+
+  it('uses browser page metadata for the tab title and favicon', async () => {
+    localStorageState.openTabsByContext = { 'draft:default:none': ['browser'] };
+    globalStore.status.workingSidebarTab = 'browser';
+
+    const { container } = render(<AgentWorkingSidebar />);
+    await waitFor(() => expect(browserPanes.current.at(-1)).toBeDefined());
+    act(() => {
+      browserPanes.current.at(-1)?.onMetadataChange?.({
+        faviconUrl: 'https://example.com/favicon.ico',
+        title: 'Example Domain',
+        url: 'https://example.com',
+      });
+    });
+
+    expect(screen.getByRole('button', { name: 'Example Domain' })).toBeInTheDocument();
+    expect(
+      container.querySelector('img[src="https://example.com/favicon.ico"]'),
+    ).toBeInTheDocument();
+  });
+
+  it('preserves natural casing for grouped menu labels', () => {
+    render(<AgentWorkingSidebar />);
+
+    const groups = dropdownMenuState.items.filter((item) => item.type === 'group');
+
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of groups) {
+      expect(group.label.props.style).toEqual({ textTransform: 'none' });
+    }
   });
 
   it('moves focus to a tab opened from the grouped menu', async () => {

@@ -16,6 +16,7 @@ import BedrockProvider from './bedrock';
 import BflProvider from './bfl';
 import BytePlusProvider from './byteplus';
 import CerebrasProvider from './cerebras';
+import ChatGPTProvider from './chatGPT';
 import CloudflareProvider from './cloudflare';
 import CohereProvider from './cohere';
 import CometAPIProvider from './cometapi';
@@ -149,6 +150,7 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   GLMCodingPlanProvider,
   KimiCodingPlanProvider,
   OpenAIProvider,
+  ChatGPTProvider,
   DeepSeekProvider,
   XinferenceProvider,
   MoonshotProvider,
@@ -260,6 +262,7 @@ export { default as BedrockProviderCard } from './bedrock';
 export { default as BflProviderCard } from './bfl';
 export { default as BytePlusProviderCard } from './byteplus';
 export { default as CerebrasProviderCard } from './cerebras';
+export { default as ChatGPTProviderCard } from './chatGPT';
 export { default as CloudflareProviderCard } from './cloudflare';
 export { default as CohereProviderCard } from './cohere';
 export { default as CometAPIProviderCard } from './cometapi';

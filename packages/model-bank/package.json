@@ -21,6 +21,7 @@
     "./bfl": "./src/aiModels/bfl.ts",
     "./byteplus": "./src/aiModels/byteplus.ts",
     "./cerebras": "./src/aiModels/cerebras.ts",
+    "./chatGPT": "./src/aiModels/chatGPT.ts",
     "./cloudflare": "./src/aiModels/cloudflare.ts",
     "./cohere": "./src/aiModels/cohere.ts",
     "./cometapi": "./src/aiModels/cometapi.ts",

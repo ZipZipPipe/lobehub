@@ -13,6 +13,7 @@ import { LobeBedrockAI } from './providers/bedrock';
 import { LobeBflAI } from './providers/bfl';
 import { LobeBytePlusAI } from './providers/byteplus';
 import { LobeCerebrasAI } from './providers/cerebras';
+import { LobeChatGPTAI } from './providers/chatGPT';
 import { LobeCloudflareAI } from './providers/cloudflare';
 import { LobeCohereAI } from './providers/cohere';
 import { LobeCometAPIAI } from './providers/cometapi';
@@ -98,6 +99,7 @@ export const providerRuntimeMap = {
   bfl: LobeBflAI,
   byteplus: LobeBytePlusAI,
   cerebras: LobeCerebrasAI,
+  chatgpt: LobeChatGPTAI,
   cloudflare: LobeCloudflareAI,
   cohere: LobeCohereAI,
   cometapi: LobeCometAPIAI,

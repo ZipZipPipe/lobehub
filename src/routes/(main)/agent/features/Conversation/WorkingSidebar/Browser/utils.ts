@@ -4,7 +4,6 @@ import { DEFAULT_BROWSER_URL } from './const';
 
 const HTTP_URL_PATTERN = /^https?:\/\//i;
 const LOCAL_URL_PATTERN = /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)(?::\d+)?(?:[/?#].*)?$/i;
-
 export const normalizeBrowserUrl = (value?: string): string => {
   const text = value?.trim();
   if (!text) return DEFAULT_BROWSER_URL;
