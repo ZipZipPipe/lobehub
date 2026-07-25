@@ -254,11 +254,25 @@ describe('LobeKimiCodingPlanAI', () => {
         });
 
         const payload = getLastRequestPayload();
+        expect(payload.model).toBe('k3');
         expect(payload.reasoning_effort).toBe('high');
         expect(payload.thinking).toBeUndefined();
         expect(payload.temperature).toBeUndefined();
         expect(payload.top_p).toBeUndefined();
         expect(payload.output_config).toBeUndefined();
+      });
+
+      it('should normalize the legacy 256K K3 model id', async () => {
+        await instance.chat({
+          messages: [{ content: 'Hello', role: 'user' }],
+          model: 'kimi-k3-256k',
+          reasoning_effort: 'max',
+        });
+
+        const payload = getLastRequestPayload();
+        expect(payload.model).toBe('k3-256k');
+        expect(payload.reasoning_effort).toBe('max');
+        expect(payload.thinking).toBeUndefined();
       });
     });
 

@@ -112,6 +112,7 @@ describe('Kimi Code models', () => {
 
     expect(model).toEqual(
       expect.objectContaining({
+        config: { deploymentName: 'k3' },
         contextWindowTokens: 256_000,
         enabled: true,
         providerId: ModelProvider.KimiCodingPlan,

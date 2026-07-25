@@ -11,6 +11,9 @@ const kimiCodingPlanChatModels: AIChatModelCard[] = [
       video: true,
       vision: true,
     },
+    config: {
+      deploymentName: 'k3',
+    },
     contextWindowTokens: 256_000,
     description:
       'Kimi K3 is the most capable Kimi model available through Kimi Code, with strong coding, long-horizon agent, visual understanding, and deep reasoning capabilities.',

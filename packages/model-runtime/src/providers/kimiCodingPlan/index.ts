@@ -19,7 +19,14 @@ const KIMI_MODEL_MAX_OUTPUT: Record<string, number> = {
 };
 
 // Helpers for message normalization (shared with Moonshot provider)
-const isKimiK3Model = (model: string) => model === 'kimi-k3';
+const KIMI_K3_DEPLOYMENT_NAMES = new Map([
+  ['kimi-k3', 'k3'],
+  ['kimi-k3-256k', 'k3-256k'],
+]);
+
+const resolveKimiCodingModelId = (model: string) => KIMI_K3_DEPLOYMENT_NAMES.get(model) ?? model;
+const isKimiK3Model = (model: string) =>
+  model === 'k3' || model === 'k3-256k' || KIMI_K3_DEPLOYMENT_NAMES.has(model);
 const isKimiK25Model = (model: string) => model === 'kimi-k2.5' || model === 'k2p5';
 const isKimiNativeThinkingModel = (model: string) =>
   isKimiK3Model(model) || model.startsWith('kimi-k2-thinking');
@@ -77,17 +84,19 @@ const normalizeMessagesForAnthropic = (
 const buildKimiCodingPlanAnthropicPayload = async (
   payload: ChatStreamPayload,
 ): Promise<Anthropic.MessageCreateParams> => {
-  const resolvedMaxTokens = payload.max_tokens ?? KIMI_MODEL_MAX_OUTPUT[payload.model] ?? 8192;
+  const requestModel = resolveKimiCodingModelId(payload.model);
+  const resolvedMaxTokens = payload.max_tokens ?? KIMI_MODEL_MAX_OUTPUT[requestModel] ?? 8192;
 
-  const isK25 = isKimiK25Model(payload.model);
-  const isK3 = isKimiK3Model(payload.model);
-  const isNativeThinking = isKimiNativeThinkingModel(payload.model);
+  const isK25 = isKimiK25Model(requestModel);
+  const isK3 = isKimiK3Model(requestModel);
+  const isNativeThinking = isKimiNativeThinkingModel(requestModel);
   const isThinkingEnabled = isNativeThinking || (isK25 && payload.thinking?.type !== 'disabled');
 
   const basePayload = await buildDefaultAnthropicPayload({
     ...payload,
     max_tokens: resolvedMaxTokens,
     messages: normalizeMessagesForAnthropic(payload.messages, isThinkingEnabled),
+    model: requestModel,
   });
 
   // K3 reasoning is always enabled. It does not accept the K2 thinking-budget
