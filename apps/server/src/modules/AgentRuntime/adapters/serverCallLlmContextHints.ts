@@ -78,16 +78,17 @@ export const resolveServerCallLlmContextHints = async ({
     modelCard?.displayName ??
     (provider === ModelProvider.LobeHub ? canonicalModelCard?.displayName : undefined);
 
-  // Custom/remote user models aren't in the bundled model bank, so both cards
-  // miss. Fall back to the user's own AI model record so server-side runs still
-  // surface identity (the inbox `{{model}}` fallback no longer exists).
-  if (!modelDisplayName && ctx.serverDB && ctx.userId) {
+  // Custom/remote user models aren't in the bundled model bank. Load the
+  // user's exact model record once so server-side runs can use both its
+  // identity and its explicitly configured capabilities.
+  let userModel: Awaited<ReturnType<AiModelModel['findByIdAndProvider']>> | undefined;
+  if (ctx.serverDB && ctx.userId) {
     try {
       const aiModelModel = new AiModelModel(ctx.serverDB, ctx.userId, ctx.workspaceId);
-      const userModel = await aiModelModel.findByIdAndProvider(model, provider);
-      modelDisplayName = userModel?.displayName ?? undefined;
+      userModel = await aiModelModel.findByIdAndProvider(model, provider);
+      modelDisplayName ||= userModel?.displayName ?? undefined;
     } catch (error) {
-      log('Failed to resolve user model display name for %s: %O', model, error);
+      log('Failed to resolve user model metadata for %s: %O', model, error);
     }
   }
 
@@ -155,21 +156,41 @@ export const resolveServerCallLlmContextHints = async ({
     ? (llmPayload.messages as UIChatMessage[])
     : stripAssistantReasoningForReplay(llmPayload.messages as UIChatMessage[]);
 
-  const findModelInfo = (targetModel: string, targetProvider: string) =>
+  const findBuiltinModelInfo = (targetModel: string, targetProvider: string) =>
     builtinModels.find((item) => item.id === targetModel && item.providerId === targetProvider) ??
     builtinModels.find((item) => item.id === targetModel);
+
+  const findExactBuiltinModelInfo = (targetModel: string, targetProvider: string) =>
+    builtinModels.find((item) => item.id === targetModel && item.providerId === targetProvider);
+
+  const findModelAbility = (
+    targetModel: string,
+    targetProvider: string,
+    ability: 'audio' | 'functionCall' | 'video' | 'vision',
+  ) => {
+    const userAbility =
+      targetModel === model && targetProvider === provider
+        ? userModel?.abilities?.[ability]
+        : undefined;
+
+    const builtinModel =
+      ability === 'functionCall'
+        ? findExactBuiltinModelInfo(targetModel, targetProvider)
+        : findBuiltinModelInfo(targetModel, targetProvider);
+
+    return userAbility ?? builtinModel?.abilities?.[ability];
+  };
 
   return {
     capabilities: {
       isCanUseAudio: (targetModel, targetProvider) =>
-        findModelInfo(targetModel, targetProvider)?.abilities?.audio ?? false,
+        findModelAbility(targetModel, targetProvider, 'audio') ?? false,
       isCanUseFC: (targetModel, targetProvider) =>
-        builtinModels.find((item) => item.id === targetModel && item.providerId === targetProvider)
-          ?.abilities?.functionCall ?? true,
+        findModelAbility(targetModel, targetProvider, 'functionCall') ?? true,
       isCanUseVideo: (targetModel, targetProvider) =>
-        findModelInfo(targetModel, targetProvider)?.abilities?.video ?? false,
+        findModelAbility(targetModel, targetProvider, 'video') ?? false,
       isCanUseVision: (targetModel, targetProvider) =>
-        findModelInfo(targetModel, targetProvider)?.abilities?.vision ?? false,
+        findModelAbility(targetModel, targetProvider, 'vision') ?? false,
     },
     messagesForContext,
     modelDisplayName,

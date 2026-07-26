@@ -137,6 +137,15 @@ vi.mock('@/server/services/file', () => ({
   })),
 }));
 
+const { mockFindAiModelByIdAndProvider } = vi.hoisted(() => ({
+  mockFindAiModelByIdAndProvider: vi.fn(),
+}));
+vi.mock('@/database/models/aiModel', () => ({
+  AiModelModel: vi.fn().mockImplementation(() => ({
+    findByIdAndProvider: mockFindAiModelByIdAndProvider,
+  })),
+}));
+
 const {
   mockDeleteDocumentWork,
   mockDeleteTaskWork,
@@ -178,6 +187,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
     mockRegisterDocument.mockResolvedValue({ id: 'doc-work-1' });
     mockRegisterTask.mockReset();
     mockRegisterTask.mockResolvedValue({ id: 'work-1' });
+    mockFindAiModelByIdAndProvider.mockReset();
+    mockFindAiModelByIdAndProvider.mockResolvedValue(undefined);
     vi.mocked(initModelRuntimeFromDB).mockReset();
     mockCreateCompressionGroup.mockReset();
     mockCancelCompression.mockReset();
@@ -2611,6 +2622,54 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           callArgs.capabilities.isCanUseVideo('gemini-3.1-flash-lite-preview', 'lobehub'),
         ).toBe(true);
         expect(callArgs.capabilities.isCanUseVision('no-tools-model', 'lobehub')).toBe(false);
+        expect(callArgs.capabilities.isCanUseFC('no-tools-model', 'lobehub')).toBe(true);
+      });
+
+      it('should use exact user model capabilities for a custom server-side model', async () => {
+        mockFindAiModelByIdAndProvider.mockResolvedValue({
+          abilities: {
+            functionCall: true,
+            video: false,
+            vision: true,
+          },
+          displayName: 'Kimi K3 (256K)',
+          id: 'kimi-k3-256k',
+          providerId: 'kimicodingplan',
+        });
+
+        const ctxWithConfig: RuntimeExecutorContext = {
+          ...ctx,
+          agentConfig: { plugins: [], systemRole: 'test' },
+        };
+        const executors = createRuntimeExecutors(ctxWithConfig);
+        const state = createMockState({
+          modelRuntimeConfig: {
+            model: 'kimi-k3-256k',
+            provider: 'kimicodingplan',
+          },
+        });
+
+        const instruction = {
+          payload: {
+            messages: [{ content: 'Describe the attached image', role: 'user' }],
+            model: 'kimi-k3-256k',
+            provider: 'kimicodingplan',
+          },
+          type: 'call_llm' as const,
+        };
+
+        await executors.call_llm!(instruction, state);
+
+        expect(mockFindAiModelByIdAndProvider).toHaveBeenCalledWith(
+          'kimi-k3-256k',
+          'kimicodingplan',
+        );
+
+        const callArgs = engineSpy.mock.calls[0][0];
+        expect(callArgs.modelDisplayName).toBe('Kimi K3 (256K)');
+        expect(callArgs.capabilities.isCanUseVision('kimi-k3-256k', 'kimicodingplan')).toBe(true);
+        expect(callArgs.capabilities.isCanUseVideo('kimi-k3-256k', 'kimicodingplan')).toBe(false);
+        expect(callArgs.capabilities.isCanUseFC('kimi-k3-256k', 'kimicodingplan')).toBe(true);
       });
 
       it('should filter disabled files and knowledgeBases from agentConfig', async () => {
