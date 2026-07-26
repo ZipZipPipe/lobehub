@@ -1441,6 +1441,11 @@ describe('StreamingExecutor actions', () => {
           toolIds: undefined,
         }),
       );
+      expect(toolEngineering.createAgentToolsEngine).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        expect.objectContaining({ disableVisualAnalysis: true }),
+      );
     });
 
     it('should use excludeDefaultToolIds (not skipDefaultTools) in manual mode for builtin agents', () => {

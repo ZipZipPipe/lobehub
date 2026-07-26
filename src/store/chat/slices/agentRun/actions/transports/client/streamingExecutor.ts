@@ -209,12 +209,16 @@ export class StreamingExecutorActionImpl {
     const serverConfigState = getServerConfigStoreState();
     const visualUnderstandingConfigured =
       !!serverConfigState && serverConfigSelectors.enableVisualUnderstanding(serverConfigState);
+    const canUseNativeVision = isCanUseVision(agentConfigData.model, agentConfigData.provider!);
+    const canUseNativeVideo = isCanUseVideo(agentConfigData.model, agentConfigData.provider!);
     const shouldEnableVisualUnderstanding =
       visualUnderstandingConfigured &&
-      ((visualMediaAvailability.hasImages &&
-        !isCanUseVision(agentConfigData.model, agentConfigData.provider!)) ||
-        (visualMediaAvailability.hasVideos &&
-          !isCanUseVideo(agentConfigData.model, agentConfigData.provider!)));
+      ((visualMediaAvailability.hasImages && !canUseNativeVision) ||
+        (visualMediaAvailability.hasVideos && !canUseNativeVideo));
+    const shouldDisableVisualAnalysis =
+      (visualMediaAvailability.hasImages || visualMediaAvailability.hasVideos) &&
+      (!visualMediaAvailability.hasImages || canUseNativeVision) &&
+      (!visualMediaAvailability.hasVideos || canUseNativeVideo);
     const runtimePluginIds = [
       ...new Set([
         ...(pluginIds || []),
@@ -250,7 +254,11 @@ export class StreamingExecutorActionImpl {
       // Context-aware builtin manifests: lobe-agent hides callSubAgent in group /
       // sub-agent runs. Replaces the former dropSubAgentInGroup + applyPluginFilters
       // isSubAgent hard-coding.
-      { isSubAgent, scope },
+      {
+        disableVisualAnalysis: shouldDisableVisualAnalysis || undefined,
+        isSubAgent,
+        scope,
+      },
     );
     // When skillActivateMode is 'manual':
     // Exclude only discovery tools (activator, skill-store) so runtime-managed defaults

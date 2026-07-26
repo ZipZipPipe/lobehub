@@ -225,16 +225,27 @@ const askUserQuestionSection = `
 </ask_user_question>
 `;
 
-// Sections independent of sub-agent dispatch (visual fallback + ask-user + plan/todo).
-// Kept as a base so contexts where callSubAgent is unavailable can drop the sub-agent
-// guidance without leaving dangling references to a tool the model can't call.
-const baseSystemPrompt = `Use Lobe Agent capabilities only when the active model needs built-in assistance. Prefer the active model's native capabilities whenever they are sufficient. Follow each tool's description and schema, and use tool results to answer the user directly.
+const systemPromptIntro =
+  "Use Lobe Agent capabilities only when the active model needs built-in assistance. Prefer the active model's native capabilities whenever they are sufficient. Follow each tool's description and schema, and use tool results to answer the user directly.";
+
+// Sections independent of sub-agent dispatch. Kept as bases so a context-aware
+// manifest can remove visual fallback and/or sub-agent guidance without leaving
+// dangling references to APIs that are hidden from the model for that turn.
+const baseSystemPrompt = `${systemPromptIntro}
 ${visualAnalysisSection}
+${askUserQuestionSection}
+${planTodoSection}`;
+
+const baseSystemPromptWithoutVisualAnalysis = `${systemPromptIntro}
 ${askUserQuestionSection}
 ${planTodoSection}`;
 
 /** Full prompt, including sub-agent dispatch (callSubAgent) guidance. */
 export const systemPrompt = `${baseSystemPrompt}
+${subAgentSection}`;
+
+/** Prompt variant with native visual input only; sub-agent dispatch remains. */
+export const systemPromptWithoutVisualAnalysis = `${baseSystemPromptWithoutVisualAnalysis}
 ${subAgentSection}`;
 
 /**
@@ -243,3 +254,6 @@ ${subAgentSection}`;
  * instructs the model to use a tool that isn't in its tool list.
  */
 export const systemPromptWithoutSubAgent = baseSystemPrompt;
+
+/** Prompt variant with both callSubAgent and visual-analysis fallback hidden. */
+export const systemPromptWithoutSubAgentAndVisualAnalysis = baseSystemPromptWithoutVisualAnalysis;

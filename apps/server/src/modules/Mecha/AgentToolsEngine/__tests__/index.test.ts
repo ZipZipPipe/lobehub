@@ -445,6 +445,33 @@ describe('createServerAgentToolsEngine', () => {
     expect(lobeAgent?.api.map((a) => a.name)).not.toContain(LobeAgentApiName.callSubAgent);
   });
 
+  it('hides only lobe-agent visual analysis when native media handling is sufficient', () => {
+    const context = createMockContext();
+    const engine = createServerAgentToolsEngine(context, {
+      agentConfig: { plugins: [] },
+      manifestContext: { disableVisualAnalysis: true },
+      model: 'native-vision-model',
+      modelAbilities: { vision: true },
+      provider: 'custom-provider',
+    });
+
+    const result = engine.generateToolsDetailed({
+      model: 'native-vision-model',
+      provider: 'custom-provider',
+      toolIds: [],
+    });
+
+    expect(result.enabledToolIds).toContain(LobeAgentManifest.identifier);
+    const lobeAgent = result.enabledManifests.find(
+      (manifest) => manifest.identifier === LobeAgentManifest.identifier,
+    );
+    const apiNames = lobeAgent?.api.map((api) => api.name);
+    expect(apiNames).not.toContain(LobeAgentApiName.analyzeVisualMedia);
+    expect(apiNames).toContain(LobeAgentApiName.createPlan);
+    expect(apiNames).toContain(LobeAgentApiName.callSubAgent);
+    expect(lobeAgent?.systemRole).not.toContain('analyzeVisualMedia');
+  });
+
   it('rewrites lobe-skills exec descriptions when manifestContext.executionEnv is device-unrouted', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {

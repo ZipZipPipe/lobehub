@@ -2907,9 +2907,30 @@ export class AiAgentService {
 
       // Dynamically inject turn-scoped builtin tools.
       const hasTopicReference = /refer_topic/.test(prompt ?? '');
-      const modelAbilities =
+      const builtinModelAbilities =
         builtinModels.find((item) => item.id === model && item.providerId === provider)
           ?.abilities ?? builtinModels.find((item) => item.id === model)?.abilities;
+      // The bundled model bank cannot describe user-defined provider/model
+      // pairs. Prefer the exact workspace-scoped DB record when present; its
+      // explicit false values must override a same-id builtin card as well.
+      const userModelAbilities = await (async () => {
+        try {
+          const userModel = await new AiModelModel(
+            this.db,
+            this.userId,
+            this.workspaceId,
+          ).findByIdAndProvider(model, provider);
+
+          return userModel?.abilities ?? undefined;
+        } catch (error) {
+          log('execAgent: failed to resolve model abilities for %s/%s: %O', provider, model, error);
+          return undefined;
+        }
+      })();
+      const modelAbilities = {
+        ...builtinModelAbilities,
+        ...userModelAbilities,
+      };
       const externalFileTypes = files?.map((file) => file.mimeType ?? '') ?? [];
       let attachedFileTypes: string[] = [];
       if (attachedFileIds && attachedFileIds.length > 0) {
@@ -2919,25 +2940,28 @@ export class AiAgentService {
       }
       const inputFileTypes = [...externalFileTypes, ...attachedFileTypes];
       const inputVisualAvailability = getVisualAvailabilityFromFileTypes(inputFileTypes);
-      let historyVisualAvailability = { hasImages: false, hasVideos: false };
+      // History is loaded later for context construction anyway; resolve it
+      // here through the shared cache so the tool manifest reflects media from
+      // prior turns as well as newly attached files.
+      const historyVisualAvailability = getVisualAvailabilityFromMessages(
+        await loadHistoryMessages(),
+      );
       const visualUnderstandingConfigured = isVisualUnderstandingConfigured();
-
-      if (
-        visualUnderstandingConfigured &&
-        ((!modelAbilities?.vision && !inputVisualAvailability.hasImages) ||
-          (!modelAbilities?.video && !inputVisualAvailability.hasVideos))
-      ) {
-        historyVisualAvailability = getVisualAvailabilityFromMessages(await loadHistoryMessages());
-      }
-
-      const needsImageUnderstanding =
-        (inputVisualAvailability.hasImages || historyVisualAvailability.hasImages) &&
-        !modelAbilities?.vision;
-      const needsVideoUnderstanding =
-        (inputVisualAvailability.hasVideos || historyVisualAvailability.hasVideos) &&
-        !modelAbilities?.video;
+      const hasImages = inputVisualAvailability.hasImages || historyVisualAvailability.hasImages;
+      const hasVideos = inputVisualAvailability.hasVideos || historyVisualAvailability.hasVideos;
+      const needsImageUnderstanding = hasImages && !modelAbilities.vision;
+      const needsVideoUnderstanding = hasVideos && !modelAbilities.video;
       const shouldEnableVisualUnderstanding =
         visualUnderstandingConfigured && (needsImageUnderstanding || needsVideoUnderstanding);
+      // lobe-agent is always-on in Agent mode. When every visible media type is
+      // natively supported, remove only its visual fallback API so models such
+      // as Kimi cannot redundantly choose MCP over the supplied image blocks.
+      // If any attached type is unsupported (e.g. video on K3-256K), keep the
+      // fallback available for that media.
+      const shouldDisableVisualAnalysis =
+        (hasImages || hasVideos) &&
+        (!hasImages || modelAbilities.vision === true) &&
+        (!hasVideos || modelAbilities.video === true);
       agentPlugins = [
         ...agentPlugins,
         ...(hasTopicReference ? ['lobe-topic-reference'] : []),
@@ -3127,6 +3151,7 @@ export class AiAgentService {
         // importantly the `device-unrouted` degradation, where the user picked
         // a local device that is offline and exec silently lands in the sandbox.
         manifestContext: {
+          disableVisualAnalysis: shouldDisableVisualAnalysis || undefined,
           executionEnv: executionPlan.kind,
           executionEnvUnroutedReason:
             executionPlan.kind === 'device-unrouted' ? executionPlan.reason : undefined,

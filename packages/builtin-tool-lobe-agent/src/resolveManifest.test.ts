@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { LobeAgentManifest } from './manifest';
 import { resolveLobeAgentManifest } from './resolveManifest';
-import { systemPromptWithoutSubAgent } from './systemRole';
+import {
+  systemPromptWithoutSubAgent,
+  systemPromptWithoutSubAgentAndVisualAnalysis,
+  systemPromptWithoutVisualAnalysis,
+} from './systemRole';
 import { LobeAgentApiName } from './types';
 
 const apiNames = (manifest: { api: { name: string }[] }) => manifest.api.map((a) => a.name);
@@ -56,11 +60,51 @@ describe('resolveLobeAgentManifest', () => {
     expect(result.systemRole).not.toContain('callSubAgent');
   });
 
+  it('hides visual analysis when the active model can inspect all attached media natively', () => {
+    const result = resolveLobeAgentManifest({
+      disableVisualAnalysis: true,
+      scope: 'main',
+    })!;
+
+    const names = apiNames(result);
+    expect(names).not.toContain(LobeAgentApiName.analyzeVisualMedia);
+    expect(names).toContain(LobeAgentApiName.callSubAgent);
+    expect(names).toContain(LobeAgentApiName.createPlan);
+    expect(names).toHaveLength(LobeAgentManifest.api.length - 1);
+    expect(result.systemRole).toBe(systemPromptWithoutVisualAnalysis);
+    expect(result.systemRole).not.toContain('visual_analysis');
+    expect(result.systemRole).not.toContain('analyzeVisualMedia');
+    expect(result.systemRole).toContain('sub_agents');
+    expect(result.systemRole).toContain('plan_and_todos');
+  });
+
+  it('hides both visual analysis and sub-agent dispatch when both gates apply', () => {
+    const result = resolveLobeAgentManifest({
+      disableVisualAnalysis: true,
+      isSubAgent: true,
+      scope: 'main',
+    })!;
+
+    const names = apiNames(result);
+    expect(names).not.toContain(LobeAgentApiName.analyzeVisualMedia);
+    expect(names).not.toContain(LobeAgentApiName.callSubAgent);
+    expect(names).toContain(LobeAgentApiName.createPlan);
+    expect(names).toContain(LobeAgentApiName.createTodos);
+    expect(names).toHaveLength(LobeAgentManifest.api.length - 2);
+    expect(result.systemRole).toBe(systemPromptWithoutSubAgentAndVisualAnalysis);
+    expect(result.systemRole).not.toContain('visual_analysis');
+    expect(result.systemRole).not.toContain('sub_agents');
+    expect(result.systemRole).toContain('plan_and_todos');
+  });
+
   it('does not mutate the original static manifest', () => {
     const before = LobeAgentManifest.api.length;
-    resolveLobeAgentManifest({ scope: 'group' });
+    resolveLobeAgentManifest({ disableVisualAnalysis: true, scope: 'group' });
     expect(LobeAgentManifest.api).toHaveLength(before);
     // the full manifest's systemRole still describes sub-agent dispatch
     expect(LobeAgentManifest.systemRole).toContain('callSubAgent');
+    expect(LobeAgentManifest.api.map((api) => api.name)).toContain(
+      LobeAgentApiName.analyzeVisualMedia,
+    );
   });
 });

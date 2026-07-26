@@ -10,8 +10,18 @@ import { AgentRuntimeService } from '@/server/services/agentRuntime';
 
 import { AiAgentService } from '../index';
 
+// Node 20 does not expose the Zstd helpers imported by the tracing stores.
+// This suite never reads or writes traces, so supply inert functions during
+// module initialization and keep the standard-agent tests environment-neutral.
+vi.mock('node:zlib', async () => {
+  const actual = await vi.importActual('node:zlib');
+
+  return { ...(actual as object), zstdCompress: vi.fn(), zstdDecompress: vi.fn() };
+});
+
 const {
   mockCreateOperation,
+  mockFindAiModelByIdAndProvider,
   mockGetAgentConfig,
   mockGetBuiltinAgent,
   mockGetInfoForAIGeneration,
@@ -22,6 +32,7 @@ const {
   mockToolsEnv,
 } = vi.hoisted(() => ({
   mockCreateOperation: vi.fn(),
+  mockFindAiModelByIdAndProvider: vi.fn(),
   mockGetAgentConfig: vi.fn(),
   mockGetBuiltinAgent: vi.fn(),
   mockGetInfoForAIGeneration: vi.fn(),
@@ -52,6 +63,12 @@ vi.mock('@/database/models/message', () => ({
     getLatestSpineMessageId: vi.fn().mockResolvedValue(undefined),
     query: mockMessageQuery,
     update: vi.fn().mockResolvedValue({}),
+  })),
+}));
+
+vi.mock('@/database/models/aiModel', () => ({
+  AiModelModel: vi.fn().mockImplementation(() => ({
+    findByIdAndProvider: mockFindAiModelByIdAndProvider,
   })),
 }));
 
@@ -141,6 +158,12 @@ vi.mock('@/server/services/agentRuntime', () => ({
   })),
 }));
 
+// This suite exercises the standard agent runtime only. Isolate the unrelated
+// heterogeneous runtime, whose tracing store requires Node's newer Zstd API.
+vi.mock('@/server/services/heterogeneousAgent', () => ({
+  HeterogeneousAgentService: vi.fn(),
+}));
+
 vi.mock('@/server/services/market', () => ({
   MarketService: vi.fn().mockImplementation(() => ({
     getLobehubSkillManifests: vi.fn().mockResolvedValue([]),
@@ -215,6 +238,7 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
     vi.clearAllMocks();
     mockMessageCreate.mockResolvedValue({ id: 'msg-1' });
     mockMessageQuery.mockResolvedValue([]);
+    mockFindAiModelByIdAndProvider.mockResolvedValue(undefined);
     mockIsAgentSignalEnabledForUser.mockResolvedValue(true);
     mockResolveTask.mockResolvedValue(null);
     mockGetInfoForAIGeneration.mockResolvedValue({
@@ -677,5 +701,75 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
 
     const callArgs = vi.mocked(createServerAgentToolsEngine).mock.calls[0][1];
     expect(callArgs.agentConfig.plugins).not.toContain('lobe-agent');
+    expect(callArgs.manifestContext?.disableVisualAnalysis).toBe(true);
+  });
+
+  it('should use exact workspace model abilities to hide visual fallback for K3-256K images', async () => {
+    mockGetAgentConfig.mockResolvedValue({
+      chatConfig: {},
+      id: 'agent-custom',
+      model: 'kimi-k3-256k',
+      plugins: [],
+      provider: 'kimicodingplan',
+      systemRole: '',
+    });
+    mockFindAiModelByIdAndProvider.mockResolvedValue({
+      abilities: { functionCall: true, video: false, vision: true },
+      id: 'kimi-k3-256k',
+      providerId: 'kimicodingplan',
+    });
+    mockMessageQuery.mockResolvedValue([
+      {
+        id: 'history-image',
+        imageList: [{ id: 'file-image', url: 'https://example.com/image.png' }],
+        role: 'user',
+      },
+    ]);
+
+    await service.execAgent({
+      agentId: 'agent-custom',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'Describe the previous image without using a visual tool.',
+    });
+
+    expect(mockFindAiModelByIdAndProvider).toHaveBeenCalledWith('kimi-k3-256k', 'kimicodingplan');
+    const callArgs = vi.mocked(createServerAgentToolsEngine).mock.calls[0][1];
+    expect(callArgs.modelAbilities).toMatchObject({ video: false, vision: true });
+    expect(callArgs.manifestContext?.disableVisualAnalysis).toBe(true);
+    expect(callArgs.agentConfig.plugins).not.toContain('lobe-agent');
+  });
+
+  it('should keep visual fallback for videos that K3-256K does not support natively', async () => {
+    mockGetAgentConfig.mockResolvedValue({
+      chatConfig: {},
+      id: 'agent-custom',
+      model: 'kimi-k3-256k',
+      plugins: [],
+      provider: 'kimicodingplan',
+      systemRole: '',
+    });
+    mockFindAiModelByIdAndProvider.mockResolvedValue({
+      abilities: { functionCall: true, video: false, vision: true },
+      id: 'kimi-k3-256k',
+      providerId: 'kimicodingplan',
+    });
+    mockMessageQuery.mockResolvedValue([
+      {
+        id: 'history-video',
+        role: 'user',
+        videoList: [{ id: 'file-video', url: 'https://example.com/video.mp4' }],
+      },
+    ]);
+
+    await service.execAgent({
+      agentId: 'agent-custom',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'Describe the previous video.',
+    });
+
+    const callArgs = vi.mocked(createServerAgentToolsEngine).mock.calls[0][1];
+    expect(callArgs.modelAbilities).toMatchObject({ video: false, vision: true });
+    expect(callArgs.manifestContext?.disableVisualAnalysis).toBeUndefined();
+    expect(callArgs.agentConfig.plugins).toContain('lobe-agent');
   });
 });
