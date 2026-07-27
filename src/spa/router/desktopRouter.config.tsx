@@ -1111,6 +1111,14 @@ export const desktopRoutes: RouteObject[] = [
         handle: { meta: acceptanceRouteMeta },
         path: ':acceptanceId',
       },
+      {
+        element: dynamicElement(
+          () => import('@/routes/acceptance/[acceptanceId]'),
+          'Desktop > AcceptanceCheck',
+        ),
+        handle: { meta: acceptanceRouteMeta },
+        path: ':acceptanceId/check/:checkId',
+      },
     ],
     element: dynamicElement(() => import('@/routes/(main)/acceptance'), 'Desktop > Acceptance'),
     errorElement: <ErrorBoundary />,
@@ -1123,22 +1131,4 @@ desktopRoutes.push({
   element: dynamicElement(() => import('@/routes/onboarding'), 'Desktop > Onboarding'),
   errorElement: <ErrorBoundary />,
   path: '/onboarding',
-});
-
-desktopRoutes.push({
-  element: dynamicElement(
-    () => import('@/routes/onboarding/agent'),
-    'Desktop > Onboarding > Agent',
-  ),
-  errorElement: <ErrorBoundary />,
-  path: '/onboarding/agent',
-});
-
-desktopRoutes.push({
-  element: dynamicElement(
-    () => import('@/routes/onboarding/classic'),
-    'Desktop > Onboarding > Classic',
-  ),
-  errorElement: <ErrorBoundary />,
-  path: '/onboarding/classic',
 });

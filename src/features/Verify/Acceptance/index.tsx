@@ -1,6 +1,6 @@
 'use client';
 
-import type { VerifyCodingScope } from '@lobechat/types';
+import type { AcceptanceChecklistItem, VerifyCodingScope } from '@lobechat/types';
 import {
   ActionIcon,
   Avatar,
@@ -14,14 +14,20 @@ import {
   Tag,
   Text,
 } from '@lobehub/ui';
-import { Button, Segmented, Select, toast } from '@lobehub/ui/base-ui';
+import type { DropdownItem } from '@lobehub/ui/base-ui';
+import { Button, DropdownMenu, Select, toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar, cx, useResponsive } from 'antd-style';
 import dayjs from 'dayjs';
 import {
   ArrowLeft,
   BadgeCheck,
+  Ban,
+  Check,
+  ChevronDown,
+  ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  CircleCheck,
   CircleDashed,
   GitBranch,
   GitCommitHorizontal,
@@ -31,16 +37,21 @@ import {
   MessagesSquare,
   PanelRightOpen,
   PencilLine,
+  Plus,
   RefreshCw,
   RotateCcw,
+  X,
+  XCircle,
 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useSearchParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 import NeuralNetworkLoading from '@/components/NeuralNetworkLoading';
 import AgentProfilePopup from '@/features/AgentProfileCard/AgentProfilePopup';
+import { openCheckEditModal } from '@/features/Conversation/ChatInput/VerifyTray/EditModal';
 import { openGoalModal } from '@/features/Conversation/ChatInput/VerifyTray/GoalModal';
+import NavItem from '@/features/NavPanel/components/NavItem';
 import { useLocalStorageState } from '@/hooks/useLocalStorageState';
 // The workspace-scoped mutate — a bare `import { mutate } from 'swr'` misses
 // every `useClientDataSWR` subscriber (augmented keys + custom cache provider).
@@ -52,23 +63,30 @@ import { useTaskStore } from '@/store/task';
 import { useAcceptanceBundle } from '../hooks';
 import ReportViewer from '../ReportViewer';
 import { extractUuid, resolveRoundParam } from '../utils';
+import { openAddCheckModal } from './AddCheckModal';
 import CheckList, {
   type CheckFilter,
   checkFilterState,
   type CheckReviewInput,
   FocusedCheckDetails,
+  focusedCheckStates,
   groupChecks,
   hasVisualEvidence,
   isException,
   isGroupFullyAccepted,
+  shouldGroupChecks,
   userReviewState,
 } from './CheckList';
 import DecisionBar from './DecisionBar';
 import { EMPTY_ID_SET, setAggregateEntry } from './expandState';
 import FeedbackDrawer, { type FeedbackListEntry } from './FeedbackDrawer';
+import { acceptanceFocusedLayout } from './layout';
 import LedgerPanel, { type AcceptanceRound } from './LedgerPanel';
 import { openAcceptModal, openRejectModal } from './modals';
+import { acceptanceCheckPath, acceptanceOverviewPath } from './routes';
+import { getAcceptanceStatusActions } from './statusActions';
 import TopicPanel from './TopicPanel';
+import { canViewAcceptanceHistory, resolveAcceptanceHistoryNavigation } from './visibility';
 
 /**
  * The hardcoded repair prompt (复制 review 建议 / 打回重跑 share it): points the
@@ -81,6 +99,13 @@ const buildRepairPrompt = (acceptanceId: string) =>
 lh acceptance feedback ${acceptanceId} --actionable
 
 Every entry it prints (per-check comments, circled-region annotations on the evidence screenshots, and attachments) is the full set of feedback to handle this round. Fix the code item by item; then re-run verification and ingest the new result back into the SAME acceptance (reuse the existing check ids, and use supersedes for any check whose meaning changed). Keep the final report in the same language the previous rounds used.`;
+
+const buildCheckRepairPrompt = (
+  acceptanceId: string,
+  check: { id: string; seq: number; title: string },
+) => `${buildRepairPrompt(acceptanceId)}
+
+For this pass, focus on check C${check.seq} "${check.title}" (check id: ${check.id}). Treat it as the bounded work item: read its evidence and feedback, make the necessary change, and re-verify it without disturbing unrelated accepted or ignored checks.`;
 
 const styles = createStaticStyles(({ css }) => ({
   banner: css`
@@ -199,11 +224,18 @@ const styles = createStaticStyles(({ css }) => ({
     font-size: 12px;
     font-weight: 500;
   `,
+  verdictPillInteractive: css`
+    cursor: pointer;
+    transition: filter ${cssVar.motionDurationMid};
+
+    &:hover {
+      filter: brightness(1.08);
+    }
+  `,
   focusLayout: css`
     display: grid;
-    grid-template-columns: 264px minmax(0, 1fr);
-    gap: 20px;
-    align-items: start;
+    grid-template-columns: 320px minmax(0, 1fr);
+    min-height: ${acceptanceFocusedLayout.viewportHeight};
 
     @media (width <= 900px) {
       grid-template-columns: 1fr;
@@ -213,39 +245,53 @@ const styles = createStaticStyles(({ css }) => ({
     position: sticky;
     inset-block-start: 0;
 
-    overflow: hidden;
+    overflow: auto;
 
-    border: 1px solid ${cssVar.colorBorderSecondary};
-    border-radius: ${cssVar.borderRadiusLG};
+    height: ${acceptanceFocusedLayout.viewportHeight};
+    padding: 8px;
+    border-inline-end: 1px solid ${cssVar.colorBorderSecondary};
 
-    background: ${cssVar.colorBgContainer};
+    background: ${cssVar.colorFillQuaternary};
 
     @media (width <= 900px) {
       position: static;
+      height: auto;
+      border-block-end: 1px solid ${cssVar.colorBorderSecondary};
+      border-inline-end: 0;
     }
   `,
-  focusOutlineItem: css`
-    cursor: pointer;
-
-    padding-block: 10px;
-    padding-inline: 12px;
-    border-block-start: 1px solid ${cssVar.colorBorderSecondary};
-
-    transition: background ${cssVar.motionDurationMid};
-
-    &:hover {
-      background: ${cssVar.colorFillQuaternary};
-    }
-
-    &[data-active='true'] {
-      background: ${cssVar.colorFillSecondary};
-    }
+  focusMain: css`
+    min-width: 0;
+    padding-block: ${acceptanceFocusedLayout.contentPaddingBlock};
+    padding-inline: 32px;
+  `,
+  focusContent: css`
+    width: min(880px, 100%);
+    margin-inline: auto;
+  `,
+  focusWork: css`
+    padding: 16px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadiusLG};
+    background: ${cssVar.colorFillQuaternary};
+  `,
+  standingPanel: css`
+    overflow: hidden;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadiusLG};
+    background: ${cssVar.colorBgContainer};
   `,
 }));
 
 /** Aggregate states in which the round chain is still executing. */
 const LIVE_STATUSES = new Set(['pending', 'planned', 'verifying', 'repairing']);
 const GOAL_COLLAPSED_STORAGE_KEY = 'lobehub-acceptance-goal-collapsed';
+const CHECK_REVIEW_ORDER: Record<Exclude<CheckFilter, 'all'>, number> = {
+  pending: 0,
+  needsFix: 1,
+  accepted: 2,
+  ignored: 3,
+};
 
 interface AcceptancePageProps {
   /**
@@ -264,11 +310,12 @@ interface AcceptancePageProps {
 
 const AcceptancePage = memo<AcceptancePageProps>(
   ({ acceptanceId: explicitAcceptanceId, onDraftToComposer }) => {
-    const params = useParams<{ acceptanceId: string }>();
+    const params = useParams<{ acceptanceId: string; checkId: string }>();
     // Route params come from shared links whose autolinker may have glued
     // trailing punctuation onto the id — salvage the leading UUID.
     const acceptanceId = explicitAcceptanceId ?? extractUuid(params.acceptanceId);
     const isEmbedded = Boolean(explicitAcceptanceId);
+    const navigate = useNavigate();
     const { t } = useTranslation('verify');
     const { data, error, isLoading, mutate } = useAcceptanceBundle(acceptanceId ?? null);
     const openTopicDrawer = useTaskStore((s) => s.openTopicDrawer);
@@ -296,12 +343,13 @@ const AcceptancePage = memo<AcceptancePageProps>(
     // only on the standalone acceptance page. The portal embed rides the chat
     // URL, so it keeps the filter in local state instead of hijacking that query.
     const [searchParams, setSearchParams] = useSearchParams();
-    const focusedCheckId = isEmbedded ? null : searchParams.get('check');
+    const legacyFocusedCheckId = isEmbedded ? null : searchParams.get('check');
+    const focusedCheckId = isEmbedded ? null : (params.checkId ?? legacyFocusedCheckId);
     const [localFilter, setLocalFilter] = useState<CheckFilter>('all');
     const urlFilterRaw = searchParams.get('filter');
-    const urlFilter: CheckFilter = (['all', 'pending', 'needsFix', 'accepted'] as const).includes(
-      urlFilterRaw as CheckFilter,
-    )
+    const urlFilter: CheckFilter = (
+      ['all', 'pending', 'needsFix', 'accepted', 'ignored'] as const
+    ).includes(urlFilterRaw as CheckFilter)
       ? (urlFilterRaw as CheckFilter)
       : 'all';
     const filter = isEmbedded ? localFilter : urlFilter;
@@ -352,6 +400,21 @@ const AcceptancePage = memo<AcceptancePageProps>(
     const [highlightRound, setHighlightRound] = useState<number | null>(null);
     const [ledgerExpand, setLedgerExpand] = useState(!isEmbedded);
     const [topicPanelOpen, setTopicPanelOpen] = useState(false);
+    // Keep previously shared `?check=` links working, but make the nested path
+    // the single source of truth for the selected check going forward.
+    useEffect(() => {
+      if (isEmbedded || params.checkId || !legacyFocusedCheckId || !acceptanceId) return;
+
+      const nextSearchParams = new URLSearchParams(searchParams);
+      nextSearchParams.delete('check');
+      navigate(
+        {
+          pathname: acceptanceCheckPath(acceptanceId, legacyFocusedCheckId),
+          search: nextSearchParams.toString(),
+        },
+        { replace: true },
+      );
+    }, [acceptanceId, isEmbedded, legacyFocusedCheckId, navigate, params.checkId, searchParams]);
     // Entering the narrow regime closes the ledger (it would cover the report);
     // reopening is an explicit act via the corner toggle, as a float overlay.
     useEffect(() => {
@@ -362,7 +425,6 @@ const AcceptancePage = memo<AcceptancePageProps>(
     useEffect(() => {
       if (focusedCheckId) setLedgerExpand(false);
     }, [focusedCheckId]);
-
     const closeTopicPanel = useCallback(() => {
       setTopicPanelOpen(false);
       closeTopicDrawer();
@@ -389,10 +451,13 @@ const AcceptancePage = memo<AcceptancePageProps>(
     const urlRoundRaw = searchParams.get('r');
     useEffect(() => {
       if (isEmbedded || !data) return;
-      setReportRound(resolveRoundParam(data.rounds, urlRoundRaw));
+      setReportRound(
+        canViewAcceptanceHistory(data.isOwner) ? resolveRoundParam(data.rounds, urlRoundRaw) : null,
+      );
     }, [isEmbedded, data, urlRoundRaw]);
     const [pending, setPending] = useState(false);
     const [rerunPending, setRerunPending] = useState(false);
+    const [checkWorkPending, setCheckWorkPending] = useState(false);
     const [actionError, setActionError] = useState<string>();
     const [feedbackOpen, setFeedbackOpen] = useState(false);
 
@@ -428,11 +493,13 @@ const AcceptancePage = memo<AcceptancePageProps>(
         ),
       );
       setCollapsedGroups(
-        new Set(
-          groupChecks(data.checks, t('acceptance.group.uncategorized'))
-            .filter((group) => isGroupFullyAccepted(group.checks))
-            .map((group) => group.key),
-        ),
+        shouldGroupChecks(data.checks.length)
+          ? new Set(
+              groupChecks(data.checks, t('acceptance.group.uncategorized'))
+                .filter((group) => isGroupFullyAccepted(group.checks))
+                .map((group) => group.key),
+            )
+          : new Set(),
       );
       // First run (one round): nothing has been reviewed yet, so open on the whole
       // list. Second round onward: the reviewer came back for what's still unsigned
@@ -467,6 +534,7 @@ const AcceptancePage = memo<AcceptancePageProps>(
         accepted: checks.filter((check) => checkFilterState(check) === 'accepted').length,
         exceptions: checks.filter((check) => isException(check)).length,
         failed: checks.filter((check) => check.state === 'failed').length,
+        ignored: checks.filter((check) => checkFilterState(check) === 'ignored').length,
         needsFix: checks.filter((check) => checkFilterState(check) === 'needsFix').length,
         notExecuted: checks.filter((check) => check.state === 'not_executed').length,
         passed: checks.filter((check) => check.state === 'passed').length,
@@ -496,17 +564,39 @@ const AcceptancePage = memo<AcceptancePageProps>(
       );
 
     const { acceptance, checks, isOwner, latestReport, origin, rounds, subject } = data;
+    const showHistory = canViewAcceptanceHistory(isOwner);
+    const originAgent = origin?.agent;
+    const originTopic = origin?.topic;
     const focusedCheck = focusedCheckId
       ? checks.find((check) => check.id === focusedCheckId)
       : undefined;
+    const orderedChecks = [...checks].sort(
+      (a, b) =>
+        CHECK_REVIEW_ORDER[checkFilterState(a)] - CHECK_REVIEW_ORDER[checkFilterState(b)] ||
+        a.seq - b.seq,
+    );
+    const standingChecklist = acceptance.config?.checklist ?? [];
+    const unverifiedStandingChecks = standingChecklist.filter(
+      (item) => !checks.some((check) => check.id === item.id),
+    );
+    const focusedStates = focusedCheck
+      ? focusedCheckStates(focusedCheck)
+      : {
+          review: 'pending' as const,
+          verifier: 'not_executed' as const,
+          verifierLabel: 'notExecuted' as const,
+        };
     const setFocusedCheck = (id?: string) => {
-      if (isEmbedded) return;
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (id) params.set('check', id);
-          else params.delete('check');
-          return params;
+      if (isEmbedded || !acceptanceId) return;
+
+      const nextSearchParams = new URLSearchParams(searchParams);
+      nextSearchParams.delete('check');
+      navigate(
+        {
+          pathname: id
+            ? acceptanceCheckPath(acceptanceId, id)
+            : acceptanceOverviewPath(acceptanceId),
+          search: nextSearchParams.toString(),
         },
         { replace: true },
       );
@@ -529,9 +619,10 @@ const AcceptancePage = memo<AcceptancePageProps>(
       .find((round) => (round.run.scenario ?? 'coding') === 'coding' && round.run.context)?.run
       .context as VerifyCodingScope | null | undefined;
 
-    const groupKeys = groupChecks(checks, t('acceptance.group.uncategorized')).map(
-      (group) => group.key,
-    );
+    const grouped = shouldGroupChecks(checks.length);
+    const groupKeys = grouped
+      ? groupChecks(checks, t('acceptance.group.uncategorized')).map((group) => group.key)
+      : [];
     const allGroupsCollapsed =
       groupKeys.length > 0 && groupKeys.every((key) => collapsedGroups.has(key));
 
@@ -581,26 +672,33 @@ const AcceptancePage = memo<AcceptancePageProps>(
                 icon: BadgeCheck,
                 label: t('acceptance.status.accepted'),
               }
-            : acceptance.status === 'rejected'
+            : acceptance.status === 'closed'
               ? {
-                  bg: cssVar.colorErrorBg,
-                  color: cssVar.colorError,
-                  icon: RotateCcw,
-                  label: t('acceptance.status.rejected'),
+                  bg: cssVar.colorFillSecondary,
+                  color: cssVar.colorTextSecondary,
+                  icon: X,
+                  label: t('acceptance.status.closed'),
                 }
-              : acceptance.status === 'errored'
+              : acceptance.status === 'rejected'
                 ? {
-                    bg: cssVar.colorWarningBg,
-                    color: cssVar.colorWarning,
-                    icon: HelpCircle,
-                    label: t('acceptance.status.errored'),
+                    bg: cssVar.colorErrorBg,
+                    color: cssVar.colorError,
+                    icon: RotateCcw,
+                    label: t('acceptance.status.rejected'),
                   }
-                : {
-                    bg: cssVar.colorInfoBg,
-                    color: cssVar.colorInfo,
-                    icon: CircleDashed,
-                    label: t('acceptance.verdict.inProgress'),
-                  };
+                : acceptance.status === 'errored'
+                  ? {
+                      bg: cssVar.colorWarningBg,
+                      color: cssVar.colorWarning,
+                      icon: HelpCircle,
+                      label: t('acceptance.status.errored'),
+                    }
+                  : {
+                      bg: cssVar.colorInfoBg,
+                      color: cssVar.colorInfo,
+                      icon: CircleDashed,
+                      label: t('acceptance.verdict.inProgress'),
+                    };
 
     const runAction = async (action: () => Promise<unknown>) => {
       try {
@@ -620,10 +718,49 @@ const AcceptancePage = memo<AcceptancePageProps>(
       }
     };
 
+    const changeAcceptanceStatus = async (status: 'accepted' | 'closed' | 'delivered') => {
+      const succeeded = await runAction(() =>
+        verifyService.updateAcceptanceStatus(acceptance.id, status),
+      );
+      if (succeeded) {
+        toast.success(t('acceptance.workspace.statusSuccess'));
+      } else {
+        toast.error(t('acceptance.workspace.statusError'));
+      }
+    };
+
+    const statusMenuItems: DropdownItem[] = getAcceptanceStatusActions(acceptance.status).map(
+      (action) => {
+        if (action === 'accept') {
+          return {
+            icon: <Icon icon={CircleCheck} />,
+            key: action,
+            label: t('acceptance.workspace.actions.markAccepted'),
+            onClick: () => void changeAcceptanceStatus('accepted'),
+          };
+        }
+        if (action === 'reopen') {
+          return {
+            icon: <Icon icon={RotateCcw} />,
+            key: action,
+            label: t('acceptance.workspace.actions.reopen'),
+            onClick: () => void changeAcceptanceStatus('delivered'),
+          };
+        }
+        return {
+          icon: <Icon icon={X} />,
+          key: action,
+          label: t('acceptance.workspace.actions.markClosed'),
+          onClick: () => void changeAcceptanceStatus('closed'),
+        };
+      },
+    );
+
     const gotoRound = (round: number) => {
       setHighlightRound(round);
       setLedgerExpand(true);
     };
+    const historyNavigation = resolveAcceptanceHistoryNavigation(isOwner, gotoRound);
 
     // Open/close the round report drawer AND mirror it to `?r=` (standalone
     // page only) so the address bar is always a copyable snapshot link for the
@@ -698,8 +835,11 @@ const AcceptancePage = memo<AcceptancePageProps>(
     const needsFixCount = reviewableChecks.filter(
       (check) => checkFilterState(check) === 'needsFix',
     ).length;
-    const pendingCount = reviewTotal - acceptedCount - needsFixCount; // 未验收 (undecided)
-    const decidedCount = acceptedCount + needsFixCount;
+    const ignoredCount = reviewableChecks.filter(
+      (check) => checkFilterState(check) === 'ignored',
+    ).length;
+    const pendingCount = reviewTotal - acceptedCount - needsFixCount - ignoredCount;
+    const decidedCount = acceptedCount + needsFixCount + ignoredCount;
     // Per-round acceptance tally for the ledger: each reviewable check belongs to
     // the round its current result came from, so the ledger can show that round's
     // own 已验收 / 待验收 progress instead of a raw verification verdict.
@@ -880,10 +1020,73 @@ const AcceptancePage = memo<AcceptancePageProps>(
       }
     };
 
+    const handleCheckWork = async () => {
+      if (!focusedCheck) return;
+      const prompt = buildCheckRepairPrompt(acceptance.id, focusedCheck);
+      if (isEmbedded) {
+        if (onDraftToComposer?.(prompt)) {
+          toast.success({ title: t('acceptance.checkWork.drafted') });
+        }
+        return;
+      }
+      if (!origin?.topic) {
+        await copyToClipboard(prompt);
+        toast.success({ title: t('acceptance.checkWork.copied') });
+        return;
+      }
+      setCheckWorkPending(true);
+      try {
+        await verifyService.dispatchAcceptanceRepair({
+          agentId: origin.agent?.id,
+          content: prompt,
+          topicId: origin.topic.id,
+        });
+        await verifyService.markAcceptanceRepairing(acceptance.id);
+        await mutate();
+        void globalMutate(verifyKeys.acceptances());
+        toast.success({ title: t('acceptance.checkWork.sent') });
+      } catch (cause) {
+        toast.error(cause instanceof Error ? cause.message : t('acceptance.actionError'));
+      } finally {
+        setCheckWorkPending(false);
+      }
+    };
+
+    const saveStandingChecklist = async (checklist: AcceptanceChecklistItem[]) => {
+      try {
+        await verifyService.saveAcceptanceChecklist(subject.type, subject.id, checklist);
+        await mutate();
+        toast.success({ title: t('acceptance.checkCreate.saved') });
+      } catch (cause) {
+        toast.error(cause instanceof Error ? cause.message : t('acceptance.actionError'));
+        throw cause;
+      }
+    };
+
+    const handleAddChecks = () =>
+      openAddCheckModal({
+        existingIds: standingChecklist.map((item) => item.id),
+        onSubmit: (items: AcceptanceChecklistItem[]) =>
+          saveStandingChecklist([...standingChecklist, ...items]),
+      });
+
+    const handleEditStandingCheck = (item: AcceptanceChecklistItem) =>
+      openCheckEditModal({
+        initial: { ...item, method: item.method ?? '' },
+        onRemove: () =>
+          void saveStandingChecklist(standingChecklist.filter((check) => check.id !== item.id)),
+        onSubmit: (value) =>
+          saveStandingChecklist(
+            standingChecklist.map((check) =>
+              check.id === item.id ? { ...check, ...value } : check,
+            ),
+          ),
+      });
+
     return (
       <Flexbox horizontal className={styles.page}>
         {/* The reopen affordance lives at the page corner — no edge handle tab. */}
-        {!ledgerExpand && !focusedCheck && (
+        {showHistory && !ledgerExpand && !focusedCheck && (
           <ActionIcon
             className={styles.ledgerToggle}
             icon={PanelRightOpen}
@@ -895,12 +1098,11 @@ const AcceptancePage = memo<AcceptancePageProps>(
         <Flexbox flex={1} style={{ minWidth: 0, overflow: 'auto' }}>
           <Flexbox
             gap={16}
-            paddingBlock={20}
-            paddingInline={focusedCheck ? undefined : 24}
+            paddingBlock={focusedCheck ? 0 : 20}
+            paddingInline={focusedCheck ? 0 : 24}
             style={{
               margin: focusedCheck ? 0 : '0 auto',
               maxWidth: focusedCheck ? 'none' : 920,
-              paddingInlineStart: focusedCheck ? 24 : undefined,
               width: '100%',
             }}
           >
@@ -910,17 +1112,34 @@ const AcceptancePage = memo<AcceptancePageProps>(
               closes it), then identity, then the origin conversation. */}
                 <Flexbox gap={10}>
                   <Flexbox horizontal align={'center'} gap={10} wrap={'wrap'}>
-                    <span
-                      className={styles.verdictPill}
-                      style={{ background: verdictMeta.bg, color: verdictMeta.color }}
-                    >
-                      <Icon icon={verdictMeta.icon} size={13} spin={verdictMeta.spin} />
-                      {verdictMeta.label}
-                    </span>
+                    {isOwner ? (
+                      <DropdownMenu items={statusMenuItems}>
+                        <span
+                          className={cx(styles.verdictPill, styles.verdictPillInteractive)}
+                          title={t('acceptance.workspace.actions.status')}
+                          style={{
+                            background: verdictMeta.bg,
+                            color: verdictMeta.color,
+                            pointerEvents: pending ? 'none' : undefined,
+                          }}
+                        >
+                          <Icon icon={verdictMeta.icon} size={13} spin={verdictMeta.spin} />
+                          {verdictMeta.label}
+                          <Icon icon={ChevronDown} size={11} />
+                        </span>
+                      </DropdownMenu>
+                    ) : (
+                      <span
+                        className={styles.verdictPill}
+                        style={{ background: verdictMeta.bg, color: verdictMeta.color }}
+                      >
+                        <Icon icon={verdictMeta.icon} size={13} spin={verdictMeta.spin} />
+                        {verdictMeta.label}
+                      </span>
+                    )}
                     <Text fontSize={12} type={'secondary'}>
                       {[
                         countsText,
-                        t('acceptance.roundCount', { count: rounds.length }),
                         currentRound
                           ? t('acceptance.verdict.latestAt', {
                               time: dayjs(currentRound.run.createdAt).format('MM-DD HH:mm'),
@@ -943,16 +1162,16 @@ const AcceptancePage = memo<AcceptancePageProps>(
                 topic). Owner-only: the server redacts it for shared links.
                 Hidden in the portal embed: that surface already lives inside
                 the origin conversation. */}
-                  {!isEmbedded && (origin?.agent || origin?.topic) && (
+                  {!isEmbedded && (originAgent || originTopic || scope?.pullRequest?.number) && (
                     <Flexbox horizontal align={'center'} gap={16} wrap={'wrap'}>
-                      {origin.agent && (
+                      {originAgent && (
                         <AgentProfilePopup
-                          agentId={origin.agent.id}
+                          agentId={originAgent.id}
                           trigger={'hover'}
                           agent={{
-                            avatar: origin.agent.avatar ?? undefined,
-                            backgroundColor: origin.agent.backgroundColor ?? undefined,
-                            title: origin.agent.title ?? undefined,
+                            avatar: originAgent.avatar ?? undefined,
+                            backgroundColor: originAgent.backgroundColor ?? undefined,
+                            title: originAgent.title ?? undefined,
                           }}
                         >
                           <Flexbox
@@ -963,15 +1182,15 @@ const AcceptancePage = memo<AcceptancePageProps>(
                             style={{ cursor: 'default', fontSize: 14 }}
                           >
                             <Avatar
-                              avatar={origin.agent.avatar ?? undefined}
-                              background={origin.agent.backgroundColor ?? undefined}
+                              avatar={originAgent.avatar ?? undefined}
+                              background={originAgent.backgroundColor ?? undefined}
                               size={18}
                             />
-                            {origin.agent.title ?? t('acceptance.origin.agentFallback')}
+                            {originAgent.title ?? t('acceptance.origin.agentFallback')}
                           </Flexbox>
                         </AgentProfilePopup>
                       )}
-                      {origin.topic && (
+                      {originTopic && (
                         <Button
                           className={cx(styles.scopeChip, styles.scopeLink)}
                           icon={MessagesSquare}
@@ -981,10 +1200,39 @@ const AcceptancePage = memo<AcceptancePageProps>(
                           type={'text'}
                           onClick={openTopicPanel}
                         >
-                          {origin.topic.title ?? subject.title ?? origin.topic.id}
+                          {originTopic.title ?? subject.title ?? originTopic.id}
                         </Button>
                       )}
+                      {scope?.pullRequest?.number &&
+                        (scope.pullRequest.url ? (
+                          <a
+                            className={cx(styles.scopeChip, styles.scopeLink)}
+                            href={scope.pullRequest.url}
+                            rel={'noreferrer'}
+                            target={'_blank'}
+                            title={scope.pullRequest.title ?? scope.pullRequest.url}
+                          >
+                            <Flexbox horizontal align={'center'} gap={4}>
+                              <Icon icon={GitPullRequest} size={13} /> #{scope.pullRequest.number}
+                            </Flexbox>
+                          </a>
+                        ) : (
+                          <Flexbox horizontal align={'center'} className={styles.scopeChip} gap={4}>
+                            <Icon icon={GitPullRequest} size={13} /> #{scope.pullRequest.number}
+                          </Flexbox>
+                        ))}
                     </Flexbox>
+                  )}
+                  {!isEmbedded && orderedChecks.length > 0 && (
+                    <Button
+                      icon={<Icon icon={ChevronRight} />}
+                      size={'small'}
+                      style={{ alignSelf: 'flex-start' }}
+                      type={'text'}
+                      onClick={() => setFocusedCheck(orderedChecks[0].id)}
+                    >
+                      {t('acceptance.focus.enter')}
+                    </Button>
                   )}
                 </Flexbox>
 
@@ -1080,7 +1328,7 @@ const AcceptancePage = memo<AcceptancePageProps>(
                             : ''}
                         </Text>
                         <Flexbox flex={1} />
-                        {latestReport && (
+                        {showHistory && latestReport && (
                           <span
                             className={styles.viewReportLink}
                             onClick={() =>
@@ -1119,30 +1367,6 @@ const AcceptancePage = memo<AcceptancePageProps>(
                               {scope.commit.slice(0, 10)}
                             </Flexbox>
                           )}
-                          {scope.pullRequest?.number &&
-                            (scope.pullRequest.url ? (
-                              <a
-                                className={cx(styles.scopeChip, styles.scopeLink)}
-                                href={scope.pullRequest.url}
-                                rel={'noreferrer'}
-                                target={'_blank'}
-                                title={scope.pullRequest.title ?? scope.pullRequest.url}
-                              >
-                                <Flexbox horizontal align={'center'} gap={4}>
-                                  <Icon icon={GitPullRequest} size={13} /> #
-                                  {scope.pullRequest.number}
-                                </Flexbox>
-                              </a>
-                            ) : (
-                              <Flexbox
-                                horizontal
-                                align={'center'}
-                                className={styles.scopeChip}
-                                gap={4}
-                              >
-                                <Icon icon={GitPullRequest} size={13} /> #{scope.pullRequest.number}
-                              </Flexbox>
-                            ))}
                         </Flexbox>
                       )}
                     </Flexbox>
@@ -1154,10 +1378,11 @@ const AcceptancePage = memo<AcceptancePageProps>(
             {focusedCheck ? (
               <div className={styles.focusLayout}>
                 <Flexbox className={styles.focusOutline}>
-                  <Flexbox gap={8} paddingBlock={12} paddingInline={12}>
+                  <Flexbox gap={10} paddingBlock={8} paddingInline={4}>
                     <Button
                       icon={<Icon icon={ArrowLeft} />}
                       size={'small'}
+                      style={{ alignSelf: 'flex-start' }}
                       type={'text'}
                       onClick={() => setFocusedCheck()}
                     >
@@ -1180,84 +1405,233 @@ const AcceptancePage = memo<AcceptancePageProps>(
                         </Text>
                       </Flexbox>
                     </Flexbox>
-                    <Flexbox horizontal align={'center'} gap={8}>
+                    <Flexbox horizontal align={'center'} gap={8} paddingInline={4}>
                       <Text strong style={{ fontSize: 13 }}>
                         {t('acceptance.checks.title')}
                       </Text>
-                      <span className={styles.countBadge}>{checks.length}</span>
+                      <span className={styles.countBadge}>
+                        {checks.length + unverifiedStandingChecks.length}
+                      </span>
+                      <Flexbox flex={1} />
+                      {isOwner && (
+                        <Button
+                          icon={<Icon icon={Plus} />}
+                          size={'small'}
+                          type={'text'}
+                          onClick={handleAddChecks}
+                        >
+                          {t('acceptance.checkCreate.title')}
+                        </Button>
+                      )}
                     </Flexbox>
                   </Flexbox>
-                  {checks.map((check) => {
+                  {orderedChecks.map((check) => {
                     const state = checkFilterState(check);
                     const icon =
                       state === 'accepted'
                         ? BadgeCheck
                         : state === 'needsFix'
                           ? RotateCcw
-                          : CircleDashed;
+                          : state === 'ignored'
+                            ? Ban
+                            : CircleDashed;
                     const color =
                       state === 'accepted'
-                        ? cssVar.colorSuccess
+                        ? 'success'
                         : state === 'needsFix'
-                          ? cssVar.colorError
-                          : cssVar.colorTextQuaternary;
+                          ? 'error'
+                          : state === 'ignored'
+                            ? 'default'
+                            : 'default';
 
                     return (
+                      <NavItem
+                        active={check.id === focusedCheck.id}
+                        key={check.id}
+                        paddingBlock={acceptanceFocusedLayout.outlineItemPaddingBlock}
+                        paddingInline={acceptanceFocusedLayout.outlineItemPaddingInline}
+                        title={check.title}
+                        titleColor={cssVar.colorText}
+                        description={
+                          <Flexbox horizontal align={'center'} gap={8}>
+                            <Tag color={color} icon={<Icon icon={icon} />} size={'small'}>
+                              {t(`acceptance.focus.state.${state}`)}
+                            </Tag>
+                            <Text fontSize={12} type={'secondary'}>
+                              {t('acceptance.focus.evidenceCount', {
+                                count: check.evidence.length,
+                              })}
+                            </Text>
+                          </Flexbox>
+                        }
+                        extra={
+                          <Icon color={cssVar.colorTextQuaternary} icon={ChevronRight} size={14} />
+                        }
+                        slots={{
+                          titlePrefix: (
+                            <Flexbox
+                              align={'center'}
+                              height={22}
+                              style={{ alignSelf: 'flex-start' }}
+                            >
+                              <Text
+                                style={{
+                                  color: cssVar.colorTextQuaternary,
+                                  fontFamily: cssVar.fontFamilyCode,
+                                  fontSize: 11,
+                                }}
+                              >
+                                C{check.seq}
+                              </Text>
+                            </Flexbox>
+                          ),
+                        }}
+                        onClick={() => setFocusedCheck(check.id)}
+                      />
+                    );
+                  })}
+                  {unverifiedStandingChecks.length > 0 && (
+                    <Flexbox gap={4} paddingBlock={8} paddingInline={8}>
+                      <Text fontSize={11} type={'secondary'}>
+                        {t('acceptance.checkCreate.pendingGroup')}
+                      </Text>
+                      {unverifiedStandingChecks.map((item) => (
+                        <NavItem
+                          extra={<Icon color={cssVar.colorTextQuaternary} icon={PencilLine} />}
+                          key={item.id}
+                          paddingBlock={acceptanceFocusedLayout.outlineItemPaddingBlock}
+                          paddingInline={acceptanceFocusedLayout.outlineItemPaddingInline}
+                          title={item.name}
+                          titleColor={cssVar.colorText}
+                          description={
+                            <Text fontSize={12} type={'secondary'}>
+                              {item.method || t('acceptance.checkCreate.pendingDescription')}
+                            </Text>
+                          }
+                          onClick={() => handleEditStandingCheck(item)}
+                        />
+                      ))}
+                    </Flexbox>
+                  )}
+                </Flexbox>
+
+                <Flexbox className={styles.focusMain}>
+                  <Flexbox className={styles.focusContent} gap={16}>
+                    <Flexbox gap={acceptanceFocusedLayout.headerGap}>
                       <Flexbox
                         horizontal
                         align={'center'}
-                        className={styles.focusOutlineItem}
-                        data-active={check.id === focusedCheck.id}
-                        gap={8}
-                        key={check.id}
-                        onClick={() => setFocusedCheck(check.id)}
+                        gap={5}
+                        style={{
+                          color:
+                            focusedStates.review === 'accepted'
+                              ? cssVar.colorSuccess
+                              : focusedStates.review === 'needsFix'
+                                ? cssVar.colorError
+                                : focusedStates.review === 'ignored'
+                                  ? cssVar.colorTextQuaternary
+                                  : cssVar.colorTextTertiary,
+                          fontSize: 12,
+                        }}
                       >
+                        <Icon
+                          size={14}
+                          icon={
+                            focusedStates.review === 'accepted'
+                              ? BadgeCheck
+                              : focusedStates.review === 'needsFix'
+                                ? RotateCcw
+                                : focusedStates.review === 'ignored'
+                                  ? Ban
+                                  : CircleDashed
+                          }
+                        />
+                        {t(`acceptance.focus.state.${focusedStates.review}`)}
+                        <Text style={{ color: cssVar.colorTextQuaternary }}>·</Text>
+                        <Flexbox
+                          horizontal
+                          align={'center'}
+                          gap={5}
+                          style={{
+                            color:
+                              focusedStates.verifier === 'passed'
+                                ? cssVar.colorSuccess
+                                : focusedStates.verifier === 'failed'
+                                  ? cssVar.colorError
+                                  : focusedStates.verifier === 'uncertain'
+                                    ? cssVar.colorWarning
+                                    : cssVar.colorTextQuaternary,
+                          }}
+                        >
+                          <Icon
+                            size={14}
+                            icon={
+                              focusedStates.verifier === 'passed'
+                                ? Check
+                                : focusedStates.verifier === 'failed'
+                                  ? XCircle
+                                  : focusedStates.verifier === 'uncertain'
+                                    ? HelpCircle
+                                    : CircleDashed
+                            }
+                          />
+                          {t('acceptance.focus.verifierLabel')} ·{' '}
+                          {t(`report.verdict.${focusedStates.verifierLabel}`)}
+                        </Flexbox>
+                      </Flexbox>
+                      <Flexbox horizontal align={'baseline'} gap={8}>
                         <Text
                           style={{
                             color: cssVar.colorTextTertiary,
                             flex: 'none',
                             fontFamily: cssVar.fontFamilyCode,
-                            fontSize: 11,
+                            fontSize: 12,
                           }}
                         >
-                          C{check.seq}
+                          C{focusedCheck.seq}
                         </Text>
-                        <Text ellipsis style={{ flex: 1, fontSize: 13, minWidth: 0 }}>
-                          {check.title}
+                        <Text as={'h2'} style={{ fontSize: 22, margin: 0 }}>
+                          {focusedCheck.title}
                         </Text>
-                        <Icon color={color} icon={icon} size={14} />
                       </Flexbox>
-                    );
-                  })}
-                </Flexbox>
-
-                <Flexbox gap={12} style={{ minWidth: 0 }}>
-                  <Flexbox gap={5}>
-                    <Text fontSize={12} type={'secondary'}>
-                      C{focusedCheck.seq}
-                    </Text>
-                    <Text as={'h2'} style={{ fontSize: 22, margin: 0 }}>
-                      {focusedCheck.title}
-                    </Text>
-                    <Text fontSize={13} type={'secondary'}>
-                      {t('acceptance.focus.evidenceHint')}
-                    </Text>
+                      <Text fontSize={13} type={'secondary'}>
+                        {t(`acceptance.focus.verifierDescription.${focusedStates.verifierLabel}`)}
+                      </Text>
+                    </Flexbox>
+                    {isOwner && acceptance.status !== 'closed' && (
+                      <Flexbox horizontal align={'center'} className={styles.focusWork} gap={16}>
+                        <Flexbox flex={1} gap={3}>
+                          <Text strong>{t('acceptance.checkWork.title')}</Text>
+                          <Text fontSize={12} type={'secondary'}>
+                            {t('acceptance.checkWork.description')}
+                          </Text>
+                        </Flexbox>
+                        <Button
+                          loading={checkWorkPending}
+                          type={'primary'}
+                          onClick={handleCheckWork}
+                        >
+                          {origin?.topic || isEmbedded
+                            ? t('acceptance.checkWork.action')
+                            : t('acceptance.checkWork.copy')}
+                        </Button>
+                      </Flexbox>
+                    )}
+                    <FocusedCheckDetails
+                      canReview={isOwner}
+                      check={focusedCheck}
+                      reviewPending={pending}
+                      onReview={handleReview}
+                      onRound={historyNavigation}
+                    />
                   </Flexbox>
-                  <FocusedCheckDetails
-                    canReview={isOwner}
-                    check={focusedCheck}
-                    reviewPending={pending}
-                    onReview={handleReview}
-                    onRound={gotoRound}
-                  />
                 </Flexbox>
               </div>
             ) : (
               <>
                 {/* Check union — the complete inventory, familiar sections (P-14).
-              Narrow surfaces (the chat portal embed, sub-lg viewports) trade
-              the Segmented for a compact Select so the toolbar stays one
-              line; wide viewports keep the glanceable Segmented. */}
+              State and round are both audit filters, so they share one compact
+              Select treatment instead of competing control dialects. */}
                 <Flexbox
                   horizontal
                   align={'center'}
@@ -1267,66 +1641,53 @@ const AcceptancePage = memo<AcceptancePageProps>(
                   <Text strong style={{ fontSize: 14, whiteSpace: 'nowrap' }}>
                     {t('acceptance.checks.title')}
                   </Text>
-                  <span className={styles.countBadge}>{counts.total}</span>
+                  <span className={styles.countBadge}>
+                    {counts.total + unverifiedStandingChecks.length}
+                  </span>
                   <Flexbox flex={1} />
-                  {compactToolbar ? (
-                    <Select
+                  {isOwner && (
+                    <ActionIcon
+                      icon={Plus}
                       size={'small'}
-                      style={{ height: 34, width: 118 }}
-                      value={filter}
-                      variant={'filled'}
-                      options={[
-                        {
-                          label: t('acceptance.filter.all', { count: counts.total }),
-                          value: 'all',
-                        },
-                        {
-                          label: t('acceptance.filter.pending', { count: counts.pending }),
-                          value: 'pending',
-                        },
-                        {
-                          label: t('acceptance.filter.needsFix', { count: counts.needsFix }),
-                          value: 'needsFix',
-                        },
-                        {
-                          label: t('acceptance.filter.accepted', { count: counts.accepted }),
-                          value: 'accepted',
-                        },
-                      ]}
-                      onChange={(value) => setFilter(value as CheckFilter)}
-                    />
-                  ) : (
-                    <Segmented
-                      size={'small'}
-                      value={filter}
-                      options={[
-                        {
-                          label: t('acceptance.filter.all', { count: counts.total }),
-                          value: 'all',
-                        },
-                        {
-                          label: t('acceptance.filter.pending', { count: counts.pending }),
-                          value: 'pending',
-                        },
-                        {
-                          label: t('acceptance.filter.needsFix', { count: counts.needsFix }),
-                          value: 'needsFix',
-                        },
-                        {
-                          label: t('acceptance.filter.accepted', { count: counts.accepted }),
-                          value: 'accepted',
-                        },
-                      ]}
-                      onChange={(value) => setFilter(value as CheckFilter)}
+                      title={t('acceptance.checkCreate.title')}
+                      onClick={handleAddChecks}
                     />
                   )}
+                  <Select
+                    size={'small'}
+                    style={{ height: 34, width: 118 }}
+                    value={filter}
+                    variant={'filled'}
+                    options={[
+                      {
+                        label: t('acceptance.filter.all', { count: counts.total }),
+                        value: 'all',
+                      },
+                      {
+                        label: t('acceptance.filter.pending', { count: counts.pending }),
+                        value: 'pending',
+                      },
+                      {
+                        label: t('acceptance.filter.needsFix', { count: counts.needsFix }),
+                        value: 'needsFix',
+                      },
+                      {
+                        label: t('acceptance.filter.accepted', { count: counts.accepted }),
+                        value: 'accepted',
+                      },
+                      {
+                        label: t('acceptance.filter.ignored', { count: counts.ignored }),
+                        value: 'ignored',
+                      },
+                    ]}
+                    onChange={(value) => setFilter(value as CheckFilter)}
+                  />
                   {/* Which round touched a check — audit slicing, orthogonal to the
                 review-state segments. */}
-                  {rounds.length > 1 && (
+                  {showHistory && rounds.length > 1 && (
                     <Select
                       size={'small'}
-                      // Filled + the Segmented's exact height so the two read as
-                      // one control family, not a stray bordered input.
+                      // Match the state filter so both read as one control family.
                       style={{ height: 34, width: 110 }}
                       value={roundFilter === null ? 'all' : String(roundFilter)}
                       variant={'filled'}
@@ -1340,19 +1701,57 @@ const AcceptancePage = memo<AcceptancePageProps>(
                       onChange={(value) => setRoundFilter(value === 'all' ? null : Number(value))}
                     />
                   )}
-                  <ActionIcon
-                    icon={allGroupsCollapsed ? ChevronsUpDown : ChevronsDownUp}
-                    size={'small'}
-                    title={
-                      allGroupsCollapsed
-                        ? t('acceptance.group.expandAll')
-                        : t('acceptance.group.collapseAll')
-                    }
-                    onClick={() =>
-                      setCollapsedGroups(allGroupsCollapsed ? new Set() : new Set(groupKeys))
-                    }
-                  />
+                  {grouped && (
+                    <ActionIcon
+                      icon={allGroupsCollapsed ? ChevronsUpDown : ChevronsDownUp}
+                      size={'small'}
+                      title={
+                        allGroupsCollapsed
+                          ? t('acceptance.group.expandAll')
+                          : t('acceptance.group.collapseAll')
+                      }
+                      onClick={() =>
+                        setCollapsedGroups(allGroupsCollapsed ? new Set() : new Set(groupKeys))
+                      }
+                    />
+                  )}
                 </Flexbox>
+
+                {unverifiedStandingChecks.length > 0 && (
+                  <Flexbox className={styles.standingPanel}>
+                    <Flexbox
+                      horizontal
+                      align={'center'}
+                      gap={8}
+                      paddingBlock={10}
+                      paddingInline={12}
+                      style={{ borderBlockEnd: `1px solid ${cssVar.colorBorderSecondary}` }}
+                    >
+                      <Icon color={cssVar.colorTextTertiary} icon={CircleDashed} size={14} />
+                      <Text strong style={{ fontSize: 13 }}>
+                        {t('acceptance.checkCreate.pendingGroup')}
+                      </Text>
+                      <span className={styles.countBadge}>{unverifiedStandingChecks.length}</span>
+                      <Text fontSize={12} type={'secondary'}>
+                        {t('acceptance.checkCreate.pendingGroupDescription')}
+                      </Text>
+                    </Flexbox>
+                    {unverifiedStandingChecks.map((item) => (
+                      <NavItem
+                        extra={<Icon color={cssVar.colorTextQuaternary} icon={PencilLine} />}
+                        key={item.id}
+                        title={item.name}
+                        titleColor={cssVar.colorText}
+                        description={
+                          <Text fontSize={12} type={'secondary'}>
+                            {item.method || t('acceptance.checkCreate.pendingDescription')}
+                          </Text>
+                        }
+                        onClick={() => handleEditStandingCheck(item)}
+                      />
+                    ))}
+                  </Flexbox>
+                )}
 
                 <CheckList
                   canReview={isOwner}
@@ -1365,9 +1764,8 @@ const AcceptancePage = memo<AcceptancePageProps>(
                   reviewPending={pending}
                   round={roundFilter}
                   onGroupFeedback={handleGroupFeedback}
-                  onOpenItem={isEmbedded ? undefined : setFocusedCheck}
                   onReview={handleReview}
-                  onRound={gotoRound}
+                  onRound={historyNavigation}
                   onToggleGroup={(key) =>
                     setCollapsedGroups((previous) => {
                       const next = new Set(previous);
@@ -1399,11 +1797,12 @@ const AcceptancePage = memo<AcceptancePageProps>(
             )}
             {/* The floating decision strip — owner-only: closing the loop and
               queueing feedback are the author's calls, never a visitor's. */}
-            {isOwner && !focusedCheck && (
+            {isOwner && !focusedCheck && acceptance.status !== 'closed' && (
               <DecisionBar
                 acceptedCount={acceptedCount}
                 embedded={isEmbedded}
                 feedbackCount={activeFeedbackCount}
+                ignoredCount={ignoredCount}
                 needsFixCount={needsFixCount}
                 pending={pending}
                 repairing={acceptance.status === 'repairing'}
@@ -1420,7 +1819,7 @@ const AcceptancePage = memo<AcceptancePageProps>(
                 onRerun={handleRerun}
               />
             )}
-            <Flexbox style={{ height: 8 }} />
+            {!focusedCheck && <Flexbox style={{ height: 8 }} />}
           </Flexbox>
         </Flexbox>
 
@@ -1440,45 +1839,18 @@ const AcceptancePage = memo<AcceptancePageProps>(
           shrinking the report into an unreadable column. The panel's own
           fold icon is the close affordance (same as wide mode), so the Drawer's
           built-in close button is suppressed — one collapse handle, not two. */}
-        {isNarrowViewport ? (
-          <Drawer
-            noHeader
-            closable={false}
-            containerMaxWidth={'100%'}
-            open={ledgerExpand}
-            placement={'right'}
-            styles={{ body: { padding: 0 } }}
-            width={'min(340px, 88vw)'}
-            onClose={() => setLedgerExpand(false)}
-          >
-            {topicPanelOpen && origin?.agent?.id && origin.topic ? (
-              <TopicPanel
-                agentId={origin.agent.id}
-                title={origin.topic.title ?? subject.title ?? origin.topic.id}
-                topicId={origin.topic.id}
-                onBack={closeTopicPanel}
-                onCollapse={() => setLedgerExpand(false)}
-              />
-            ) : (
-              <LedgerPanel
-                highlight={highlightRound}
-                reviewByRound={reviewByRound}
-                rounds={rounds}
-                onCollapse={() => setLedgerExpand(false)}
-                onOpenReport={openReport}
-              />
-            )}
-          </Drawer>
-        ) : (
-          <DraggablePanel
-            defaultSize={{ width: 340 }}
-            expand={ledgerExpand}
-            minWidth={300}
-            placement={'right'}
-            style={{ flex: 'none', height: '100%' }}
-            onExpandChange={setLedgerExpand}
-          >
-            <Flexbox style={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
+        {showHistory &&
+          (isNarrowViewport ? (
+            <Drawer
+              noHeader
+              closable={false}
+              containerMaxWidth={'100%'}
+              open={ledgerExpand}
+              placement={'right'}
+              styles={{ body: { padding: 0 } }}
+              width={'min(340px, 88vw)'}
+              onClose={() => setLedgerExpand(false)}
+            >
               {topicPanelOpen && origin?.agent?.id && origin.topic ? (
                 <TopicPanel
                   agentId={origin.agent.id}
@@ -1488,44 +1860,74 @@ const AcceptancePage = memo<AcceptancePageProps>(
                   onCollapse={() => setLedgerExpand(false)}
                 />
               ) : (
-                <Flexbox style={{ height: '100%', overflow: 'auto' }}>
-                  <LedgerPanel
-                    highlight={highlightRound}
-                    reviewByRound={reviewByRound}
-                    rounds={rounds}
-                    onCollapse={() => setLedgerExpand(false)}
-                    onOpenReport={openReport}
-                  />
-                </Flexbox>
+                <LedgerPanel
+                  highlight={highlightRound}
+                  reviewByRound={reviewByRound}
+                  rounds={rounds}
+                  onCollapse={() => setLedgerExpand(false)}
+                  onOpenReport={openReport}
+                />
               )}
-            </Flexbox>
-          </DraggablePanel>
-        )}
+            </Drawer>
+          ) : (
+            <DraggablePanel
+              defaultSize={{ width: 340 }}
+              expand={ledgerExpand}
+              minWidth={300}
+              placement={'right'}
+              style={{ flex: 'none', height: '100%' }}
+              onExpandChange={setLedgerExpand}
+            >
+              <Flexbox style={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
+                {topicPanelOpen && origin?.agent?.id && origin.topic ? (
+                  <TopicPanel
+                    agentId={origin.agent.id}
+                    title={origin.topic.title ?? subject.title ?? origin.topic.id}
+                    topicId={origin.topic.id}
+                    onBack={closeTopicPanel}
+                    onCollapse={() => setLedgerExpand(false)}
+                  />
+                ) : (
+                  <Flexbox style={{ height: '100%', overflow: 'auto' }}>
+                    <LedgerPanel
+                      highlight={highlightRound}
+                      reviewByRound={reviewByRound}
+                      rounds={rounds}
+                      onCollapse={() => setLedgerExpand(false)}
+                      onOpenReport={openReport}
+                    />
+                  </Flexbox>
+                )}
+              </Flexbox>
+            </DraggablePanel>
+          ))}
 
         {/* Per-round report drill-down — the full verify run view, not a
           markdown excerpt: same content as /verify/:runId, opened in place.
           No drawer header: the report's own hero (title + verdict pill) is the
           header; the Drawer's OWN floating close renders even with noHeader,
           so no extra close button here (two would overlap). */}
-        <Drawer
-          destroyOnHidden
-          noHeader
-          containerMaxWidth={'100%'}
-          open={reportRound !== null}
-          placement={'right'}
-          width={'min(960px, 92vw)'}
-          styles={{
-            body: { height: '100%', padding: 0 },
-            bodyContent: { height: '100%', minHeight: 0, overflow: 'hidden' },
-          }}
-          onClose={() => openReport(null)}
-        >
-          {reportRound && (
-            <Flexbox style={{ height: '100%', position: 'relative' }}>
-              <ReportViewer runId={reportRound.run.id} />
-            </Flexbox>
-          )}
-        </Drawer>
+        {showHistory && (
+          <Drawer
+            destroyOnHidden
+            noHeader
+            containerMaxWidth={'100%'}
+            open={reportRound !== null}
+            placement={'right'}
+            width={'min(960px, 92vw)'}
+            styles={{
+              body: { height: '100%', padding: 0 },
+              bodyContent: { height: '100%', minHeight: 0, overflow: 'hidden' },
+            }}
+            onClose={() => openReport(null)}
+          >
+            {reportRound && (
+              <Flexbox style={{ height: '100%', position: 'relative' }}>
+                <ReportViewer runId={reportRound.run.id} />
+              </Flexbox>
+            )}
+          </Drawer>
+        )}
       </Flexbox>
     );
   },

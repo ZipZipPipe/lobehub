@@ -14,7 +14,12 @@ import type {
   EnabledAiModel,
   ModelParamsSchema,
 } from 'model-bank';
-import { AiModelSourceEnum, isAiModelVisible, normalizeAiModelType } from 'model-bank';
+import {
+  AiModelSourceEnum,
+  isAiModelVisible,
+  normalizeAiModelType,
+  resolveModelSearchDefaultSettings,
+} from 'model-bank';
 import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 import pMap from 'p-map';
 
@@ -39,66 +44,6 @@ const VOLCENGINE_IMAGE_PARAMETERS: ModelParamsSchema = {
   webSearch: { default: false },
   width: { default: 2048, max: 16_384, min: 480, step: 1 },
 };
-
-/**
- * Provider-level search defaults (only used when built-in models don't provide settings.searchImpl and settings.searchProvider)
- * Note: Not stored in DB, only injected during read
- */
-const PROVIDER_SEARCH_DEFAULTS: Record<
-  string,
-  { searchImpl?: 'tool' | 'params' | 'internal'; searchProvider?: string }
-> = {
-  ai360: { searchImpl: 'params' },
-  aihubmix: { searchImpl: 'params' },
-  anthropic: { searchImpl: 'params' },
-  baichuan: { searchImpl: 'params' },
-  default: { searchImpl: 'params' },
-  google: { searchImpl: 'params', searchProvider: 'google' },
-  hunyuan: { searchImpl: 'params' },
-  jina: { searchImpl: 'internal' },
-  minimax: { searchImpl: 'params' },
-  // openai: defaults to params, but -search- models use internal as special case
-  openai: { searchImpl: 'params' },
-  // perplexity: defaults to internal
-  perplexity: { searchImpl: 'internal' },
-  qwen: { searchImpl: 'params' },
-  spark: { searchImpl: 'params' }, // Some models (like max-32k) will prioritize built-in if marked as internal
-  stepfun: { searchImpl: 'params' },
-  vertexai: { searchImpl: 'params', searchProvider: 'google' },
-  wenxin: { searchImpl: 'params' },
-  xai: { searchImpl: 'params' },
-  zhipu: { searchImpl: 'params' },
-};
-
-// Special model configuration - model-level settings override provider defaults
-const MODEL_SEARCH_DEFAULTS: Record<
-  string,
-  Record<string, { searchImpl?: 'tool' | 'params' | 'internal'; searchProvider?: string }>
-> = {
-  openai: {
-    'gpt-4o-mini-search-preview': { searchImpl: 'internal' },
-    'gpt-4o-search-preview': { searchImpl: 'internal' },
-    // Add other special model configurations here
-  },
-  spark: {
-    'max-32k': { searchImpl: 'internal' },
-  },
-  // Add special model configurations for other providers here
-};
-
-// Infer default settings based on providerId + modelId
-const inferProviderSearchDefaults = (
-  providerId: string | undefined,
-  modelId: string,
-): { searchImpl?: 'tool' | 'params' | 'internal'; searchProvider?: string } => {
-  const modelSpecificConfig = providerId ? MODEL_SEARCH_DEFAULTS[providerId]?.[modelId] : undefined;
-  if (modelSpecificConfig) {
-    return modelSpecificConfig;
-  }
-
-  return (providerId && PROVIDER_SEARCH_DEFAULTS[providerId]) || PROVIDER_SEARCH_DEFAULTS.default;
-};
-
 // Only inject settings during read; add or remove search-related fields in settings based on abilities.search
 const injectSearchSettings = (providerId: string, item: any) => {
   const abilities = item?.abilities || {};
@@ -126,7 +71,7 @@ const injectSearchSettings = (providerId: string, item: any) => {
     if (item?.settings?.searchImpl || item?.settings?.searchProvider) return item;
 
     // Otherwise use providerId + modelId
-    const searchSettings = inferProviderSearchDefaults(providerId, item.id);
+    const searchSettings = resolveModelSearchDefaultSettings(providerId, item.id);
 
     return {
       ...item,

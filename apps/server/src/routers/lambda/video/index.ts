@@ -169,10 +169,7 @@ export const videoRouter = router({
           }
         }
 
-        if (
-          typeof configForDatabase.endImageUrl === 'string' &&
-          configForDatabase.endImageUrl
-        ) {
+        if (typeof configForDatabase.endImageUrl === 'string' && configForDatabase.endImageUrl) {
           const fullUrl = await fileService.getFullFileUrl(configForDatabase.endImageUrl);
           if (fullUrl) {
             log(
