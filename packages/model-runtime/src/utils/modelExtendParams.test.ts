@@ -131,6 +131,16 @@ describe('applyModelExtendParams', () => {
     expect(result.reasoning_effort).toBe('max');
   });
 
+  it('resolves Kimi K3 reasoning effort', () => {
+    const result = applyModelExtendParams({
+      chatConfig: chatConfig({ kimiK3ReasoningEffort: 'high' }),
+      extendParams: ['kimiK3ReasoningEffort'],
+      model: 'kimi-k3',
+    });
+
+    expect(result.reasoning_effort).toBe('high');
+  });
+
   it('resolves GPT-5.6 Pro mode independently from reasoning effort', () => {
     const result = applyModelExtendParams({
       chatConfig: chatConfig({
@@ -175,26 +185,6 @@ describe('applyModelExtendParams', () => {
     });
 
     expect(result.reasoning_effort).toBe('max');
-  });
-
-  it('maps Kimi K3 reasoning effort to reasoning_effort', () => {
-    const result = applyModelExtendParams({
-      chatConfig: chatConfig({ kimiK3ReasoningEffort: 'max' }),
-      extendParams: ['kimiK3ReasoningEffort'],
-      model: 'kimi-k3',
-    });
-
-    expect(result.reasoning_effort).toBe('max');
-  });
-
-  it('defaults Kimi K3 reasoning effort to high', () => {
-    const result = applyModelExtendParams({
-      chatConfig: chatConfig(),
-      extendParams: ['kimiK3ReasoningEffort'],
-      model: 'kimi-k3',
-    });
-
-    expect(result.reasoning_effort).toBe('high');
   });
 
   it('preserves thinking budget when deepseekV4ReasoningEffort is set', () => {

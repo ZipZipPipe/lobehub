@@ -87,42 +87,6 @@ describe('createLevelSliderComponent', () => {
   });
 
   describe('factory configuration', () => {
-    it('should align labels with the slider positions', () => {
-      const TwoLevelSlider = createLevelSliderComponent<'high' | 'max'>({
-        configKey: 'glm5_2ReasoningEffort',
-        defaultValue: 'max',
-        levels: ['high', 'max'],
-      });
-
-      const ThreeLevelSlider = createLevelSliderComponent<TestLevel>({
-        configKey: 'reasoningEffort',
-        defaultValue: 'medium',
-        levels: TEST_LEVELS,
-      });
-
-      const { unmount } = render(<TwoLevelSlider value="max" />);
-
-      expect(screen.getByRole('button', { name: 'high' }).parentElement).toHaveStyle({
-        insetInlineStart: '0%',
-      });
-      expect(screen.getByRole('button', { name: 'max' }).parentElement).toHaveStyle({
-        insetInlineStart: '100%',
-      });
-
-      unmount();
-      render(<ThreeLevelSlider value="medium" />);
-
-      expect(screen.getByRole('button', { name: 'low' }).parentElement).toHaveStyle({
-        insetInlineStart: '0%',
-      });
-      expect(screen.getByRole('button', { name: 'medium' }).parentElement).toHaveStyle({
-        insetInlineStart: '50%',
-      });
-      expect(screen.getByRole('button', { name: 'high' }).parentElement).toHaveStyle({
-        insetInlineStart: '100%',
-      });
-    });
-
     it('should create slider with custom marks', () => {
       const customMarks = {
         0: 'OFF',

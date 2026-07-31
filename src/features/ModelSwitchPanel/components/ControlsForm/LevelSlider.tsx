@@ -10,7 +10,6 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   label: css`
     cursor: pointer;
 
-    width: max-content;
     padding: 0;
     border: none;
 
@@ -19,7 +18,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     line-height: 16px;
     color: ${cssVar.colorTextTertiary};
     text-align: center;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 
     background: transparent;
 
@@ -35,20 +34,10 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
       outline-offset: 2px;
     }
   `,
-  labelAnchor: css`
-    position: absolute;
-    inset-block-start: 0;
-
-    display: grid;
-    place-items: start center;
-
-    width: 0;
-  `,
   labels: css`
-    position: relative;
-    width: calc(100% - 12px);
-    height: 16px;
-    margin-inline: 6px;
+    display: grid;
+    gap: 8px;
+    width: 100%;
   `,
   root: css`
     width: 100%;
@@ -139,9 +128,6 @@ const getMinimumWidth = (levelCount: number, customMinWidth: CSSProperties['minW
     : customMinWidth;
 };
 
-const getLevelPosition = (index: number, levelCount: number) =>
-  levelCount <= 1 ? '50%' : `${(index / (levelCount - 1)) * 100}%`;
-
 const resolveMark = (
   mark: NonNullable<SliderSingleProps['marks']>[number] | undefined,
   fallback: string,
@@ -188,6 +174,20 @@ function LevelSlider<T extends string = string>({
   const sliderValue = currentIndex === -1 ? Math.floor(levels.length / 2) : currentIndex;
   const { minWidth: customMinWidth, ...restStyle } = style ?? {};
 
+  // Slider dots sit at i / (n - 1) of the track while equal grid columns center
+  // labels at (i + 0.5) / n, so labels drift off their dots (e.g. 'none' / 'max'
+  // float away from the track ends). Half-width edge columns with start/end
+  // alignment pin the first/last labels to the ends and center the middle
+  // labels exactly under their dots.
+  const gridTemplateColumns =
+    levels.length > 1
+      ? [
+          'minmax(0, 0.5fr)',
+          ...Array.from({ length: levels.length - 2 }).fill('minmax(0, 1fr)'),
+          'minmax(0, 0.5fr)',
+        ].join(' ')
+      : 'minmax(0, 1fr)';
+
   const handleChange = (index: number) => {
     if (disabled) return;
 
@@ -219,30 +219,28 @@ function LevelSlider<T extends string = string>({
           onChange={handleChange}
         />
       </div>
-      <div className={styles.labels}>
+      <div className={styles.labels} style={{ gridTemplateColumns }}>
         {options.map((option, index) => {
           const selected = index === sliderValue;
+          const isFirst = index === 0;
+          const isLast = index === levels.length - 1;
+          const textAlign = isFirst === isLast ? 'center' : isFirst ? 'start' : 'end';
 
           return (
-            <span
-              className={styles.labelAnchor}
+            <button
+              aria-current={selected ? 'true' : undefined}
+              className={cx(styles.label, selected && styles.selectedLabel)}
+              disabled={disabled}
               key={option.value}
-              style={{ insetInlineStart: getLevelPosition(index, options.length) }}
+              style={{ textAlign, ...option.style }}
+              type="button"
+              onClick={() => {
+                if (disabled) return;
+                setCurrentLevel(option.value);
+              }}
             >
-              <button
-                aria-current={selected ? 'true' : undefined}
-                className={cx(styles.label, selected && styles.selectedLabel)}
-                disabled={disabled}
-                style={option.style}
-                type="button"
-                onClick={() => {
-                  if (disabled) return;
-                  setCurrentLevel(option.value);
-                }}
-              >
-                {option.label}
-              </button>
-            </span>
+              {option.label}
+            </button>
           );
         })}
       </div>

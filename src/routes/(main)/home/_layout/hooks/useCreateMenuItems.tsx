@@ -1,4 +1,5 @@
 import { isDesktop } from '@lobechat/const';
+import type { SFSymbol } from '@lobechat/electron-client-ipc';
 import { HETEROGENEOUS_AGENT_CLIENT_CONFIGS } from '@lobechat/heterogeneous-agents/client';
 import { Icon } from '@lobehub/ui';
 import { GroupBotSquareIcon } from '@lobehub/ui/icons';
@@ -9,6 +10,7 @@ import {
   FileTextIcon,
   FolderCogIcon,
   FolderPlus,
+  ListPlusIcon,
   MonitorSmartphone,
   Store,
 } from 'lucide-react';
@@ -32,6 +34,8 @@ import { useHomeStore } from '@/store/home';
 import { usePageStore } from '@/store/page';
 import { useUserStore } from '@/store/user';
 import { labPreferSelectors } from '@/store/user/selectors';
+
+type MenuItem = NonNullable<ItemType> & { sfSymbol?: SFSymbol };
 
 interface CreateAgentOptions {
   groupId?: string;
@@ -232,19 +236,21 @@ export const useCreateMenuItems = () => {
 
   const agentModal = useOptionalAgentModal();
   const openCreateModal = agentModal?.openCreateModal;
+  const openCreateGroupModal = agentModal?.openCreateGroupModal;
   const enablePlatformAgent = useUserStore(labPreferSelectors.enablePlatformAgent);
 
   /**
    * Create agent menu item
    */
   const createAgentMenuItem = useCallback(
-    (options?: CreateAgentOptions): ItemType => ({
+    (options?: CreateAgentOptions): MenuItem => ({
       icon: <Icon icon={BotIcon} />,
       disabled: !canCreate,
       // Key needs to vary by visibility so the public and private "New
       // Agent" entries can coexist (e.g. if a future menu lists both).
       key: options?.visibility === 'private' ? 'newPrivateAgent' : 'newAgent',
       label: t('newAgent'),
+      sfSymbol: 'plus.bubble',
       onClick: async (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
@@ -266,11 +272,12 @@ export const useCreateMenuItems = () => {
    * Add market agent menu item
    */
   const createMarketAgentMenuItem = useCallback(
-    (): ItemType => ({
+    (): MenuItem => ({
       icon: <Icon icon={Store} />,
       disabled: !canCreate,
       key: 'addAgentFromMarket',
       label: t('addAgentFromMarket'),
+      sfSymbol: 'bag',
       onClick: (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
@@ -279,6 +286,25 @@ export const useCreateMenuItems = () => {
       },
     }),
     [canCreate, navigate, t],
+  );
+
+  /**
+   * Open the complete Agent list, where shared Agents can be added to the
+   * caller's sidebar without mutating the Agent itself.
+   */
+  const createAgentListMenuItem = useCallback(
+    (options?: { visibility?: 'private' | 'public' }): MenuItem => ({
+      icon: <Icon icon={ListPlusIcon} />,
+      key: options?.visibility === 'private' ? 'addPrivateAgentFromList' : 'addAgentFromList',
+      label: t('addAgentFromList'),
+      sfSymbol: 'list.bullet',
+      onClick: (info) => {
+        info.domEvent?.stopPropagation();
+        // Land the view-all page on the tab matching the caller's bucket.
+        navigate(options?.visibility === 'private' ? '/agents?tab=private' : '/agents');
+      },
+    }),
+    [navigate, t],
   );
 
   /**
@@ -313,12 +339,13 @@ export const useCreateMenuItems = () => {
    * Opens the 3-step creation modal
    */
   const createPlatformAgentMenuItem = useCallback(
-    (options?: CreateAgentOptions): ItemType => {
+    (options?: CreateAgentOptions): MenuItem | null => {
       if (!enablePlatformAgent) return null;
       return {
         icon: <Icon icon={MonitorSmartphone} />,
         key: 'newPlatformAgent',
         label: t('newPlatformAgent'),
+        sfSymbol: 'laptopcomputer.and.iphone',
         onClick: (info) => {
           info.domEvent?.stopPropagation();
           agentModal?.openCreatePlatformAgentModal(
@@ -337,11 +364,12 @@ export const useCreateMenuItems = () => {
    * Creates an empty group and navigates to its profile page
    */
   const createGroupChatMenuItem = useCallback(
-    (options?: CreateAgentOptions): ItemType => ({
+    (options?: CreateAgentOptions): MenuItem => ({
       icon: <Icon icon={GroupBotSquareIcon} />,
       disabled: !canCreate,
       key: options?.visibility === 'private' ? 'newPrivateGroupChat' : 'newGroupChat',
       label: t('newGroupChat'),
+      sfSymbol: 'person.2',
       onClick: async (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
@@ -363,31 +391,39 @@ export const useCreateMenuItems = () => {
    * Add session group menu item
    */
   const createSessionGroupMenuItem = useCallback(
-    (options?: { visibility?: 'private' | 'public' }): ItemType => ({
+    (options?: { visibility?: 'private' | 'public' }): MenuItem => ({
       icon: <Icon icon={FolderPlus} />,
       disabled: !canCreate,
       key: options?.visibility === 'private' ? 'addPrivateSessionGroup' : 'addSessionGroup',
       label: t('sessionGroup.createGroup'),
+      sfSymbol: 'folder.badge.plus',
       onClick: async (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
+
+        if (openCreateGroupModal) {
+          // Let the user name the group at creation time (LOBE-12597)
+          openCreateGroupModal(undefined, options?.visibility);
+          return;
+        }
 
         setIsCreatingSessionGroup(true);
         await addGroup(t('sessionGroup.newGroup'), options?.visibility);
         setIsCreatingSessionGroup(false);
       },
     }),
-    [canCreate, t, addGroup],
+    [canCreate, t, addGroup, openCreateGroupModal],
   );
 
   /**
    * Config menu item
    */
   const configMenuItem = useCallback(
-    (onOpenConfig: () => void): ItemType => ({
+    (onOpenConfig: () => void): MenuItem => ({
       icon: <Icon icon={FolderCogIcon} />,
       key: 'config',
       label: t('sessionGroup.manageCategory'),
+      sfSymbol: 'folder.badge.gearshape',
       onClick: (info) => {
         info.domEvent?.stopPropagation();
         onOpenConfig();
@@ -420,11 +456,12 @@ export const useCreateMenuItems = () => {
    * Create page menu item
    */
   const createPageMenuItem = useCallback(
-    (): ItemType => ({
+    (): MenuItem => ({
       icon: <Icon icon={FileTextIcon} />,
       disabled: !canCreate,
       key: 'newPage',
       label: t('newPage'),
+      sfSymbol: 'doc.badge.plus',
       onClick: async (info) => {
         info.domEvent?.stopPropagation();
         if (!canCreate) return;
@@ -448,26 +485,27 @@ export const useCreateMenuItems = () => {
     return [
       createAgentMenuItem(),
       createGroupChatMenuItem(),
-      createPageMenuItem(),
       ...(heterogeneousItems.length > 0
         ? [{ type: 'divider' as const }, ...heterogeneousItems]
         : []),
       ...(platformItem ? [{ type: 'divider' as const }, platformItem] : []),
       { type: 'divider' as const },
+      createAgentListMenuItem(),
       createMarketAgentMenuItem(),
     ];
   }, [
+    createAgentListMenuItem,
     createAgentMenuItem,
     createGroupChatMenuItem,
     createHeterogeneousAgentMenuItems,
     createMarketAgentMenuItem,
-    createPageMenuItem,
     createPlatformAgentMenuItem,
   ]);
 
   return {
     configMenuItem,
     createAgent,
+    createAgentListMenuItem,
     createAgentMenuItem,
     createEmptyGroup,
     createGroupChatMenuItem,
