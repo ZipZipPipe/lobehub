@@ -6,6 +6,8 @@ import { resolveChiefAgentArtwork } from '@/features/ChiefAgent/artwork';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors, builtinAgentSelectors } from '@/store/agent/selectors';
 
+const DEEPSEEK_CHIEF_AGENT_HERO = '/images/deepseek-chief-agent.webp';
+
 const styles = createStaticStyles(({ css }) => ({
   // Anchored below the greeting row rather than above the rail, so the agent
   // stands the same distance into the first card however the greeting wraps.
@@ -34,7 +36,12 @@ const HomePortrait = memo(() => {
 
   return (
     <div className={styles.root}>
-      <img aria-hidden alt="" className={styles.image} src={artwork.hero} />
+      <img
+        aria-hidden
+        alt=""
+        className={styles.image}
+        src={artwork.id === 'lobe' ? DEEPSEEK_CHIEF_AGENT_HERO : artwork.hero}
+      />
     </div>
   );
 });
