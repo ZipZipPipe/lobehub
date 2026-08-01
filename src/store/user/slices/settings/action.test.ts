@@ -108,6 +108,29 @@ describe('SettingsAction', () => {
       );
     });
 
+    it('should persist memory.enabled when effort differs from the default', async () => {
+      useUserStore.setState({
+        defaultSettings: DEFAULT_SETTINGS,
+        settings: { memory: { effort: 'high' } },
+        updateSettingsSignal: undefined,
+      });
+      const { result } = renderHook(() => useUserStore());
+
+      await act(async () => {
+        await result.current.setSettings({ memory: { enabled: true } });
+      });
+
+      expect(userService.updateUserSettings).toHaveBeenLastCalledWith(
+        {
+          memory: {
+            effort: 'high',
+            enabled: true,
+          },
+        },
+        expect.any(AbortSignal),
+      );
+    });
+
     it('should keep legacy scalar system agent fields unchanged', async () => {
       const { result } = renderHook(() => useUserStore());
       const settingsWithLegacySystemAgent = {

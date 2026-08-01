@@ -120,6 +120,24 @@ describe('settingsSelectors', () => {
     });
   });
 
+  describe('currentMemorySettings', () => {
+    it('should apply enabled=true when the persisted memory row only contains effort', () => {
+      const s = {
+        defaultSettings: {
+          memory: { enabled: true, effort: 'medium' },
+        },
+        settings: {
+          memory: { effort: 'high' },
+        },
+      } as unknown as UserStore;
+
+      expect(settingsSelectors.currentMemorySettings(s)).toEqual({
+        effort: 'high',
+        enabled: true,
+      });
+    });
+  });
+
   describe('getProviderConfigById', () => {
     it('should return the provider config for a given provider id', () => {
       const providerConfig = {

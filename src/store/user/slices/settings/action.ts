@@ -111,6 +111,16 @@ export class UserSettingsActionImpl {
       }
     }
 
+    // `enabled: true` is the memory default, so the regular default diff omits it. Preserve an
+    // explicit toggle change even when another memory field (for example `effort: high`) keeps the
+    // parent `memory` diff non-empty; otherwise the saved row never records the re-enabled state.
+    if ('memory' in prevSetting && typeof changedFields.memory?.enabled === 'boolean') {
+      diffs.memory = {
+        ...diffs.memory,
+        enabled: changedFields.memory.enabled,
+      };
+    }
+
     const nextDefaultAgentConfig = nextSettings.defaultAgent?.config;
     const changedDefaultAgentConfig = changedFields.defaultAgent?.config;
     const hasDefaultAgentModelProviderChange =

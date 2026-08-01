@@ -22,7 +22,7 @@ const MemorySetting = memo(() => {
   const { t } = useTranslation('setting');
   const { allowed: canManageMemory, reason } = usePermission('manage_settings');
   const [form] = Form.useForm();
-  const { memory } = useUserStore(settingsSelectors.currentSettings, isEqual);
+  const memory = useUserStore(settingsSelectors.currentMemorySettings, isEqual);
   const [setSettings, isUserStateInit] = useUserStore((s) => [s.setSettings, s.isUserStateInit]);
   const { status: saveStatus, lastSavedAt, save, retry } = useSaveState();
 
