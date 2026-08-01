@@ -94,6 +94,7 @@ export const initBetterAuthSSOProviders = () => {
       // @ts-expect-error - build expects specific env type, but we use union definition type
       const config = definition.build(env);
       if (config) {
+        config.disableSignUp = authEnv.AUTH_DISABLE_SIGNUP;
         // @ts-expect-error hard to type
         socialProviders[providerId] = config;
       }
@@ -105,6 +106,7 @@ export const initBetterAuthSSOProviders = () => {
     const config = definition.build(env);
 
     if (config) {
+      config.disableSignUp = authEnv.AUTH_DISABLE_SIGNUP;
       // the generic oidc callback url is /api/auth/oauth2/callback/{providerId}
       // different from builtin providers' /api/auth/callback/{providerId}
       config.redirectURI = `${appEnv.APP_URL}/api/auth/callback/${definition.id}`;

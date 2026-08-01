@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Get mocked module
 import { authEnv } from '@/envs/auth';
 
-import { isEmailAllowed } from './email-whitelist';
+import { emailWhitelist, isEmailAllowed } from './email-whitelist';
 
 // Mock authEnv
 vi.mock('@/envs/auth', () => ({
   authEnv: {
     AUTH_ALLOWED_EMAILS: undefined as string | undefined,
+    AUTH_DISABLE_SIGNUP: false,
   },
 }));
 
@@ -16,6 +17,17 @@ describe('isEmailAllowed', () => {
   beforeEach(() => {
     // Reset to undefined before each test
     (authEnv as { AUTH_ALLOWED_EMAILS: string | undefined }).AUTH_ALLOWED_EMAILS = undefined;
+    (authEnv as { AUTH_DISABLE_SIGNUP: boolean }).AUTH_DISABLE_SIGNUP = false;
+  });
+
+  it('should reject every user creation when signup is disabled', async () => {
+    (authEnv as { AUTH_DISABLE_SIGNUP: boolean }).AUTH_DISABLE_SIGNUP = true;
+    const pluginOptions = emailWhitelist().init?.({} as never)?.options;
+    const beforeCreate = pluginOptions?.databaseHooks?.user?.create?.before;
+
+    await expect(
+      beforeCreate?.({ email: 'allowed@example.com' } as never, {} as never),
+    ).rejects.toThrow('SIGNUP_DISABLED');
   });
 
   describe('when whitelist is empty', () => {

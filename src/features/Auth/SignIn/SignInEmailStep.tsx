@@ -38,6 +38,7 @@ const getProviderName = (provider: string) =>
 
 export interface SignInEmailStepProps {
   disableEmailPassword?: boolean;
+  disableSignUp?: boolean;
   form: FormInstance<{ email: string }>;
   isSocialOnly: boolean;
   lastAuthProvider?: string | null;
@@ -54,6 +55,7 @@ export interface SignInEmailStepProps {
 
 export const SignInEmailStep = ({
   disableEmailPassword,
+  disableSignUp,
   form,
   isSocialOnly,
   lastAuthProvider,
@@ -227,7 +229,7 @@ export const SignInEmailStep = ({
         </Text>
       )}
       {!showEmailForm && <AuthAgreement />}
-      {showEmailForm && (
+      {showEmailForm && !disableSignUp && (
         <Text align={'center'} fontSize={13} style={{ marginTop: 16 }} type={'secondary'}>
           {t('betterAuth.signin.noAccount')}{' '}
           <a

@@ -122,7 +122,7 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
 
     emailAndPassword: {
       autoSignIn: true,
-      disableSignUp: authEnv.AUTH_DISABLE_EMAIL_PASSWORD,
+      disableSignUp: authEnv.AUTH_DISABLE_EMAIL_PASSWORD || authEnv.AUTH_DISABLE_SIGNUP,
       enabled: !authEnv.AUTH_DISABLE_EMAIL_PASSWORD,
       maxPasswordLength: 64,
       minPasswordLength: 8,
@@ -296,6 +296,7 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
       admin(),
       // Email OTP plugin for mobile verification
       emailOTP({
+        disableSignUp: authEnv.AUTH_DISABLE_SIGNUP,
         expiresIn: OTP_EXPIRES_IN,
         otpLength: 6,
         allowedAttempts: 3,
@@ -338,6 +339,7 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
       ...(enableMagicLink
         ? [
             magicLink({
+              disableSignUp: authEnv.AUTH_DISABLE_SIGNUP,
               expiresIn: MAGIC_LINK_EXPIRES_IN,
               sendMagicLink: async ({ email, url }) => {
                 const template = getMagicLinkEmailTemplate({

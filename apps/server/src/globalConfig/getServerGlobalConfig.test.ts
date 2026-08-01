@@ -52,6 +52,7 @@ const mockGlobalConfigDependencies = (
   vi.doMock('@/envs/auth', () => ({
     authEnv: {
       AUTH_DISABLE_EMAIL_PASSWORD: false,
+      AUTH_DISABLE_SIGNUP: true,
       AUTH_EMAIL_VERIFICATION: false,
       AUTH_ENABLE_MAGIC_LINK: false,
       AUTH_SSO_PROVIDERS: '',
@@ -169,6 +170,13 @@ describe('getServerGlobalConfig', () => {
   it('should enable gateway mode for business builds', async () => {
     await expect(loadServerConfig(true)).resolves.toMatchObject({
       enableGatewayMode: true,
+    });
+  });
+
+  it('should expose the signup lock to the client', async () => {
+    await expect(loadServerConfig(false)).resolves.toMatchObject({
+      disableEmailPassword: false,
+      disableSignUp: true,
     });
   });
 

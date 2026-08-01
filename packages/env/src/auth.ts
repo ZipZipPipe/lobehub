@@ -37,6 +37,7 @@ declare global {
 
       AUTH_COGNITO_USERPOOL_ID?: string;
       AUTH_DISABLE_EMAIL_PASSWORD?: string;
+      AUTH_DISABLE_SIGNUP?: string;
       AUTH_EMAIL_VERIFICATION?: string;
 
       AUTH_ENABLE_MAGIC_LINK?: string;
@@ -116,6 +117,7 @@ export const getAuthConfig = () => {
       AUTH_ENABLE_MAGIC_LINK: z.boolean().optional().default(false),
       AUTH_ALLOWED_EMAILS: z.string().optional(),
       AUTH_DISABLE_EMAIL_PASSWORD: z.boolean().optional().default(false),
+      AUTH_DISABLE_SIGNUP: z.boolean().optional().default(false),
 
       AUTH_GOOGLE_ID: z.string().optional(),
       AUTH_GOOGLE_SECRET: z.string().optional(),
@@ -206,6 +208,7 @@ export const getAuthConfig = () => {
       AUTH_TRUSTED_ORIGINS: process.env.AUTH_TRUSTED_ORIGINS,
       AUTH_ALLOWED_EMAILS: process.env.AUTH_ALLOWED_EMAILS,
       AUTH_DISABLE_EMAIL_PASSWORD: process.env.AUTH_DISABLE_EMAIL_PASSWORD === '1',
+      AUTH_DISABLE_SIGNUP: process.env.AUTH_DISABLE_SIGNUP === '1',
 
       // Cognito provider specific env vars
       AUTH_COGNITO_DOMAIN: process.env.AUTH_COGNITO_DOMAIN,

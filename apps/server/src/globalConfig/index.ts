@@ -103,6 +103,7 @@ export const getServerGlobalConfig = async () => {
       config: parseAgentConfig(DEFAULT_AGENT_CONFIG),
     },
     disableEmailPassword: authEnv.AUTH_DISABLE_EMAIL_PASSWORD,
+    disableSignUp: authEnv.AUTH_DISABLE_SIGNUP,
     enableBusinessFeatures: ENABLE_BUSINESS_FEATURES,
     enableEmailVerification: authEnv.AUTH_EMAIL_VERIFICATION,
     enableComposio: !!composioEnv.COMPOSIO_API_KEY,

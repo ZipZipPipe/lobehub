@@ -2,6 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   betterAuth: vi.fn((options) => options),
+  authEnv: {
+    AUTH_DISABLE_EMAIL_PASSWORD: false,
+    AUTH_DISABLE_SIGNUP: false,
+    AUTH_EMAIL_VERIFICATION: true,
+    AUTH_ENABLE_MAGIC_LINK: false,
+    AUTH_SECRET: 'test-secret',
+    AUTH_SSO_PROVIDERS: '',
+  },
   clearMismatchedOIDCSession: vi.fn(),
   EnvHttpProxyAgent: vi.fn((options) => ({ options })),
   serverDB: {},
@@ -61,13 +69,7 @@ vi.mock('@/envs/app', () => ({
 }));
 
 vi.mock('@/envs/auth', () => ({
-  authEnv: {
-    AUTH_DISABLE_EMAIL_PASSWORD: false,
-    AUTH_EMAIL_VERIFICATION: true,
-    AUTH_ENABLE_MAGIC_LINK: false,
-    AUTH_SECRET: 'test-secret',
-    AUTH_SSO_PROVIDERS: '',
-  },
+  authEnv: mocks.authEnv,
 }));
 
 vi.mock('@/libs/better-auth/email-templates', () => ({
@@ -123,6 +125,8 @@ describe('defineConfig', () => {
     delete process.env.https_proxy;
     delete process.env.NO_PROXY;
     delete process.env.no_proxy;
+    mocks.authEnv.AUTH_DISABLE_EMAIL_PASSWORD = false;
+    mocks.authEnv.AUTH_DISABLE_SIGNUP = false;
   });
 
   afterEach(() => {
@@ -139,6 +143,22 @@ describe('defineConfig', () => {
       expect.objectContaining({
         emailAndPassword: expect.objectContaining({
           revokeSessionsOnPasswordReset: true,
+        }),
+      }),
+    );
+  });
+
+  it('should keep password login enabled while disabling password signup', async () => {
+    mocks.authEnv.AUTH_DISABLE_SIGNUP = true;
+    const { defineConfig } = await import('./define-config');
+
+    defineConfig({ plugins: [] });
+
+    expect(mocks.betterAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        emailAndPassword: expect.objectContaining({
+          disableSignUp: true,
+          enabled: true,
         }),
       }),
     );

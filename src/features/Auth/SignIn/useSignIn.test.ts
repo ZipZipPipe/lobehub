@@ -66,11 +66,13 @@ vi.mock('@/business/client/hooks/useBusinessSignin', () => ({
 
 let mockEnableBusinessFeatures = false;
 let mockEnableMagicLink = false;
+let mockDisableSignUp = false;
 vi.mock('@/features/AuthShell', () => ({
   useAuthServerConfigStore: (selector: (s: any) => any) =>
     selector({
       serverConfig: {
         disableEmailPassword: false,
+        disableSignUp: mockDisableSignUp,
         enableBusinessFeatures: mockEnableBusinessFeatures,
         enableMagicLink: mockEnableMagicLink,
         oAuthSSOProviders: ['google', 'github'],
@@ -118,6 +120,7 @@ describe('useSignIn', () => {
     mockSearchParamsGet.mockReturnValue(null);
     mockEnableBusinessFeatures = false;
     mockEnableMagicLink = false;
+    mockDisableSignUp = false;
     mockBusinessSignin.ssoProviders = [];
     mockBusinessSignin.getAdditionalData.mockResolvedValue({});
     mockBusinessSignin.preSocialSigninCheck.mockResolvedValue(true);
@@ -147,6 +150,7 @@ describe('useSignIn', () => {
       expect(result.current.socialLoading).toBeNull();
       expect(result.current.isSocialOnly).toBe(false);
       expect(result.current.disableEmailPassword).toBe(false);
+      expect(result.current.disableSignUp).toBe(false);
     });
   });
 
@@ -166,6 +170,23 @@ describe('useSignIn', () => {
       expect(mockNavigate).toHaveBeenCalledWith(
         expect.stringContaining('/signup?email=new%40example.com'),
       );
+    });
+
+    it('should not redirect to signup when registration is disabled', async () => {
+      mockDisableSignUp = true;
+      mockFetch.mockResolvedValueOnce({
+        json: async () => ({ exists: false }),
+        ok: true,
+      });
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleCheckUser({ email: 'new@example.com' });
+      });
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+      expect(mockMessageError).toHaveBeenCalled();
     });
 
     it('should go to password step when user exists with password', async () => {

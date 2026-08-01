@@ -59,6 +59,34 @@ describe('AuthAgreement', () => {
 });
 
 describe('SignInEmailStep', () => {
+  it('should keep email sign-in visible while hiding signup when registration is disabled', () => {
+    const TestSignInEmailStep = () => {
+      const [form] = Form.useForm<{ email: string }>();
+
+      return (
+        <SignInEmailStep
+          disableSignUp
+          serverConfigInit
+          form={form}
+          isSocialOnly={false}
+          loading={false}
+          oAuthSSOProviders={[]}
+          socialLoading={null}
+          onCheckUser={vi.fn(async () => {})}
+          onGoToSignup={vi.fn()}
+          onResetEmail={vi.fn()}
+          onSetPassword={vi.fn()}
+          onSocialSignIn={vi.fn()}
+        />
+      );
+    };
+
+    render(<TestSignInEmailStep />);
+
+    expect(screen.getByRole('textbox')).toBeTruthy();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
   it('should confirm the agreement before social sign-in', async () => {
     let confirmAgreement: (() => Promise<void>) | (() => void) | undefined;
     vi.spyOn(BaseUI, 'confirmModal').mockImplementation(({ onOk }) => {

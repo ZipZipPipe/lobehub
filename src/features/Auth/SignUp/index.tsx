@@ -10,8 +10,9 @@ const SignUp = () => {
   const disableEmailPassword = useAuthServerConfigStore(
     (s) => s.serverConfig.disableEmailPassword || false,
   );
+  const disableSignUp = useAuthServerConfigStore((s) => s.serverConfig.disableSignUp || false);
 
-  if (disableEmailPassword) return <Navigate replace to="/signin" />;
+  if (disableEmailPassword || disableSignUp) return <Navigate replace to="/signin" />;
 
   return <BetterAuthSignUpForm />;
 };

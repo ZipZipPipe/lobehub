@@ -44,6 +44,7 @@ export const useSignIn = () => {
   const disableEmailPassword = useAuthServerConfigStore(
     (s) => s.serverConfig.disableEmailPassword || false,
   );
+  const disableSignUp = useAuthServerConfigStore((s) => s.serverConfig.disableSignUp || false);
   const enableBusinessFeatures = useAuthServerConfigStore(
     (s) => s.serverConfig.enableBusinessFeatures || false,
   );
@@ -165,6 +166,10 @@ export const useSignIn = () => {
       if (!data.exists) {
         if (identifierType === 'username') {
           message.error(t('betterAuth.errors.usernameNotRegistered'));
+          return;
+        }
+        if (disableSignUp) {
+          message.error(t('betterAuth.errors.emailNotRegistered'));
           return;
         }
         const callbackUrl = searchParams.get('callbackUrl') || '/';
@@ -372,6 +377,7 @@ export const useSignIn = () => {
 
   return {
     disableEmailPassword,
+    disableSignUp,
     email,
     form,
     handleBackFromSent,

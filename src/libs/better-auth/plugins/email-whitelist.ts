@@ -33,8 +33,8 @@ export function isEmailAllowed(email: string): boolean {
 }
 
 /**
- * Better Auth plugin to restrict registration to whitelisted emails/domains.
- * Intercepts user creation (both email signup and SSO) via databaseHooks.
+ * Better Auth plugin to enforce registration policy.
+ * Intercepts user creation (email, SSO and plugin-driven signup) via databaseHooks.
  */
 export const emailWhitelist = (): BetterAuthPlugin => ({
   id: 'email-whitelist',
@@ -45,6 +45,13 @@ export const emailWhitelist = (): BetterAuthPlugin => ({
           user: {
             create: {
               before: async (user) => {
+                if (authEnv.AUTH_DISABLE_SIGNUP) {
+                  throw new APIError('FORBIDDEN', {
+                    code: 'SIGNUP_DISABLED',
+                    message: 'SIGNUP_DISABLED',
+                  });
+                }
+
                 if (!user.email) return { data: user };
 
                 if (!isEmailAllowed(user.email)) {
