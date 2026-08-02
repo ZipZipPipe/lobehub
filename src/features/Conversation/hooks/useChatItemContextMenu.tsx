@@ -4,7 +4,7 @@ import {
   type ActionIconGroupItemType,
   type GenericItemType,
 } from '@lobehub/ui';
-import { App } from 'antd';
+import { toast } from '@lobehub/ui/base-ui';
 import isEqual from 'fast-deep-equal';
 import { type MouseEvent, type ReactNode } from 'react';
 import { useCallback, useMemo, useRef } from 'react';
@@ -55,7 +55,7 @@ export const useChatItemContextMenu = ({
   topic,
 }: UseChatItemContextMenuProps) => {
   const contextMenuMode = useUserStore(userGeneralSettingsSelectors.contextMenuMode);
-  const { message } = App.useApp();
+
   const { t } = useTranslation('common');
   const { allowed: canCreateContent } = usePermission('create_content');
   const { allowed: canEditContent } = usePermission('edit_own_content');
@@ -256,7 +256,7 @@ export const useChatItemContextMenu = ({
         }
         case 'copy': {
           await copyMessage(id, item.content);
-          message.success(t('copySuccess'));
+          toast.success(t('copySuccess'));
           break;
         }
         case 'expand':
@@ -268,7 +268,7 @@ export const useChatItemContextMenu = ({
         case 'branching': {
           if (!canCreate) break;
           if (!topic) {
-            message.warning(t('branchingRequiresSavedTopic'));
+            toast.warning(t('branchingRequiresSavedTopic'));
             break;
           }
           openThreadCreator(id);
@@ -335,7 +335,6 @@ export const useChatItemContextMenu = ({
       handleShare,
       id,
       inPortalThread,
-      message,
       openThreadCreator,
       regenerateAssistantMessage,
       regenerateUserMessage,
