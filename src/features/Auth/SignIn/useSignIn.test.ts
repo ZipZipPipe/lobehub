@@ -186,7 +186,9 @@ describe('useSignIn', () => {
       });
 
       expect(mockNavigate).not.toHaveBeenCalled();
-      expect(mockMessageError).toHaveBeenCalled();
+      expect(mockMessageError).toHaveBeenCalledWith(
+        expect.stringMatching(/emailNotRegistered|not registered/i),
+      );
     });
 
     it('should go to password step when user exists with password', async () => {

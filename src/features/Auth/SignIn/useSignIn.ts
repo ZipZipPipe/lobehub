@@ -169,7 +169,7 @@ export const useSignIn = () => {
           return;
         }
         if (disableSignUp) {
-          message.error(t('betterAuth.errors.emailNotRegistered'));
+          toast.error(t('betterAuth.errors.emailNotRegistered'));
           return;
         }
         const callbackUrl = searchParams.get('callbackUrl') || '/';
