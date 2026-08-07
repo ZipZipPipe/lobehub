@@ -4,7 +4,7 @@ import { ContextMenuHost, ModalHost, TooltipGroup } from '@lobehub/ui';
 import { ModalHost as BaseModalHost, ToastHost } from '@lobehub/ui/base-ui';
 import { StyleProvider } from 'antd-style';
 import { domMax, LazyMotion } from 'motion/react';
-import { type CSSProperties, lazy, memo, type PropsWithChildren, Suspense } from 'react';
+import { Component, type CSSProperties, lazy, memo, type PropsWithChildren, Suspense } from 'react';
 
 import { LobeAnalyticsProviderWrapper } from '@/components/Analytics/LobeAnalyticsProviderWrapper';
 import { DragUploadProvider } from '@/components/DragUploadZone/DragUploadProvider';
@@ -40,6 +40,18 @@ const devDockLayoutStyle: CSSProperties = {
   width: '100%',
 };
 
+class DevDockBoundary extends Component<PropsWithChildren, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 export const DevDockLayout = memo<PropsWithChildren>(({ children }) => {
   const mounted = useDevDockMounted();
 
@@ -47,9 +59,11 @@ export const DevDockLayout = memo<PropsWithChildren>(({ children }) => {
     <>
       <div style={devDockLayoutStyle}>{children}</div>
       {mounted && (
-        <Suspense>
-          <DevDock />
-        </Suspense>
+        <DevDockBoundary>
+          <Suspense>
+            <DevDock />
+          </Suspense>
+        </DevDockBoundary>
       )}
     </>
   );
@@ -83,7 +97,9 @@ const SPAGlobalProvider = memo<PropsWithChildren>(({ children }) => {
                 <TooltipGroup layoutAnimation={false}>
                   <StyleProvider speedy={import.meta.env.PROD}>
                     <LobeAnalyticsProviderWrapper>
-                      <CacheHydrationGate>{children}</CacheHydrationGate>
+                      <CacheHydrationGate>
+                        <DevDockLayout>{children}</DevDockLayout>
+                      </CacheHydrationGate>
                     </LobeAnalyticsProviderWrapper>
                   </StyleProvider>
                 </TooltipGroup>
@@ -110,9 +126,7 @@ const SPAGlobalProvider = memo<PropsWithChildren>(({ children }) => {
           isMobile={isMobile}
           serverConfig={serverConfig?.config}
         >
-          <QueryProvider>
-            <DevDockLayout>{content}</DevDockLayout>
-          </QueryProvider>
+          <QueryProvider>{content}</QueryProvider>
         </ServerConfigStoreProvider>
       </AppTheme>
     </Locale>

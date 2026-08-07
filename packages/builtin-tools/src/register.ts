@@ -125,7 +125,12 @@ import {
   SkillsManifest,
   SkillsRenders,
 } from '@lobechat/builtin-tool-skills/client';
-import { TaskInspectors, TaskManifest, TaskRenders } from '@lobechat/builtin-tool-task/client';
+import {
+  TaskInspectors,
+  TaskInterventions,
+  TaskManifest,
+  TaskRenders,
+} from '@lobechat/builtin-tool-task/client';
 import {
   UserInteractionIdentifier,
   UserInteractionInspectors,
@@ -169,6 +174,8 @@ import { registerBuiltinRenders } from './renders';
 import { registerBuiltinStreamings } from './streamings';
 import { TwitterIdentifier, TwitterInspectors } from './twitter';
 
+const QODER_IDENTIFIER = 'qoder';
+
 let builtinToolSurfacesRegistered = false;
 
 export const registerBuiltinToolSurfaces = (): void => {
@@ -179,6 +186,7 @@ export const registerBuiltinToolSurfaces = (): void => {
     [AgentDocumentsManifest.identifier]: AgentDocumentsRenders as Record<string, BuiltinRender>,
     [AgentManagementManifest.identifier]: AgentManagementRenders as Record<string, BuiltinRender>,
     [ClaudeCodeIdentifier]: ClaudeCodeRenders as Record<string, BuiltinRender>,
+    [QODER_IDENTIFIER]: ClaudeCodeRenders as Record<string, BuiltinRender>,
     [CloudSandboxManifest.identifier]: CloudSandboxRenders as Record<string, BuiltinRender>,
     [GroupAgentBuilderManifest.identifier]: GroupAgentBuilderRenders as Record<
       string,
@@ -225,6 +233,7 @@ export const registerBuiltinToolSurfaces = (): void => {
       BuiltinInspector
     >,
     [ClaudeCodeIdentifier]: ClaudeCodeInspectors as Record<string, BuiltinInspector>,
+    [QODER_IDENTIFIER]: ClaudeCodeInspectors as Record<string, BuiltinInspector>,
     [CloudSandboxManifest.identifier]: CloudSandboxInspectors as Record<string, BuiltinInspector>,
     [GroupAgentBuilderManifest.identifier]: GroupAgentBuilderInspectors as Record<
       string,
@@ -277,6 +286,7 @@ export const registerBuiltinToolSurfaces = (): void => {
       BuiltinStreaming
     >,
     [ClaudeCodeIdentifier]: ClaudeCodeStreamings as Record<string, BuiltinStreaming>,
+    [QODER_IDENTIFIER]: ClaudeCodeStreamings as Record<string, BuiltinStreaming>,
     [CloudSandboxManifest.identifier]: CloudSandboxStreamings as Record<string, BuiltinStreaming>,
     [GroupAgentBuilderManifest.identifier]: GroupAgentBuilderStreamings as Record<
       string,
@@ -299,6 +309,7 @@ export const registerBuiltinToolSurfaces = (): void => {
       BuiltinIntervention
     >,
     [ClaudeCodeIdentifier]: ClaudeCodeInterventions as Record<string, BuiltinIntervention>,
+    [QODER_IDENTIFIER]: ClaudeCodeInterventions as Record<string, BuiltinIntervention>,
     [CloudSandboxManifest.identifier]: CloudSandboxInterventions as Record<
       string,
       BuiltinIntervention
@@ -311,6 +322,7 @@ export const registerBuiltinToolSurfaces = (): void => {
     [LocalSystemIdentifier]: LocalSystemInterventions as Record<string, BuiltinIntervention>,
     [MemoryManifest.identifier]: MemoryInterventions as Record<string, BuiltinIntervention>,
     [MessageManifest.identifier]: MessageInterventions as Record<string, BuiltinIntervention>,
+    [TaskManifest.identifier]: TaskInterventions as Record<string, BuiltinIntervention>,
     [UserInteractionIdentifier]: UserInteractionInterventions as Record<
       string,
       BuiltinIntervention

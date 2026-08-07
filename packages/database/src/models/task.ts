@@ -1,6 +1,7 @@
 import type {
   CheckpointConfig,
   NewTask,
+  TaskGoalConfig,
   TaskItem,
   TaskVerifyConfig,
   WorkspaceData,
@@ -755,6 +756,19 @@ export class TaskModel {
     return this.updateTaskConfig(id, { review });
   }
 
+  // ========== Goal Config ==========
+
+  /**
+   * Read this task's goal-loop config from `config.goal`. Presence marks a
+   * goal-driven task (created via the `createGoal` builtin tool) and enables
+   * the outer verify-driven round loop. No inheritance — a goal belongs to the
+   * exact task it was created on.
+   */
+  getGoalConfig(task: TaskItem): TaskGoalConfig | undefined {
+    const config = task.config as Record<string, any> | undefined;
+    return config?.goal ? (config.goal as TaskGoalConfig) : undefined;
+  }
+
   // ========== Verify Config ==========
 
   /**
@@ -908,6 +922,14 @@ export class TaskModel {
     });
 
   async addDependency(taskId: string, dependsOnId: string, type: string = 'blocks'): Promise<void> {
+    const dependencyTasks = await this.findByIds([taskId, dependsOnId]);
+    const task = dependencyTasks.find(({ id }) => id === taskId);
+    const dependsOn = dependencyTasks.find(({ id }) => id === dependsOnId);
+    if (!task || !dependsOn) throw new Error('Task not found');
+    if (task.projectId !== dependsOn.projectId && (task.projectId || dependsOn.projectId)) {
+      throw new Error('Task dependencies cannot cross project boundaries');
+    }
+
     const visibility = await this.getTaskVisibility(taskId);
     await this.db
       .insert(taskDependencies)

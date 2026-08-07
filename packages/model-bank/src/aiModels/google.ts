@@ -297,6 +297,40 @@ const googleChatModels: AIChatModelCard[] = [
     enabled: true,
     family: 'gemini',
     generation: 'gemini-3.1',
+    id: 'gemini-3.1-flash-image',
+    knowledgeCutoff: '2025-01',
+    maxOutput: 32_768,
+    pricing: {
+      approximatePricePerImage: 0.067,
+      units: [
+        { name: 'imageOutput', rate: 60, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput', rate: 0.5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput', rate: 0.5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 3, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+    releasedAt: '2026-05-28',
+    settings: {
+      extendParams: ['imageAspectRatio2', 'imageResolution2', 'thinkingLevel4'],
+      searchImpl: 'params',
+      searchProvider: 'google',
+    },
+    type: 'chat',
+  },
+  {
+    abilities: {
+      imageOutput: true,
+      reasoning: true,
+      search: true,
+      vision: true,
+    },
+    contextWindowTokens: 131_072 + 32_768,
+    description:
+      "Gemini 3.1 Flash Image (Nano Banana 2) is Google's fastest native image generation model with thinking support, conversational image generation and editing.",
+    displayName: 'Nano Banana 2',
+    enabled: true,
+    family: 'gemini',
+    generation: 'gemini-3.1',
     id: 'gemini-3.1-flash-image-preview',
     knowledgeCutoff: '2025-01',
     maxOutput: 32_768,
@@ -953,6 +987,25 @@ export const imagenGenParameters: ModelParamsSchema = {
 const googleImageModels: AIImageModelCard[] = [
   {
     displayName: 'Nano Banana 2',
+    id: 'gemini-3.1-flash-image:image',
+    type: 'image',
+    enabled: true,
+    description:
+      "Gemini 3.1 Flash Image (Nano Banana 2) is Google's fastest native image generation model with thinking support, conversational image generation and editing.",
+    releasedAt: '2026-05-28',
+    parameters: nanoBanana2Parameters,
+    pricing: {
+      approximatePricePerImage: 0.067,
+      units: [
+        { name: 'imageOutput', rate: 60, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput', rate: 0.5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput', rate: 0.5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 3, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+  },
+  {
+    displayName: 'Nano Banana 2',
     id: 'gemini-3.1-flash-image-preview:image',
     type: 'image',
     enabled: true,
@@ -1127,89 +1180,6 @@ const googleVideoModels: AIVideoModelCard[] = [
       units: [{ name: 'videoGeneration', rate: 0.35, strategy: 'fixed', unit: 'second' }],
     },
     releasedAt: '2026-01-13',
-    type: 'video',
-  },
-  {
-    description:
-      'Our stable video generation model, available to developers on the paid tier of the Gemini API.',
-    displayName: 'Veo 3.0 Generate 001',
-    enabled: true,
-    id: 'veo-3.0-generate-001',
-    parameters: {
-      aspectRatio: {
-        default: '16:9',
-        enum: ['16:9', '9:16'],
-      },
-      duration: { default: 8, enum: [8] },
-      imageUrl: {
-        default: null,
-      },
-      prompt: { default: '' },
-      resolution: {
-        default: '720p',
-        enum: ['720p', '1080p'],
-      },
-      seed: { default: null },
-    },
-    pricing: {
-      units: [{ name: 'videoGeneration', rate: 0.4, strategy: 'fixed', unit: 'second' }],
-    },
-    releasedAt: '2025-11-11',
-    type: 'video',
-  },
-  {
-    description:
-      'Our stable video generation model, available to developers on the paid tier of the Gemini API.',
-    displayName: 'Veo 3.0 Fast Generate 001',
-    enabled: true,
-    id: 'veo-3.0-fast-generate-001',
-    parameters: {
-      aspectRatio: {
-        default: '16:9',
-        enum: ['16:9', '9:16'],
-      },
-      duration: { default: 8, enum: [8] },
-      imageUrl: {
-        default: null,
-      },
-      prompt: { default: '' },
-      resolution: {
-        default: '720p',
-        enum: ['720p', '1080p'],
-      },
-      seed: { default: null },
-    },
-    pricing: {
-      units: [{ name: 'videoGeneration', rate: 0.15, strategy: 'fixed', unit: 'second' }],
-    },
-    releasedAt: '2025-11-11',
-    type: 'video',
-  },
-  {
-    description:
-      'Our state-of-the-art video generation model, available to developers on the paid tier of the Gemini API.',
-    displayName: 'Veo 2.0 Generate 001',
-    id: 'veo-2.0-generate-001',
-    parameters: {
-      aspectRatio: {
-        default: '16:9',
-        enum: ['16:9', '9:16'],
-      },
-      duration: { default: 8, max: 8, min: 5 },
-      imageUrl: {
-        default: null,
-      },
-      prompt: { default: '' },
-      resolution: {
-        default: '720p',
-        enum: ['720p', '1080p'],
-      },
-      seed: { default: null },
-    },
-    pricing: {
-      units: [{ name: 'videoGeneration', rate: 0.35, strategy: 'fixed', unit: 'second' }],
-    },
-    releasedAt: '2025-04-09',
     type: 'video',
   },
 ];

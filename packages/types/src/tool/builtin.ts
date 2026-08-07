@@ -289,12 +289,12 @@ export const BuiltinToolManifestSchema = z.object({
  */
 export interface BuiltinToolResolveContext {
   /**
-   * Hide the lobe-agent visual-analysis fallback for this turn. Set when all
-   * visual media already present in the multimodal context are supported by
-   * the active model natively, so the model cannot redundantly route visible
-   * images/videos through the fallback tool.
+   * Hide the lobe-agent multimodal-analysis fallback for this turn. Set when
+   * every audio/image/video already present in the context is supported by the
+   * active model natively, so the model cannot redundantly route visible media
+   * through the fallback tool.
    */
-  disableVisualAnalysis?: boolean;
+  disableMultimodalAnalysis?: boolean;
   /**
    * Where this run executes, mirroring the resolved `ExecutionPlan.kind`
    * (`device` / `device-unrouted` / `sandbox` / `none`) plus `local` for the

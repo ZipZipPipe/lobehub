@@ -9,6 +9,7 @@ import { storageOverageRouter } from '@/business/server/lambda-routers/storageOv
 import { subscriptionRouter } from '@/business/server/lambda-routers/subscription';
 import { taskTemplateRouter } from '@/business/server/lambda-routers/taskTemplate';
 import { topUpRouter } from '@/business/server/lambda-routers/topUp';
+import { waitlistRouter } from '@/business/server/lambda-routers/waitlist';
 import { workspaceRouter } from '@/business/server/lambda-routers/workspace';
 import { workspaceAuditLogRouter } from '@/business/server/lambda-routers/workspaceAuditLog';
 import { workspaceCreditsRouter } from '@/business/server/lambda-routers/workspaceCredits';
@@ -25,6 +26,7 @@ import { agentDocumentRouter } from './agentDocument';
 import { agentEvalRouter } from './agentEval';
 import { agentEvalExternalRouter } from './agentEvalExternal';
 import { agentGroupRouter } from './agentGroup';
+import { agentLabelRouter } from './agentLabel';
 import { agentNotifyRouter } from './agentNotify';
 import { agentQuotaRouter } from './agentQuota';
 import { agentSignalRouter } from './agentSignal';
@@ -66,6 +68,7 @@ import { notificationRouter } from './notification';
 import { oauthAppRouter } from './oauthApp';
 import { oauthDeviceFlowRouter } from './oauthDeviceFlow';
 import { pluginRouter } from './plugin';
+import { projectRouter } from './project';
 import { pushTokenRouter } from './pushToken';
 import { ragEvalRouter } from './ragEval';
 import { recentRouter } from './recent';
@@ -98,6 +101,7 @@ export const lambdaRouter = router({
   agentDocument: agentDocumentRouter,
   agentEval: agentEvalRouter,
   agentEvalExternal: agentEvalExternalRouter,
+  agentLabel: agentLabelRouter,
   agentSkills: agentSkillsRouter,
   agentSignal: agentSignalRouter,
   task: taskRouter,
@@ -141,6 +145,7 @@ export const lambdaRouter = router({
   oauthApp: oauthAppRouter,
   oauthDeviceFlow: oauthDeviceFlowRouter,
   plugin: pluginRouter,
+  project: projectRouter,
   pushToken: pushTokenRouter,
   ragEval: ragEvalRouter,
   recent: recentRouter,
@@ -177,6 +182,7 @@ export const lambdaRouter = router({
   subscription: subscriptionRouter,
   taskTemplate: taskTemplateRouter,
   topUp: topUpRouter,
+  waitlist: waitlistRouter,
 });
 
 export type LambdaRouter = typeof lambdaRouter;

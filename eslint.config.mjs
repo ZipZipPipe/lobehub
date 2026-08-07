@@ -97,6 +97,10 @@ export default eslint(
       '.i18nrc.js',
       // vendored code (copied from @microsoft/fetch-event-source)
       'packages/utils/src/client/fetchEventSource/parse.ts',
+      // generated files (regenerate with `bun generate:openapi` in packages/openapi)
+      'packages/openapi/openapi.yml',
+      // generated files (regenerate with `bun generate` in packages/sdk)
+      'packages/sdk/src/generated/**',
     ],
     next: true,
     react: 'next',
@@ -226,11 +230,12 @@ export default eslint(
     },
   },
   {
-    files: ['src/features/Home/**/*.{ts,tsx}', 'src/routes/(main)/home/**/*.{ts,tsx}'],
-    ignores: [
-      'src/routes/(main)/home/_layout/hooks/useCreateModal.tsx',
-      'src/features/Home/InputArea/EditorInput.tsx',
+    files: [
+      'src/features/Home/**/*.{ts,tsx}',
+      'src/features/HomeLayout/**/*.{ts,tsx}',
+      'src/routes/(main)/home/**/*.{ts,tsx}',
     ],
+    ignores: ['src/features/Home/InputArea/EditorInput.tsx'],
     rules: {
       'no-restricted-imports': createRestrictedImportRule({
         paths: [
@@ -239,6 +244,34 @@ export default eslint(
               'Home cold-path modules must use stable Conversation subpaths instead of the root barrel that exports ChatInput.',
             name: '@/features/Conversation',
           },
+        ],
+        patterns: [
+          {
+            message:
+              'Home cold-path modules must not statically import ChatInput. Load an isolated editor entry with import().',
+            regex:
+              '^@/features/ChatInput(?:$|/(?!(?:store/initialState|utils/contextSelections)$).+)',
+          },
+        ],
+      }),
+    },
+  },
+  {
+    // The home sidebar tree carries both sets of constraints: it is a shell tree
+    // rendered outside TabHost, and it is also a home cold path. Flat config
+    // replaces `no-restricted-imports` rather than merging it, so the shell paths
+    // have to be repeated here instead of relying on the shell block above.
+    files: ['src/features/HomeSidebar/**/*.{ts,tsx}'],
+    ignores: ['src/features/HomeSidebar/hooks/useCreateModal.tsx'],
+    rules: {
+      'no-restricted-imports': createRestrictedImportRule({
+        paths: [
+          {
+            message:
+              'Home cold-path modules must use stable Conversation subpaths instead of the root barrel that exports ChatInput.',
+            name: '@/features/Conversation',
+          },
+          ...shellRouterRestrictedPaths,
         ],
         patterns: [
           {
@@ -282,6 +315,8 @@ export default eslint(
       'react/no-unknown-property': 0,
       'regexp/match-any': 0,
       'unicorn/better-regex': 0,
+      // conflicts with prettier, which lowercases hex literals
+      'unicorn/number-literal-case': 0,
     },
   },
   // TypeScript files - enforce consistent type imports

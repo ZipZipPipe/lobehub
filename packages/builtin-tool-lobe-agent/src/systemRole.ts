@@ -205,12 +205,12 @@ When working with plan/todo tools:
 </plan_and_todos>
 `;
 
-const visualAnalysisSection = `
-<visual_analysis>
-\`analyzeVisualMedia\` is only a fallback when the active model cannot inspect the requested image/video natively.
+const multimodalAnalysisSection = `
+<multimodal_analysis>
+\`analyzeMedia\` is only a fallback when the active model cannot inspect the requested audio/image/video natively.
 If the media is already visible in the current multimodal context, answer directly without this tool.
-Use it only for refs/URLs you cannot inspect directly, or when the active model lacks the needed image/video capability.
-</visual_analysis>
+Use it only for refs/URLs you cannot inspect directly, or when the active model lacks the needed audio/image/video capability.
+</multimodal_analysis>
 `;
 
 const askUserQuestionSection = `
@@ -229,14 +229,14 @@ const systemPromptIntro =
   "Use Lobe Agent capabilities only when the active model needs built-in assistance. Prefer the active model's native capabilities whenever they are sufficient. Follow each tool's description and schema, and use tool results to answer the user directly.";
 
 // Sections independent of sub-agent dispatch. Kept as bases so a context-aware
-// manifest can remove visual fallback and/or sub-agent guidance without leaving
+// manifest can remove multimodal fallback and/or sub-agent guidance without leaving
 // dangling references to APIs that are hidden from the model for that turn.
 const baseSystemPrompt = `${systemPromptIntro}
-${visualAnalysisSection}
+${multimodalAnalysisSection}
 ${askUserQuestionSection}
 ${planTodoSection}`;
 
-const baseSystemPromptWithoutVisualAnalysis = `${systemPromptIntro}
+const baseSystemPromptWithoutMultimodalAnalysis = `${systemPromptIntro}
 ${askUserQuestionSection}
 ${planTodoSection}`;
 
@@ -244,8 +244,8 @@ ${planTodoSection}`;
 export const systemPrompt = `${baseSystemPrompt}
 ${subAgentSection}`;
 
-/** Prompt variant with native visual input only; sub-agent dispatch remains. */
-export const systemPromptWithoutVisualAnalysis = `${baseSystemPromptWithoutVisualAnalysis}
+/** Prompt variant with native multimodal input only; sub-agent dispatch remains. */
+export const systemPromptWithoutMultimodalAnalysis = `${baseSystemPromptWithoutMultimodalAnalysis}
 ${subAgentSection}`;
 
 /**
@@ -255,5 +255,6 @@ ${subAgentSection}`;
  */
 export const systemPromptWithoutSubAgent = baseSystemPrompt;
 
-/** Prompt variant with both callSubAgent and visual-analysis fallback hidden. */
-export const systemPromptWithoutSubAgentAndVisualAnalysis = baseSystemPromptWithoutVisualAnalysis;
+/** Prompt variant with both callSubAgent and multimodal-analysis fallback hidden. */
+export const systemPromptWithoutSubAgentAndMultimodalAnalysis =
+  baseSystemPromptWithoutMultimodalAnalysis;

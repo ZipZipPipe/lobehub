@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { LobeAgentManifest } from './manifest';
 import { resolveLobeAgentManifest } from './resolveManifest';
 import {
+  systemPromptWithoutMultimodalAnalysis,
   systemPromptWithoutSubAgent,
-  systemPromptWithoutSubAgentAndVisualAnalysis,
-  systemPromptWithoutVisualAnalysis,
+  systemPromptWithoutSubAgentAndMultimodalAnalysis,
 } from './systemRole';
 import { LobeAgentApiName } from './types';
 
@@ -36,7 +36,7 @@ describe('resolveLobeAgentManifest', () => {
       // the rest of lobe-agent stays available
       expect(names).toContain(LobeAgentApiName.createPlan);
       expect(names).toContain(LobeAgentApiName.createTodos);
-      expect(names).toContain(LobeAgentApiName.analyzeVisualMedia);
+      expect(names).toContain(LobeAgentApiName.analyzeMedia);
       // exactly one API removed
       expect(names).toHaveLength(LobeAgentManifest.api.length - 1);
 
@@ -60,51 +60,49 @@ describe('resolveLobeAgentManifest', () => {
     expect(result.systemRole).not.toContain('callSubAgent');
   });
 
-  it('hides visual analysis when the active model can inspect all attached media natively', () => {
+  it('hides multimodal analysis when the active model can inspect all attached media natively', () => {
     const result = resolveLobeAgentManifest({
-      disableVisualAnalysis: true,
+      disableMultimodalAnalysis: true,
       scope: 'main',
     })!;
 
     const names = apiNames(result);
-    expect(names).not.toContain(LobeAgentApiName.analyzeVisualMedia);
+    expect(names).not.toContain(LobeAgentApiName.analyzeMedia);
     expect(names).toContain(LobeAgentApiName.callSubAgent);
     expect(names).toContain(LobeAgentApiName.createPlan);
     expect(names).toHaveLength(LobeAgentManifest.api.length - 1);
-    expect(result.systemRole).toBe(systemPromptWithoutVisualAnalysis);
-    expect(result.systemRole).not.toContain('visual_analysis');
-    expect(result.systemRole).not.toContain('analyzeVisualMedia');
+    expect(result.systemRole).toBe(systemPromptWithoutMultimodalAnalysis);
+    expect(result.systemRole).not.toContain('multimodal_analysis');
+    expect(result.systemRole).not.toContain('analyzeMedia');
     expect(result.systemRole).toContain('sub_agents');
     expect(result.systemRole).toContain('plan_and_todos');
   });
 
-  it('hides both visual analysis and sub-agent dispatch when both gates apply', () => {
+  it('hides both multimodal analysis and sub-agent dispatch when both gates apply', () => {
     const result = resolveLobeAgentManifest({
-      disableVisualAnalysis: true,
+      disableMultimodalAnalysis: true,
       isSubAgent: true,
       scope: 'main',
     })!;
 
     const names = apiNames(result);
-    expect(names).not.toContain(LobeAgentApiName.analyzeVisualMedia);
+    expect(names).not.toContain(LobeAgentApiName.analyzeMedia);
     expect(names).not.toContain(LobeAgentApiName.callSubAgent);
     expect(names).toContain(LobeAgentApiName.createPlan);
     expect(names).toContain(LobeAgentApiName.createTodos);
     expect(names).toHaveLength(LobeAgentManifest.api.length - 2);
-    expect(result.systemRole).toBe(systemPromptWithoutSubAgentAndVisualAnalysis);
-    expect(result.systemRole).not.toContain('visual_analysis');
+    expect(result.systemRole).toBe(systemPromptWithoutSubAgentAndMultimodalAnalysis);
+    expect(result.systemRole).not.toContain('multimodal_analysis');
     expect(result.systemRole).not.toContain('sub_agents');
     expect(result.systemRole).toContain('plan_and_todos');
   });
 
   it('does not mutate the original static manifest', () => {
     const before = LobeAgentManifest.api.length;
-    resolveLobeAgentManifest({ disableVisualAnalysis: true, scope: 'group' });
+    resolveLobeAgentManifest({ disableMultimodalAnalysis: true, scope: 'group' });
     expect(LobeAgentManifest.api).toHaveLength(before);
     // the full manifest's systemRole still describes sub-agent dispatch
     expect(LobeAgentManifest.systemRole).toContain('callSubAgent');
-    expect(LobeAgentManifest.api.map((api) => api.name)).toContain(
-      LobeAgentApiName.analyzeVisualMedia,
-    );
+    expect(LobeAgentManifest.api.map((api) => api.name)).toContain(LobeAgentApiName.analyzeMedia);
   });
 });

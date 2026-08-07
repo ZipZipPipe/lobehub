@@ -1,6 +1,7 @@
 import type { AgentStreamEvent } from '@lobechat/agent-gateway-client';
 import { type ISnapshotStore, parseOperationId } from '@lobechat/agent-tracing';
 import type { LobeChatDatabase } from '@lobechat/database';
+import type { LocalHeterogeneousAgentType } from '@lobechat/heterogeneous-agents';
 import debug from 'debug';
 
 import { AgentOperationModel } from '@/database/models/agentOperation';
@@ -22,7 +23,7 @@ import { HeteroTraceRecorder } from './HeteroTraceRecorder';
 
 const log = debug('lobe-server:hetero-agent-service');
 
-export type HeterogeneousAgentType = 'amp' | 'claude-code' | 'codex' | 'opencode';
+export type HeterogeneousAgentType = LocalHeterogeneousAgentType;
 
 export type HeterogeneousFinishResult = 'success' | 'error' | 'cancelled';
 
@@ -74,7 +75,7 @@ export interface HeterogeneousAgentServiceOptions {
 
 /**
  * Server-side ingest handler for heterogeneous agent CLIs (`lh hetero exec`
- * for Amp / Claude Code / Codex / OpenCode). Receives `AgentStreamEvent` batches from the
+ * for Amp / Claude Code / Codex / OpenCode / Pi / Qoder). Receives `AgentStreamEvent` batches from the
  * producer and republishes them through the existing `StreamEventManager`
  * fanout, so renderer-side gateway WS subscribers see the same wire shape
  * regardless of whether the run came from the agent gateway or a CLI process.
