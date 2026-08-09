@@ -1,4 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import type { ClientOptions } from '@anthropic-ai/sdk';
 import { ModelProvider } from 'model-bank';
 
 import {
@@ -9,6 +10,7 @@ import {
 import type { ChatStreamPayload } from '../../types';
 import { processMultiProviderModelList } from '../../utils/modelParse';
 import { sanitizeAnthropicThinkingParts } from '../../utils/sanitizeAnthropicThinkingParts';
+import { prepareKimiCodingPlanVideoInput } from './videoUpload';
 
 const DEFAULT_KIMI_CODING_BASE_URL = 'https://api.kimi.com/coding';
 
@@ -102,6 +104,7 @@ const normalizeMessagesForAnthropic = (
 
 const buildKimiCodingPlanAnthropicPayload = async (
   payload: ChatStreamPayload,
+  options: ClientOptions,
 ): Promise<Anthropic.MessageCreateParams> => {
   const requestModel = resolveKimiCodingModelId(payload.model);
   const resolvedMaxTokens = payload.max_tokens ?? KIMI_MODEL_MAX_OUTPUT[requestModel] ?? 8192;
@@ -110,11 +113,12 @@ const buildKimiCodingPlanAnthropicPayload = async (
   const isK3 = isKimiK3Model(requestModel);
   const isNativeThinking = isKimiNativeThinkingModel(requestModel);
   const isThinkingEnabled = isNativeThinking || (isK25 && payload.thinking?.type !== 'disabled');
+  const messages = await prepareKimiCodingPlanVideoInput(payload.messages, options);
 
   const basePayload = await buildDefaultAnthropicPayload({
     ...payload,
     max_tokens: resolvedMaxTokens,
-    messages: normalizeMessagesForAnthropic(payload.messages, isThinkingEnabled),
+    messages: normalizeMessagesForAnthropic(messages, isThinkingEnabled),
     model: requestModel,
   });
 
