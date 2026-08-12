@@ -380,7 +380,9 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
     });
 
     const dispatchParams = mockDispatchAgentRun.mock.calls[0][0];
-    expect(dispatchParams).toEqual(expect.objectContaining({ deviceId: 'device-1' }));
+    expect(dispatchParams).toEqual(
+      expect.objectContaining({ assistantMessageId: 'msg-1', deviceId: 'device-1' }),
+    );
     expect(dispatchParams.args).toEqual(['--model', 'opus', '--effort', 'high']);
   });
 
@@ -745,7 +747,7 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
     it('keeps the conversation workspace separate from a personal platform device scope', async () => {
       heteroAgentConfig.agencyConfig = {
         executionTarget: 'local',
-        heterogeneousProvider: { type: 'openclaw' },
+        heterogeneousProvider: { platformAgentId: 'researcher', type: 'openclaw' },
       } as any;
       (heteroAgentConfig as any).userId = userId;
       (heteroAgentConfig as any).visibility = 'public';
@@ -774,6 +776,7 @@ describe('AiAgentService.execAgent - hetero early-exit file attachments', () => 
       expect(JSON.parse(toolCall.arguments)).toEqual(
         expect.objectContaining({
           agentType: 'openclaw',
+          platformAgentId: 'researcher',
           workspaceId: 'workspace-a',
         }),
       );

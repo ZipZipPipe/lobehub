@@ -61,6 +61,9 @@ export default {
     'We explore your notes and pages to understand how you think, organize ideas, and manage projects',
   'flow.steps.connectApps.apps.twitter.description':
     'We review your posts and activity to understand your opinions, passions, and social connections',
+  'flow.steps.connectApps.autoConnectCountdown': 'Connect in {{countdown}}s',
+  'flow.steps.connectApps.connect': 'Connect',
+  'flow.steps.connectApps.connected': 'Connected',
   'flow.steps.connectApps.description': 'Add a few apps to help shape a more personal experience.',
   'flow.steps.connectApps.title': 'Begin the shape of you',
   'flow.steps.learnYourWorld.analysisFailed':
@@ -73,6 +76,8 @@ export default {
   'flow.steps.learnYourWorld.sectionHint':
     'Analyze your connected data to understand what matters to you…',
   'flow.steps.learnYourWorld.skipAhead': 'Skip ahead',
+  'flow.steps.learnYourWorld.skipNotificationHint':
+    "💡 You can skip this step for now — we'll notify you when your profile is ready.",
   'flow.steps.learnYourWorld.title': 'Learn your world',
   'flow.steps.messenger.connect': 'Connect',
   'flow.steps.messenger.connected': 'Connected',
@@ -89,6 +94,7 @@ export default {
   'flow.steps.messenger.quoteHighlight': 'wherever you already are.',
   'flow.steps.messenger.title': 'Stay connected',
   'flow.steps.profile.empty': 'Your profile is still being prepared.',
+  'flow.steps.profile.expandIdentity': 'Expand profile',
   'flow.steps.profile.identity': 'Identity',
   'flow.steps.profile.supplementModal.aboutYou': 'About you',
   'flow.steps.profile.supplementModal.description':

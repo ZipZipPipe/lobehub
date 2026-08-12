@@ -289,6 +289,22 @@ export const BuiltinToolManifestSchema = z.object({
  */
 export interface BuiltinToolResolveContext {
   /**
+   * IM platform the run originates from (bot conversations only). Lets platform-
+   * aware tools trim APIs the platform can't fulfil — e.g. the `lobe-message`
+   * tool drops `readMessages` on WeChat, which has no history-read API and would
+   * otherwise throw `PlatformUnsupportedError` after the model dutifully calls it.
+   */
+  botPlatform?: {
+    /** Platform id (e.g. `wechat`, `discord`). */
+    id: string;
+    /**
+     * `lobe-message` API names this platform does not support. Sourced from the
+     * platform definition (`PlatformDefinition.unsupportedMessageApis`) so the
+     * manifest trim stays in lock-step with the runtime that throws.
+     */
+    unsupportedMessageApis?: string[];
+  };
+  /**
    * Hide the lobe-agent multimodal-analysis fallback for this turn. Set when
    * every audio/image/video already present in the context is supported by the
    * active model natively, so the model cannot redundantly route visible media
@@ -602,6 +618,24 @@ export interface BuiltinToolContext {
    * not spawn additional sub-agents.
    */
   isSubAgent?: boolean;
+
+  /**
+   * The run executes on this machine AND its owner asked for the device sandbox
+   * (`agencyConfig.localSandbox` on a `local` target). The Local System executor
+   * forwards it to `runCommand` so the desktop confines the spawned command.
+   *
+   * Resolved by the caller that builds this context — the executor must not
+   * re-derive it, so the in-process path and the server device-proxy stay in
+   * agreement about which runs are fenced.
+   */
+  localSandbox?: boolean;
+
+  /**
+   * The fenced run may reach the package-registry allowlist
+   * (`agencyConfig.localSandboxNetwork`). Meaningless without
+   * {@link localSandbox}.
+   */
+  localSandboxNetwork?: boolean;
 
   /**
    * Tool execution context key. It is the tool message ID for locally persisted

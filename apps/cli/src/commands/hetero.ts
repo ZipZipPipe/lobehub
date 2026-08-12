@@ -139,7 +139,10 @@ const buildExtraArgs = (
             : options.type === 'pi'
               ? [...(options.model ? ['--model', options.model] : [])]
               : options.type === 'qoder'
-                ? [...(options.model ? ['--model', options.model] : [])]
+                ? [
+                    ...(options.model ? ['--model', options.model] : []),
+                    ...(options.effort ? ['--reasoning-effort', options.effort] : []),
+                  ]
                 : [];
   const extraArgs = [...(options.agentArg ?? []), ...selectorArgs];
 
@@ -598,12 +601,16 @@ const exec = async (options: ExecOptions): Promise<void> => {
     } catch (err) {
       await dumpAttempt?.close();
       const message = err instanceof Error ? err.message : String(err);
+      const errnoCode =
+        typeof err === 'object' && err && 'code' in err && typeof err.code === 'string'
+          ? err.code
+          : undefined;
       log.error('Failed to start agent:', message);
       if (serverIngester && sink) {
         try {
           await serverIngester.drain();
           await sink.finish({
-            error: buildFinishError(message, 'AgentRuntimeError'),
+            error: buildFinishError(message, 'AgentRuntimeError', errnoCode),
             result: 'error',
           });
         } catch {
@@ -776,6 +783,11 @@ const exec = async (options: ExecOptions): Promise<void> => {
       cwd: options.cwd || process.cwd(),
       env: commandEnv,
       extraArgs,
+      // Device and sandbox executions are observed through the same gateway
+      // stream as native server agents. Ask Claude Code for content-block
+      // deltas so the current conversation receives text while the process is
+      // running instead of seeing only the terminal assistant snapshot.
+      includePartialMessages: options.type === 'claude-code',
       operationId,
       prompt: resolved.prompt,
       resumeSessionId: options.resume,
@@ -808,6 +820,7 @@ const exec = async (options: ExecOptions): Promise<void> => {
         cwd: options.cwd || process.cwd(),
         env: commandEnv,
         extraArgs,
+        includePartialMessages: options.type === 'claude-code',
         operationId,
         prompt: resolved.prompt,
         uploadImage,

@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { TaskRecommendationConfigurator } from './config';
 import { TaskRecommendationService } from './service';
 
+const providerGuide = { examples: [], principles: [] };
+
 const session: OnboardingTaskRecommendationSession = {
   completedAt: '2026-07-30T00:00:00.000Z',
   createdTaskIds: {},
@@ -40,8 +42,8 @@ describe('TaskRecommendationService', () => {
       connectorData: {},
       onboarding: {},
       providers: new Map([
-        ['github', { collect: vi.fn(), id: 'github' }],
-        ['gmail', { collect: vi.fn(), id: 'gmail' }],
+        ['github', { collect: vi.fn(), guide: providerGuide, id: 'github' }],
+        ['gmail', { collect: vi.fn(), guide: providerGuide, id: 'gmail' }],
       ]),
       task: {},
       topic: {
@@ -112,6 +114,7 @@ describe('TaskRecommendationService', () => {
                 { type: 'github', url: 'https://github.com/lobehub/lobe-chat/issues/2' },
               ],
             })),
+            guide: providerGuide,
             id: 'github',
           },
         ],
@@ -158,6 +161,7 @@ describe('TaskRecommendationService', () => {
               signalCount: 1,
               sources: [{ type: 'github', url: 'https://github.com/lobehub/lobe-chat/pull/1' }],
             })),
+            guide: providerGuide,
             id: 'github',
           },
         ],
@@ -181,6 +185,115 @@ describe('TaskRecommendationService', () => {
       error: { code: 'TASK_RECOMMENDATION_GENERATION_EMPTY' },
       recommendations: [],
     });
+  });
+
+  /** @example A provider response with three grounded drafts exposes only its first two slots. */
+  it('hard-caps one provider result at two recommendations', async () => {
+    const sources = [
+      { type: 'github' as const, url: 'https://github.com/lobehub/lobe-chat/pull/1' },
+      { type: 'github' as const, url: 'https://github.com/lobehub/lobe-chat/issues/2' },
+      { type: 'github' as const, url: 'https://github.com/lobehub/lobe-chat/issues/3' },
+    ];
+    const service = new TaskRecommendationService({
+      configurator: new TaskRecommendationConfigurator(),
+      connectorData: {},
+      onboarding: {},
+      providers: new Map([
+        [
+          'github',
+          {
+            collect: vi.fn(async () => ({
+              context: JSON.stringify({ sources }),
+              diagnostics: { errors: [], evidenceCount: 3, failedCount: 0, succeededCount: 3 },
+              signalCount: 3,
+              sources,
+            })),
+            guide: providerGuide,
+            id: 'github',
+          },
+        ],
+      ]),
+      task: {},
+      topic: {},
+      userId: 'user-1',
+      writer: {
+        generate: vi.fn(async () =>
+          sources.map(({ url }, index) => ({
+            instruction: `Inspect recommendation ${index + 1}.`,
+            reason: `It has evidence ${index + 1}.`,
+            sourceUrls: [url],
+            title: `Recommendation ${index + 1}`,
+          })),
+        ),
+      },
+    } as never);
+
+    const result = await service.generateProvider('github', 2, 'en-US');
+
+    expect(result.recommendations.map(({ title }) => title)).toEqual([
+      'Recommendation 1',
+      'Recommendation 2',
+    ]);
+  });
+
+  /** @example A provider freshness gate can narrow its budget and add trusted prompt policy. */
+  it('applies provider-owned generation policy before invoking the writer', async () => {
+    const source = { type: 'notion' as const, url: 'https://www.notion.so/old-page' };
+    const generate = vi.fn(async () => [
+      {
+        instruction: 'Return a private Notion access and freshness checklist.',
+        reason: 'The visible workspace evidence is old.',
+        sourceUrls: [source.url],
+        title: 'Review Notion workspace coverage',
+      },
+      {
+        instruction: 'Execute an old implementation plan.',
+        reason: 'An old page contains a TODO.',
+        sourceUrls: [source.url],
+        title: 'Implement the old plan',
+      },
+    ]);
+    const service = new TaskRecommendationService({
+      configurator: new TaskRecommendationConfigurator(),
+      connectorData: {},
+      onboarding: {},
+      providers: new Map([
+        [
+          'notion',
+          {
+            collect: vi.fn(async () => ({
+              context: '{"provider":"notion"}',
+              diagnostics: { errors: [], evidenceCount: 1, failedCount: 0, succeededCount: 1 },
+              promptPrinciples: ['Prioritize a Notion coverage and freshness review.'],
+              recommendationLimit: 1,
+              signalCount: 1,
+              sources: [source],
+            })),
+            guide: providerGuide,
+            id: 'notion',
+          },
+        ],
+      ]),
+      task: {},
+      topic: {},
+      userId: 'user-1',
+      writer: { generate },
+    } as never);
+
+    const result = await service.generateProvider('notion', 2, 'en-US');
+
+    expect(generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guide: {
+          examples: [],
+          principles: ['Prioritize a Notion coverage and freshness review.'],
+        },
+        limit: 1,
+      }),
+    );
+    expect(result.recommendations.map(({ title }) => title)).toEqual([
+      'Review Notion workspace coverage',
+    ]);
   });
 
   /** @example Repeating the same create request reuses the persisted task mapping. */
