@@ -216,11 +216,10 @@ export class MessagesEngine {
           : undefined;
     const isTodoEnabled = effectiveTodos !== undefined;
 
-    // System date is redundant when web-browsing or memory tools are enabled,
-    // as they already include current date in their system prompts
+    // Memory renders its date placeholder per request. Web browsing no longer
+    // owns a date because a module-level value became stale in long-lived servers.
     const toolIds = toolsConfig?.tools || [];
-    const hasDateAwareTools =
-      toolIds.includes('lobe-web-browsing') || toolIds.includes('lobe-user-memory');
+    const hasDateAwareTools = toolIds.includes('lobe-user-memory');
     const isSystemDateEnabled = enableSystemDate !== false && !hasDateAwareTools;
     const currentUserMessage = [...messages]
       .reverse()

@@ -31,6 +31,7 @@ describe('SearchService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(toolsEnv).SEARCH_PROVIDERS = '';
     mockSearchImpl = createMockSearchImpl();
     vi.mocked(createSearchServiceImpl).mockReturnValue(mockSearchImpl as any);
     searchService = new SearchService();
@@ -399,7 +400,7 @@ describe('SearchService', () => {
       expect(mockImpl1.query).toHaveBeenCalledTimes(1);
       // Second provider returned results on first call
       expect(mockImpl2.query).toHaveBeenCalledTimes(1);
-      expect(result).toBe(successResponse);
+      expect(result).toEqual(successResponse);
     });
 
     it('should try all providers in order and return empty when none find results', async () => {
@@ -420,12 +421,24 @@ describe('SearchService', () => {
       expect(mockImpl1.query).toHaveBeenCalled();
       expect(mockImpl2.query).toHaveBeenCalled();
       expect(mockImpl3.query).toHaveBeenCalled();
-      expect(result).toBe(emptyResponse);
+      expect(result).toEqual(emptyResponse);
     });
 
-    it('should not call later providers if first provider succeeds', async () => {
+    it('should query and merge all configured providers when both return results', async () => {
       const mockImpl1 = { query: vi.fn().mockResolvedValue(successResponse) };
-      const mockImpl2 = { query: vi.fn() };
+      const secondResponse = {
+        ...successResponse,
+        results: [
+          {
+            ...successResponse.results[0],
+            content: 'Result from another provider',
+            engines: ['brave'],
+            title: 'Another result',
+            url: 'https://another.example.com',
+          },
+        ],
+      };
+      const mockImpl2 = { query: vi.fn().mockResolvedValue(secondResponse) };
 
       vi.mocked(createSearchServiceImpl)
         .mockReturnValueOnce(mockImpl1 as any)
@@ -437,8 +450,50 @@ describe('SearchService', () => {
       const result = await searchService.webSearch({ query: 'test' });
 
       expect(mockImpl1.query).toHaveBeenCalledTimes(1);
-      expect(mockImpl2.query).not.toHaveBeenCalled();
-      expect(result).toBe(successResponse);
+      expect(mockImpl2.query).toHaveBeenCalledTimes(1);
+      expect(result.results).toHaveLength(2);
+      expect(result.results.map((item) => item.url)).toEqual([
+        'https://example.com',
+        'https://another.example.com',
+      ]);
+    });
+
+    it('should deduplicate normalized URLs and merge engine metadata', async () => {
+      const firstResponse = {
+        ...successResponse,
+        results: [
+          {
+            ...successResponse.results[0],
+            engines: ['searxng'],
+            publishedDate: '2026-08-13',
+            url: 'https://example.com/article/?utm_source=search#top',
+          },
+        ],
+      };
+      const secondResponse = {
+        ...successResponse,
+        results: [
+          {
+            ...successResponse.results[0],
+            engines: ['tavily'],
+            url: 'https://example.com/article',
+          },
+        ],
+      };
+      const mockImpl1 = { query: vi.fn().mockResolvedValue(firstResponse) };
+      const mockImpl2 = { query: vi.fn().mockResolvedValue(secondResponse) };
+
+      vi.mocked(createSearchServiceImpl)
+        .mockReturnValueOnce(mockImpl1 as any)
+        .mockReturnValueOnce(mockImpl2 as any);
+      vi.mocked(toolsEnv).SEARCH_PROVIDERS = 'searxng,tavily';
+      searchService = new SearchService();
+
+      const result = await searchService.webSearch({ query: 'test' });
+
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0].engines).toEqual(['searxng', 'tavily']);
+      expect(result.results[0].publishedDate).toBe('2026-08-13');
     });
 
     it('should exhaust all retries on first provider before falling back', async () => {
@@ -460,7 +515,7 @@ describe('SearchService', () => {
       // First provider: full params -> without engines = 2 calls
       expect(mockImpl1.query).toHaveBeenCalledTimes(2);
       expect(mockImpl2.query).toHaveBeenCalledTimes(1);
-      expect(result).toBe(successResponse);
+      expect(result).toEqual(successResponse);
     });
 
     it('should skip retries for a failed provider and return a later provider success', async () => {

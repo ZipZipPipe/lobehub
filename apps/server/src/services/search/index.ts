@@ -1,4 +1,9 @@
-import type { SearchParams, SearchQuery, UniformSearchResponse } from '@lobechat/types';
+import type {
+  SearchParams,
+  SearchQuery,
+  UniformSearchResponse,
+  UniformSearchResult,
+} from '@lobechat/types';
 import type { Crawler, CrawlImplType, CrawlUniformResult } from '@lobechat/web-crawler';
 import debug from 'debug';
 import pMap from 'p-map';
@@ -17,7 +22,10 @@ const log = debug('lobe-oom:web-browsing:search-service');
 const parseImplEnv = (envString: string = '') => {
   // Handle full-width commas and extra whitespace
   const envValue = envString.replaceAll('，', ',').trim();
-  return envValue.split(',').filter(Boolean);
+  return envValue
+    .split(',')
+    .map((impl) => impl.trim())
+    .filter(Boolean);
 };
 
 const buildSearchParams = ({
@@ -179,6 +187,106 @@ export class SearchService {
     }
   }
 
+  private async queryProvider(
+    impl: SearchServiceImpl,
+    query: string,
+    params: SearchParams,
+  ): Promise<UniformSearchResponse | undefined> {
+    let currentParams = buildSearchParams({
+      searchCategories: params.searchCategories,
+      searchEngines: impl.useAutoSearchEngineSelection ? undefined : params.searchEngines,
+      searchTimeRange: params.searchTimeRange,
+    });
+    let lastSuccessfulEmpty: UniformSearchResponse | undefined;
+
+    while (true) {
+      const data = await this.queryWithImpl(impl, query, currentParams);
+
+      if (data.errorDetail) return undefined;
+      if (data.results.length > 0) return data;
+
+      lastSuccessfulEmpty = data;
+
+      if (currentParams?.searchEngines?.length) {
+        currentParams = buildSearchParams({
+          searchCategories: params.searchCategories,
+          searchTimeRange: params.searchTimeRange,
+        });
+        continue;
+      }
+
+      if (currentParams) {
+        currentParams = undefined;
+        continue;
+      }
+
+      return lastSuccessfulEmpty;
+    }
+  }
+
+  private mergeSearchResponses(
+    query: string,
+    responses: UniformSearchResponse[],
+  ): UniformSearchResponse {
+    if (responses.length === 1) return responses[0];
+
+    const results: UniformSearchResult[] = [];
+    const resultIndexByUrl = new Map<string, number>();
+    const maxResultCount = Math.max(0, ...responses.map((response) => response.results.length));
+
+    // Interleave provider results so one noisy provider cannot crowd every
+    // other source out of the 30-item prompt limit used by the web tool.
+    for (let resultIndex = 0; resultIndex < maxResultCount; resultIndex++) {
+      for (const response of responses) {
+        const result = response.results[resultIndex];
+        if (!result) continue;
+
+        const resultKey = this.normalizeResultUrl(result.url);
+        const existingIndex = resultIndexByUrl.get(resultKey);
+
+        if (existingIndex === undefined) {
+          resultIndexByUrl.set(resultKey, results.length);
+          results.push({ ...result, engines: [...result.engines] });
+          continue;
+        }
+
+        const existing = results[existingIndex];
+        results[existingIndex] = {
+          ...existing,
+          content: existing.content || result.content,
+          engines: [...new Set([...existing.engines, ...result.engines])],
+          imgSrc: existing.imgSrc || result.imgSrc,
+          publishedDate: existing.publishedDate || result.publishedDate,
+          thumbnail: existing.thumbnail || result.thumbnail,
+        };
+      }
+    }
+
+    return {
+      costTime: Math.max(0, ...responses.map((response) => response.costTime)),
+      query,
+      resultNumbers: results.length,
+      results,
+    };
+  }
+
+  private normalizeResultUrl(url: string) {
+    try {
+      const normalized = new URL(url);
+      normalized.hash = '';
+
+      const retainedSearchParams = new URLSearchParams();
+      normalized.searchParams.forEach((value, key) => {
+        if (!key.toLowerCase().startsWith('utm_')) retainedSearchParams.append(key, value);
+      });
+      normalized.search = retainedSearchParams.toString();
+
+      return normalized.toString().replace(/\/$/, '');
+    } catch {
+      return url.trim().replace(/\/$/, '');
+    }
+  }
+
   /**
    * Query for search results (uses the first provider)
    */
@@ -200,50 +308,32 @@ export class SearchService {
       }
     } catch {}
 
-    let lastSuccessfulEmpty: UniformSearchResponse | undefined;
+    const responses = await Promise.all(
+      this.searchImpList.map((impl) => {
+        try {
+          if (log.enabled) {
+            log(
+              'webSearch:impl impl=%s mem=%s',
+              impl.constructor.name || 'UnknownSearchImpl',
+              getMemorySnapshot(),
+            );
+          }
+        } catch {}
 
-    for (const impl of this.searchImpList) {
-      try {
-        if (log.enabled) {
-          log(
-            'webSearch:impl impl=%s mem=%s',
-            impl.constructor.name || 'UnknownSearchImpl',
-            getMemorySnapshot(),
-          );
-        }
-      } catch {}
+        return this.queryProvider(impl, query, {
+          searchCategories,
+          searchEngines,
+          searchTimeRange,
+        });
+      }),
+    );
+    const successfulResponses = responses.filter(
+      (response): response is UniformSearchResponse => response !== undefined,
+    );
 
-      let currentParams = buildSearchParams({
-        searchCategories,
-        searchEngines: impl.useAutoSearchEngineSelection ? undefined : searchEngines,
-        searchTimeRange,
-      });
-      while (true) {
-        const data = await this.queryWithImpl(impl, query, currentParams);
-
-        if (data.errorDetail) break;
-        if (data.results.length > 0) return data;
-
-        lastSuccessfulEmpty = data;
-
-        if (currentParams?.searchEngines?.length) {
-          currentParams = buildSearchParams({
-            searchCategories,
-            searchTimeRange,
-          });
-          continue;
-        }
-
-        if (currentParams) {
-          currentParams = undefined;
-          continue;
-        }
-
-        break;
-      }
+    if (successfulResponses.length > 0) {
+      return this.mergeSearchResponses(query, successfulResponses);
     }
-
-    if (lastSuccessfulEmpty) return lastSuccessfulEmpty;
 
     return {
       costTime: 0,

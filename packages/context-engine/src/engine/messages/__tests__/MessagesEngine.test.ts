@@ -72,6 +72,20 @@ describe('MessagesEngine', () => {
   });
 
   describe('process', () => {
+    it('should inject a request-time system date when web browsing is enabled', async () => {
+      const result = await new MessagesEngine(
+        createBasicParams({
+          enableSystemDate: true,
+          timezone: 'Asia/Shanghai',
+          toolsConfig: { manifests: [], tools: ['lobe-web-browsing'] },
+        }),
+      ).process();
+
+      expect(result.messages[0].content).toMatch(
+        /^Current date: \d{4}-\d{2}-\d{2} \(Asia\/Shanghai\)$/,
+      );
+    });
+
     describe('TODO context priority', () => {
       const messageTodos = {
         items: [{ status: 'processing' as const, text: 'Message task' }],
