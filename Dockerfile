@@ -79,10 +79,11 @@ RUN set -e && \
     corepack enable && \
     corepack use $(sed -n 's/.*"packageManager": "\(.*\)".*/\1/p' package.json) && \
     pnpm i && \
+    SWC_HELPERS_VERSION="$(node -p 'require(require.resolve("@swc/helpers/package.json",{paths:[require.resolve("next/package.json")]})).version')" && \
     mkdir -p /deps && \
     cd /deps && \
     echo '{"name":"deps","private":true}' > package.json && \
-    pnpm add pg drizzle-orm
+    pnpm add pg drizzle-orm "@swc/helpers@${SWC_HELPERS_VERSION}"
 
 COPY . .
 
@@ -114,6 +115,14 @@ COPY --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js
 COPY --from=builder /deps/node_modules/.pnpm /app/node_modules/.pnpm
 COPY --from=builder /deps/node_modules/pg /app/node_modules/pg
 COPY --from=builder /deps/node_modules/drizzle-orm /app/node_modules/drizzle-orm
+
+# Next patch releases can add runtime SWC helper imports that output tracing
+# does not copy completely. Fail the image build instead of publishing an image
+# that only discovers the missing ESM helper after production startup.
+RUN set -e && \
+    NEXT_DIR="$(find /app/node_modules/.pnpm -maxdepth 1 -type d -name 'next@*' -print -quit)" && \
+    SWC_HELPERS_DIR="$(readlink -f "${NEXT_DIR}/node_modules/@swc/helpers")" && \
+    test -f "${SWC_HELPERS_DIR}/esm/_interop_require_default.js"
 
 # Copy server launcher and shared scripts
 COPY --from=builder /app/scripts/serverLauncher/startServer.js /app/startServer.js
