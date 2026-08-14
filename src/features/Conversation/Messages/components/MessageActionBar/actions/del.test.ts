@@ -10,10 +10,18 @@ import { delAction } from './del';
 
 const deleteMessage = vi.fn();
 const deleteAssistantMessage = vi.fn();
+const generationState = vi.hoisted(() => ({ isGenerating: false }));
 
 vi.mock('../../../../store', () => ({
+  messageStateSelectors: {
+    isAIGenerating: (s: any) => s.isGenerating,
+  },
   useConversationStore: (selector: (s: any) => any) =>
-    selector({ deleteAssistantMessage, deleteMessage }),
+    selector({
+      deleteAssistantMessage,
+      deleteMessage,
+      isGenerating: generationState.isGenerating,
+    }),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -34,6 +42,15 @@ const heteroError = { body: { agentType: 'claude-code', code: 'overloaded' } };
 describe('delAction', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    generationState.isGenerating = false;
+  });
+
+  it('disables delete while the current conversation is still generating', () => {
+    generationState.isGenerating = true;
+
+    expect(build({ id: 'msg-1', role: 'assistant' } as any, 'assistant', 'msg-1').disabled).toBe(
+      true,
+    );
   });
 
   it('deletes only the errored tail step of a heterogeneous (CC/Codex) run', () => {

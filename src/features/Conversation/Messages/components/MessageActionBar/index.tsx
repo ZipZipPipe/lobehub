@@ -140,6 +140,7 @@ export const MessageActionBar = memo<MessageActionBarProps>(({ ctx, bar, leading
         }
       }
       const action = allActions.get(event.key);
+      if (action?.disabled) return;
       action?.handleClick?.();
     },
     [allActions],

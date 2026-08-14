@@ -12,17 +12,18 @@ export const delAndRegenerateAction = defineAction({
     const isRegenerating = useConversationStore(
       messageStateSelectors.isMessageRegenerating(ctx.id),
     );
+    const isGenerating = useConversationStore(messageStateSelectors.isAIGenerating);
     const delAndRegenerateMessage = useConversationStore((s) => s.delAndRegenerateMessage);
 
     return useMemo(
       () => ({
-        disabled: isRegenerating,
+        disabled: isGenerating || isRegenerating,
         handleClick: () => delAndRegenerateMessage(ctx.id),
         icon: ListRestart,
         key: 'delAndRegenerate',
         label: t('messageAction.delAndRegenerate'),
       }),
-      [t, ctx.id, isRegenerating, delAndRegenerateMessage],
+      [t, ctx.id, isGenerating, isRegenerating, delAndRegenerateMessage],
     );
   },
 });

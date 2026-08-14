@@ -12,15 +12,19 @@ const regenerateUserMessage = vi.fn();
 const regenerateAssistantMessage = vi.fn();
 const delAndRegenerateMessage = vi.fn();
 const deleteMessage = vi.fn();
+const generationState = vi.hoisted(() => ({ isGenerating: false, isRegenerating: false }));
 
 vi.mock('../../../../store', () => ({
   messageStateSelectors: {
-    isMessageRegenerating: () => () => false,
+    isAIGenerating: (s: any) => s.isGenerating,
+    isMessageRegenerating: () => (s: any) => s.isRegenerating,
   },
   useConversationStore: (selector: (s: any) => any) =>
     selector({
       delAndRegenerateMessage,
       deleteMessage,
+      isGenerating: generationState.isGenerating,
+      isRegenerating: generationState.isRegenerating,
       regenerateAssistantMessage,
       regenerateUserMessage,
     }),
@@ -41,6 +45,14 @@ const build = (
 describe('regenerateAction', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    generationState.isGenerating = false;
+    generationState.isRegenerating = false;
+  });
+
+  it('disables retry while the current conversation is still generating', () => {
+    generationState.isGenerating = true;
+
+    expect(build({} as any).disabled).toBe(true);
   });
 
   // Regression: this used to fire `regenerateAssistantMessage` WITHOUT awaiting

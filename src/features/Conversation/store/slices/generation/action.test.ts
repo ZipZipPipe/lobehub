@@ -671,6 +671,38 @@ describe('Generation Actions', () => {
   });
 
   describe('delAndRegenerateMessage', () => {
+    it('does not delete the response while its agent operation is still running', async () => {
+      const { useChatStore } = await import('@/store/chat');
+      const runningOperation = {
+        context: { agentId: 'session-1', messageId: 'msg-2', topicId: 'topic-1' },
+        id: 'active-run',
+        metadata: { startTime: Date.now() },
+        status: 'running',
+        type: 'execServerAgentRuntime',
+      };
+      vi.mocked(useChatStore.getState).mockReturnValue({
+        operations: { 'active-run': runningOperation },
+        operationsByMessage: { 'msg-2': ['active-run'] },
+        deleteMessage: mockDeleteMessage,
+        startOperation: mockStartOperation,
+      } as any);
+
+      const store = createStore({
+        context: { agentId: 'session-1', threadId: null, topicId: 'topic-1' },
+      });
+      store.setState({
+        displayMessages: [
+          { content: 'prompt', id: 'msg-1', role: 'user' },
+          { content: 'answer', id: 'msg-2', parentId: 'msg-1', role: 'assistant' },
+        ],
+      } as any);
+
+      await store.getState().delAndRegenerateMessage('msg-2');
+
+      expect(mockStartOperation).not.toHaveBeenCalled();
+      expect(mockDeleteMessage).not.toHaveBeenCalled();
+    });
+
     it('should create operation with context and pass operationId to deleteMessage', async () => {
       // Re-setup mock to ensure all required functions are available
       const { useChatStore } = await import('@/store/chat');

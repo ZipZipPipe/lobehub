@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import type { UIChatMessage } from '@lobechat/types';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MessageActionBar } from './index';
@@ -12,17 +12,21 @@ const permissionMock = vi.hoisted(() => ({
 }));
 const actionMocks = vi.hoisted(() => ({
   commentsAvailable: true,
+  deleteDisabled: false,
+  handleDelete: vi.fn(),
 }));
 
 vi.mock('@lobehub/ui', () => ({
   ActionIconGroup: ({
     items,
     menu,
+    onActionClick,
     style,
     variant,
   }: {
     items: { key?: string }[];
     menu?: { key?: string; type?: string }[];
+    onActionClick?: (event: { key: string }) => void;
     style?: React.CSSProperties;
     variant?: string;
   }) => (
@@ -33,7 +37,9 @@ vi.mock('@lobehub/ui', () => ({
       data-testid="action-group"
       data-variant={variant}
       style={style}
-    />
+    >
+      <button onClick={() => onActionClick?.({ key: 'del' })}>Trigger delete</button>
+    </div>
   ),
   Block: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="action-container">{children}</div>
@@ -53,13 +59,40 @@ vi.mock('./useBuildActions', () => ({
         }
       : null,
     copy: { key: 'copy', label: 'Copy' },
-    del: { key: 'del', label: 'Delete' },
+    del: {
+      disabled: actionMocks.deleteDisabled,
+      handleClick: actionMocks.handleDelete,
+      key: 'del',
+      label: 'Delete',
+    },
     edit: { key: 'edit', label: 'Edit' },
     regenerate: { key: 'regenerate', label: 'Regenerate' },
   }),
 }));
 
 describe('MessageActionBar', () => {
+  it('does not dispatch a disabled action from a stale action event', () => {
+    permissionMock.canEdit = true;
+    actionMocks.deleteDisabled = true;
+    actionMocks.handleDelete.mockClear();
+
+    render(
+      <MessageActionBar
+        bar={['del']}
+        ctx={{
+          data: { content: 'hello', role: 'assistant' } as UIChatMessage,
+          id: 'message-1',
+          role: 'assistant',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Trigger delete' }));
+
+    expect(actionMocks.handleDelete).not.toHaveBeenCalled();
+    actionMocks.deleteDisabled = false;
+  });
+
   it('renders a leading control inside the shared action container', () => {
     permissionMock.canEdit = true;
 

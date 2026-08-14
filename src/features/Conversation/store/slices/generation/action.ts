@@ -966,6 +966,24 @@ export const generationSlice: StateCreator<
     const userId = currentMessage.parentId;
     if (!userId) return;
 
+    // The producer may have emitted its last visible token while the Gateway
+    // operation is still finalizing and persisting the message. Deleting the
+    // placeholder in that window makes the finishing stream update target a
+    // row that no longer exists, so the completed answer disappears. Keep this
+    // guard next to the destructive action as a race-safe fallback for stale
+    // menus/keyboard events in addition to the disabled UI controls.
+    const targetMessageIds = [
+      currentMessage.id,
+      ...(currentMessage.children?.map((child) => child.id) ?? []),
+    ];
+    if (
+      targetMessageIds.some((id) =>
+        operationSelectors.isMessageGenerating(id)(useChatStore.getState()),
+      )
+    ) {
+      return;
+    }
+
     // Create operation to track context (use 'regenerate' type since this is a regenerate action)
     const { operationId } = chatStore.startOperation({
       context: { ...context, messageId },

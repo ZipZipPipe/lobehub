@@ -75,6 +75,7 @@ import {
   messageTranslates,
   messageTTS,
   threads,
+  topics,
   users,
 } from '../schemas';
 import type { LobeChatDatabase, Transaction } from '../type';
@@ -413,6 +414,43 @@ export class MessageModel {
 
   private agentsToSessionsOwnership = () =>
     buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, agentsToSessions);
+
+  /**
+   * Lock the affected topic rows and reject deletion of the assistant message
+   * currently owned by a running Gateway operation. This is the server-side
+   * fallback for stale tabs and clients that do not yet disable destructive
+   * message actions while generation is finishing.
+   */
+  private assertNoRunningMessageDeletion = async (
+    tx: Transaction,
+    rows: { id: string; topicId: string | null }[],
+  ) => {
+    const topicIds = [
+      ...new Set(rows.map((row) => row.topicId).filter((id): id is string => Boolean(id))),
+    ].sort();
+    if (topicIds.length === 0) return;
+
+    const topicRows = await tx
+      .select({ metadata: topics.metadata })
+      .from(topics)
+      .where(
+        and(
+          buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, topics),
+          inArray(topics.id, topicIds),
+        ),
+      )
+      .orderBy(asc(topics.id))
+      .for('update');
+
+    const deletingIds = new Set(rows.map((row) => row.id));
+    const runningMessageId = topicRows
+      .map((row) => row.metadata?.runningOperation?.assistantMessageId)
+      .find((id): id is string => Boolean(id && deletingIds.has(id)));
+
+    if (runningMessageId) {
+      throw new Error(`Cannot delete message ${runningMessageId} while its agent run is active`);
+    }
+  };
 
   // **************** Query *************** //
 
@@ -3426,6 +3464,8 @@ export class MessageModel {
       // If the message to be deleted is not found, return directly
       if (message.length === 0) return;
 
+      await this.assertNoRunningMessageDeletion(tx, [message[0]]);
+
       const activeBranchSnapshots = await this.captureActiveBranchSnapshots(
         tx,
         message[0].parentId ? [message[0].parentId] : [],
@@ -3484,6 +3524,8 @@ export class MessageModel {
         .where(and(this.ownership(), inArray(messages.id, ids)));
 
       if (toDelete.length === 0) return;
+
+      await this.assertNoRunningMessageDeletion(tx, toDelete);
 
       // 2. Build id -> parentId map and deleteSet
       const parentMap = new Map<string, string | null>();

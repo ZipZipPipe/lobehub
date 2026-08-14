@@ -4,13 +4,14 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveHeteroErroredStepId } from '@/features/Conversation/Error/heterogeneous';
 
-import { useConversationStore } from '../../../../store';
+import { messageStateSelectors, useConversationStore } from '../../../../store';
 import { defineAction } from '../defineAction';
 
 export const delAction = defineAction({
   key: 'del',
   useBuild: (ctx) => {
     const { t } = useTranslation('common');
+    const isGenerating = useConversationStore(messageStateSelectors.isAIGenerating);
     const deleteMessage = useConversationStore((s) => s.deleteMessage);
     const deleteAssistantMessage = useConversationStore((s) => s.deleteAssistantMessage);
 
@@ -27,6 +28,7 @@ export const delAction = defineAction({
     return useMemo(
       () => ({
         danger: true,
+        disabled: isGenerating,
         handleClick: () => {
           if (erroredBlockId) {
             void deleteAssistantMessage(erroredBlockId);
@@ -38,7 +40,7 @@ export const delAction = defineAction({
         key: 'del',
         label: t('delete'),
       }),
-      [t, ctx.id, deleteMessage, deleteAssistantMessage, erroredBlockId],
+      [t, ctx.id, isGenerating, deleteMessage, deleteAssistantMessage, erroredBlockId],
     );
   },
 });

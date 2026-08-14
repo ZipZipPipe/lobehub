@@ -59,6 +59,42 @@ describe('MessageModel Delete Tests', () => {
       expect(result).toHaveLength(0);
     });
 
+    it('should preserve the assistant message owned by a running topic operation', async () => {
+      await serverDB.insert(topics).values({
+        id: 'active-single-topic',
+        metadata: {
+          runningOperation: { assistantMessageId: 'active-assistant', operationId: 'op-active' },
+        },
+        sessionId: '1',
+        userId,
+      });
+      await serverDB.insert(messages).values({
+        content: 'completed visible output',
+        id: 'active-assistant',
+        role: 'assistant',
+        sessionId: '1',
+        topicId: 'active-single-topic',
+        userId,
+      });
+
+      await expect(messageModel.deleteMessage('active-assistant')).rejects.toThrow(
+        'Cannot delete message active-assistant while its agent run is active',
+      );
+      expect(
+        await serverDB.select().from(messages).where(eq(messages.id, 'active-assistant')),
+      ).toHaveLength(1);
+
+      await serverDB
+        .update(topics)
+        .set({ metadata: { runningOperation: null } })
+        .where(eq(topics.id, 'active-single-topic'));
+      await messageModel.deleteMessage('active-assistant');
+
+      expect(
+        await serverDB.select().from(messages).where(eq(messages.id, 'active-assistant')),
+      ).toHaveLength(0);
+    });
+
     it('should delete a message with tool calls', async () => {
       // Create test data
       await serverDB.transaction(async (trx) => {
@@ -273,6 +309,51 @@ describe('MessageModel Delete Tests', () => {
       expect(result).toHaveLength(0);
       const result2 = await serverDB.select().from(messages).where(eq(messages.id, '2'));
       expect(result2).toHaveLength(0);
+    });
+
+    it('should reject an entire batch when it contains an actively generated message', async () => {
+      await serverDB.insert(topics).values({
+        id: 'active-batch-topic',
+        metadata: {
+          runningOperation: {
+            assistantMessageId: 'active-batch-assistant',
+            operationId: 'op-active-batch',
+          },
+        },
+        sessionId: '1',
+        userId,
+      });
+      await serverDB.insert(messages).values([
+        {
+          content: 'active answer',
+          id: 'active-batch-assistant',
+          role: 'assistant',
+          sessionId: '1',
+          topicId: 'active-batch-topic',
+          userId,
+        },
+        {
+          content: 'related tool output',
+          id: 'active-batch-tool',
+          parentId: 'active-batch-assistant',
+          role: 'tool',
+          sessionId: '1',
+          topicId: 'active-batch-topic',
+          userId,
+        },
+      ]);
+
+      await expect(
+        messageModel.deleteMessages(['active-batch-assistant', 'active-batch-tool']),
+      ).rejects.toThrow(
+        'Cannot delete message active-batch-assistant while its agent run is active',
+      );
+
+      const remaining = await serverDB
+        .select()
+        .from(messages)
+        .where(eq(messages.topicId, 'active-batch-topic'));
+      expect(remaining).toHaveLength(2);
     });
 
     it('should only delete messages belonging to the user', async () => {

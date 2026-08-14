@@ -12,6 +12,7 @@ export const regenerateAction = defineAction({
     const isRegenerating = useConversationStore(
       messageStateSelectors.isMessageRegenerating(ctx.id),
     );
+    const isGenerating = useConversationStore(messageStateSelectors.isAIGenerating);
     const [
       regenerateUserMessage,
       regenerateAssistantMessage,
@@ -26,7 +27,7 @@ export const regenerateAction = defineAction({
 
     return useMemo(
       () => ({
-        disabled: isRegenerating,
+        disabled: isGenerating || isRegenerating,
         handleClick: () => {
           if (ctx.role === 'user') {
             void regenerateUserMessage(ctx.id);
@@ -57,6 +58,7 @@ export const regenerateAction = defineAction({
         ctx.id,
         ctx.role,
         ctx.data.error,
+        isGenerating,
         isRegenerating,
         regenerateUserMessage,
         regenerateAssistantMessage,
