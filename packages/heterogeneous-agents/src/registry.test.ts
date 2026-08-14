@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   AmpAdapter,
   ClaudeCodeAdapter,
+  CodeBuddyAdapter,
   CodexAdapter,
+  CursorAdapter,
+  GrokBuildAdapter,
+  KimiCodeAdapter,
   OpenCodeAdapter,
   PiAdapter,
   QoderAdapter,
@@ -23,9 +27,25 @@ describe('registry', () => {
       expect(adapter).toBeInstanceOf(ClaudeCodeAdapter);
     });
 
+    it('creates a CodeBuddyAdapter for "codebuddy"', () => {
+      expect(createAdapter('codebuddy')).toBeInstanceOf(CodeBuddyAdapter);
+    });
+
     it('creates a CodexAdapter for "codex"', () => {
       const adapter = createAdapter('codex');
       expect(adapter).toBeInstanceOf(CodexAdapter);
+    });
+
+    it('creates a KimiCodeAdapter for "kimi-code"', () => {
+      expect(createAdapter('kimi-code')).toBeInstanceOf(KimiCodeAdapter);
+    });
+
+    it('creates a CursorAdapter for "cursor"', () => {
+      expect(createAdapter('cursor')).toBeInstanceOf(CursorAdapter);
+    });
+
+    it('creates a GrokBuildAdapter for "grok-build"', () => {
+      expect(createAdapter('grok-build')).toBeInstanceOf(GrokBuildAdapter);
     });
 
     it('creates an OpenCodeAdapter for "opencode"', () => {

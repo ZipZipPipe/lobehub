@@ -1,5 +1,16 @@
 import type { HeterogeneousAgentClientConfig } from '@lobechat/heterogeneous-agents/client';
-import { Amp, ClaudeCode, Codex, OpenCode, Pi, Qoder } from '@lobehub/icons';
+import {
+  Amp,
+  ClaudeCode,
+  CodeBuddy,
+  Codex,
+  Cursor,
+  Grok,
+  Kimi,
+  OpenCode,
+  Pi,
+  Qoder,
+} from '@lobehub/icons';
 import { createElement } from 'react';
 
 import type { RecommendedAction } from './types';
@@ -7,7 +18,11 @@ import type { RecommendedAction } from './types';
 const avatarIcons = {
   'amp': Amp.Avatar,
   'claude-code': ClaudeCode.Avatar,
+  'codebuddy': CodeBuddy.Avatar,
   'codex': Codex.Avatar,
+  'cursor': Cursor.Avatar,
+  'grok-build': Grok.Avatar,
+  'kimi-code': Kimi.Avatar,
   'opencode': OpenCode.Avatar,
   'pi': Pi.Avatar,
   'qoder': Qoder.Avatar,

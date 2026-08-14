@@ -8,7 +8,20 @@ import {
   REMOTE_HETEROGENEOUS_AGENT_CONFIGS,
 } from '@lobechat/heterogeneous-agents';
 import { HETEROGENEOUS_AGENT_CLIENT_CONFIGS } from '@lobechat/heterogeneous-agents/client';
-import { Amp, ClaudeCode, Codex, HermesAgent, OpenClaw, OpenCode, Pi, Qoder } from '@lobehub/icons';
+import {
+  Amp,
+  ClaudeCode,
+  CodeBuddy,
+  Codex,
+  Cursor,
+  Grok,
+  HermesAgent,
+  Kimi,
+  OpenClaw,
+  OpenCode,
+  Pi,
+  Qoder,
+} from '@lobehub/icons';
 
 /**
  * One row in the connect wizard's agent inventory. `kind` mirrors the domain
@@ -22,8 +35,12 @@ export interface ConnectableProvider {
   brand:
     | typeof Amp
     | typeof ClaudeCode
+    | typeof CodeBuddy
     | typeof Codex
+    | typeof Cursor
+    | typeof Grok
     | typeof HermesAgent
+    | typeof Kimi
     | typeof OpenClaw
     | typeof OpenCode
     | typeof Pi
@@ -51,7 +68,11 @@ interface BuildConnectAgentConfigOptions {
 const CLI_BRANDS: Record<LocalHeterogeneousAgentType, ConnectableProvider['brand']> = {
   'amp': Amp,
   'claude-code': ClaudeCode,
+  'codebuddy': CodeBuddy,
   'codex': Codex,
+  'cursor': Cursor,
+  'grok-build': Grok,
+  'kimi-code': Kimi,
   'opencode': OpenCode,
   'pi': Pi,
   'qoder': Qoder,

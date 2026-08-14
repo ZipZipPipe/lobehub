@@ -6,7 +6,7 @@ import { resolveChiefAgentArtwork } from '@/features/ChiefAgent/artwork';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors, builtinAgentSelectors } from '@/store/agent/selectors';
 
-const DEEPSEEK_CHIEF_AGENT_HERO = '/images/deepseek-chief-agent.webp';
+const DEEPSEEK_CHIEF_AGENT_HERO = '/app-images/deepseek-chief-agent.webp';
 
 const styles = createStaticStyles(({ css }) => ({
   // Anchored below the greeting row rather than above the rail, so the agent

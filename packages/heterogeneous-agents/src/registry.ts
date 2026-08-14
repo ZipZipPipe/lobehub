@@ -9,7 +9,11 @@ import {
   AmpAdapter,
   ClaudeCodeAdapter,
   ClaudeCodeSdkAdapter,
+  CodeBuddyAdapter,
   CodexAdapter,
+  CursorAdapter,
+  GrokBuildAdapter,
+  KimiCodeAdapter,
   OpenCodeAdapter,
   PiAdapter,
   QoderAdapter,
@@ -28,8 +32,20 @@ const localAgentRegistry = {
   'claude-code': {
     createAdapter: () => new ClaudeCodeAdapter(),
   },
+  'codebuddy': {
+    createAdapter: () => new CodeBuddyAdapter(),
+  },
   'codex': {
     createAdapter: () => new CodexAdapter(),
+  },
+  'cursor': {
+    createAdapter: () => new CursorAdapter(),
+  },
+  'grok-build': {
+    createAdapter: () => new GrokBuildAdapter(),
+  },
+  'kimi-code': {
+    createAdapter: () => new KimiCodeAdapter(),
   },
   'opencode': {
     createAdapter: () => new OpenCodeAdapter(),
