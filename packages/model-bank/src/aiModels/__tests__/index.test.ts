@@ -124,6 +124,25 @@ describe('Kimi Code models', () => {
   });
 });
 
+describe('GLM Coding Plan models', () => {
+  it('includes GLM-5.3 with its official context, output, and effort capabilities', () => {
+    const model = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.providerId === ModelProvider.GLMCodingPlan && m.id === 'glm-5.3',
+    );
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        contextWindowTokens: 1_000_000,
+        enabled: true,
+        maxOutput: 131_072,
+        providerId: ModelProvider.GLMCodingPlan,
+        settings: expect.objectContaining({ extendParams: ['glm5_3ReasoningEffort'] }),
+        type: 'chat',
+      }),
+    );
+  });
+});
+
 describe('knowledgeCutoff backfill', () => {
   it('fills knowledgeCutoff from the canonical map for builtin models', () => {
     const fable = LOBE_DEFAULT_MODEL_LIST.find(

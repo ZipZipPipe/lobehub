@@ -188,6 +188,16 @@ describe('applyModelExtendParams', () => {
     expect(result.reasoning_effort).toBe('max');
   });
 
+  it('resolves GLM-5.3 reasoning effort', () => {
+    const result = applyModelExtendParams({
+      chatConfig: chatConfig({ glm5_3ReasoningEffort: 'low' }),
+      extendParams: ['glm5_3ReasoningEffort'],
+      model: 'glm-5.3',
+    });
+
+    expect(result.reasoning_effort).toBe('low');
+  });
+
   it('preserves thinking budget when deepseekV4ReasoningEffort is set', () => {
     const result = applyModelExtendParams({
       chatConfig: chatConfig({

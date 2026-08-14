@@ -1,8 +1,30 @@
 import { type AIChatModelCard } from '../types/aiModel';
 
-// ref: https://docs.z.ai/devpack/overview
+// ref: https://docs.bigmodel.cn/cn/coding-plan/latest-model
+// ref: https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3
 
 const glmCodingPlanChatModels: AIChatModelCard[] = [
+  {
+    abilities: {
+      functionCall: true,
+      reasoning: true,
+    },
+    contextWindowTokens: 1_000_000,
+    description:
+      "GLM-5.3 is Zhipu's latest flagship model, built on the same foundation as GLM-5.2 with substantially scaled long-horizon post-training. It delivers stronger coding, agentic engineering, and cybersecurity capabilities for complex, long-running tasks.",
+    displayName: 'GLM-5.3',
+    enabled: true,
+    family: 'glm',
+    generation: 'glm-5.3',
+    id: 'glm-5.3',
+    maxOutput: 131_072,
+    organization: 'Zhipu',
+    releasedAt: '2026-08-14',
+    settings: {
+      extendParams: ['glm5_3ReasoningEffort'],
+    },
+    type: 'chat',
+  },
   {
     abilities: {
       functionCall: true,
