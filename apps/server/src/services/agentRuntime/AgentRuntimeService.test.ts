@@ -16,6 +16,8 @@ import {
   type StartExecutionParams,
 } from './types';
 
+const findAiModelByIdAndProvider = vi.hoisted(() => vi.fn());
+
 vi.mock('@lobechat/model-runtime', () => ({
   // RuntimeExecutors (loaded transitively) resolves extend params via this
   // helper; an empty result keeps the runtime payload unchanged.
@@ -41,6 +43,12 @@ vi.mock('@/database/models/message', () => ({
   MessageModel: vi.fn().mockImplementation(() => ({
     query: vi.fn().mockResolvedValue([]),
   })),
+}));
+
+vi.mock('@/database/models/aiModel', () => ({
+  AiModelModel: class {
+    findByIdAndProvider = findAiModelByIdAndProvider;
+  },
 }));
 
 vi.mock('@/database/models/agent', () => ({
@@ -210,6 +218,7 @@ describe('AgentRuntimeService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    findAiModelByIdAndProvider.mockResolvedValue(undefined);
     process.env.AGENT_RUNTIME_BASE_URL = 'http://localhost:3010';
 
     // Mock database
@@ -565,6 +574,67 @@ describe('AgentRuntimeService', () => {
           }),
         }),
       );
+    });
+
+    it('should prefer the user model context window for compression', async () => {
+      findAiModelByIdAndProvider.mockResolvedValueOnce({ contextWindowTokens: 272_000 });
+
+      let capturedConfig: any;
+      const serviceWithFactory = new AgentRuntimeService(mockDb, mockUserId, {
+        agentFactory: (config) => {
+          capturedConfig = config;
+          return { runner: vi.fn() } as any;
+        },
+      });
+
+      await (serviceWithFactory as any).createAgentRuntime({
+        metadata: {
+          agentConfig: { chatConfig: { enableContextCompression: true } },
+          modelRuntimeConfig: { model: 'gpt-5.6-sol', provider: 'openai' },
+        },
+        operationId: 'test-operation-1',
+        stepIndex: 1,
+      });
+
+      expect(findAiModelByIdAndProvider).toHaveBeenCalledWith('gpt-5.6-sol', 'openai');
+      expect(getModelPropertyWithFallback).not.toHaveBeenCalled();
+      expect(capturedConfig).toEqual(
+        expect.objectContaining({
+          compressionConfig: expect.objectContaining({
+            enabled: true,
+            maxWindowToken: 272_000,
+          }),
+        }),
+      );
+    });
+
+    it('should fall back to the model bank when the user model context window is invalid', async () => {
+      findAiModelByIdAndProvider.mockResolvedValueOnce({ contextWindowTokens: 0 });
+      vi.mocked(getModelPropertyWithFallback).mockResolvedValueOnce(200_000);
+
+      let capturedConfig: any;
+      const serviceWithFactory = new AgentRuntimeService(mockDb, mockUserId, {
+        agentFactory: (config) => {
+          capturedConfig = config;
+          return { runner: vi.fn() } as any;
+        },
+      });
+
+      await (serviceWithFactory as any).createAgentRuntime({
+        metadata: {
+          agentConfig: { chatConfig: { enableContextCompression: true } },
+          modelRuntimeConfig: { model: 'gpt-4o-mini', provider: 'openai' },
+        },
+        operationId: 'test-operation-1',
+        stepIndex: 1,
+      });
+
+      expect(getModelPropertyWithFallback).toHaveBeenCalledWith(
+        'gpt-4o-mini',
+        'contextWindowTokens',
+        'openai',
+      );
+      expect(capturedConfig.compressionConfig.maxWindowToken).toBe(200_000);
     });
 
     it('should fall back to undefined maxWindowToken when model lookup misses', async () => {

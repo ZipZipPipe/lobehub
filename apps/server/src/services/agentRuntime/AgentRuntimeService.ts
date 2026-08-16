@@ -40,6 +40,7 @@ import debug from 'debug';
 import urlJoin from 'url-join';
 
 import { AgentOperationModel } from '@/database/models/agentOperation';
+import { AiModelModel } from '@/database/models/aiModel';
 import { MessageModel } from '@/database/models/message';
 import { type LobeChatDatabase } from '@/database/type';
 import { appEnv } from '@/envs/app';
@@ -2714,14 +2715,37 @@ export class AgentRuntimeService {
     stepIndex: number;
     tracingContextEngine?: (input: unknown, output: unknown) => void;
   }) {
-    const contextWindowTokens =
-      metadata?.modelRuntimeConfig?.model && metadata?.modelRuntimeConfig?.provider
-        ? await getModelPropertyWithFallback<number | undefined>(
-            metadata.modelRuntimeConfig.model,
-            'contextWindowTokens',
-            metadata.modelRuntimeConfig.provider,
-          )
-        : undefined;
+    const model = metadata?.modelRuntimeConfig?.model;
+    const provider = metadata?.modelRuntimeConfig?.provider;
+    let contextWindowTokens: number | undefined;
+
+    if (model && provider) {
+      try {
+        const userModel = await new AiModelModel(
+          this.serverDB,
+          this.userId,
+          this.workspaceId,
+        ).findByIdAndProvider(model, provider);
+        const configuredContextWindow = userModel?.contextWindowTokens;
+
+        if (typeof configuredContextWindow === 'number' && configuredContextWindow > 0) {
+          contextWindowTokens = configuredContextWindow;
+        }
+      } catch (error) {
+        log(
+          'Failed to resolve user model context window for %s/%s, falling back to model bank: %O',
+          provider,
+          model,
+          error,
+        );
+      }
+
+      contextWindowTokens ??= await getModelPropertyWithFallback<number | undefined>(
+        model,
+        'contextWindowTokens',
+        provider,
+      );
+    }
 
     // Create Agent instance — use custom factory if provided, otherwise default to GeneralChatAgent
     const generalConfig = {
