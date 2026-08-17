@@ -54,6 +54,10 @@ describe('ExtendParamsSelect', () => {
       expect(TITLE_KEY_ALIASES['glm5_3ReasoningEffort']).toBe('reasoningEffort');
     });
 
+    it('should map GLM-5.3 variant to reasoningEffort', () => {
+      expect(TITLE_KEY_ALIASES['glm5_3ReasoningEffort']).toBe('reasoningEffort');
+    });
+
     it('should map thinkingLevel2 to thinkingLevel', () => {
       expect(TITLE_KEY_ALIASES['thinkingLevel2']).toBe('thinkingLevel');
     });

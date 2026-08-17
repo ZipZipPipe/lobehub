@@ -58,6 +58,7 @@ describe('createXAIImage', () => {
         body: JSON.stringify({
           model: 'grok-imagine-image',
           prompt: 'A beautiful sunset over the mountains',
+          response_format: 'url',
         }),
       });
 
@@ -97,6 +98,7 @@ describe('createXAIImage', () => {
           body: JSON.stringify({
             model: 'grok-imagine-image',
             prompt: 'Abstract digital art',
+            response_format: 'url',
             aspect_ratio: '16:9',
           }),
         }),
@@ -138,6 +140,7 @@ describe('createXAIImage', () => {
           body: JSON.stringify({
             model: 'grok-imagine-image',
             prompt: 'Abstract digital art',
+            response_format: 'url',
             aspect_ratio: 'auto',
           }),
         }),
@@ -179,6 +182,7 @@ describe('createXAIImage', () => {
           body: JSON.stringify({
             model: 'grok-imagine-image',
             prompt: 'An astronaut performing EVA in LEO',
+            response_format: 'url',
             resolution: '2k',
           }),
         }),
@@ -220,6 +224,7 @@ describe('createXAIImage', () => {
           body: JSON.stringify({
             model: 'grok-imagine-image',
             prompt: 'Test image',
+            response_format: 'url',
             resolution: '1k',
           }),
         }),
@@ -261,6 +266,7 @@ describe('createXAIImage', () => {
           body: JSON.stringify({
             model: 'grok-imagine-image',
             prompt: 'Change the landmarks to be New York City landmarks',
+            response_format: 'url',
             image: {
               type: 'image_url',
               url: 'https://example.com/landmarks.jpg',
@@ -306,6 +312,7 @@ describe('createXAIImage', () => {
           body: JSON.stringify({
             model: 'grok-imagine-image',
             prompt: 'Change the landmarks to be New York City landmarks',
+            response_format: 'url',
             image: {
               type: 'image_url',
               url: 'https://example.com/landmarks.jpg',
@@ -386,6 +393,7 @@ describe('createXAIImage', () => {
           body: JSON.stringify({
             model: 'grok-imagine-image',
             prompt: 'Edit multiple images',
+            response_format: 'url',
             images: [
               {
                 type: 'image_url',

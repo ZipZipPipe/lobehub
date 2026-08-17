@@ -37,6 +37,7 @@ import type {
 import {
   AgentRuntimeErrorType,
   buildHeteroSpawnArgs,
+  HETEROGENEOUS_AGENT_DEFAULT_SELECTION,
   normalizeHeterogeneousProviderConfig,
   ThreadStatus,
   ThreadType,
@@ -225,25 +226,14 @@ const buildLocalHeterogeneousSystemContext = ({
   agentSystemContext,
   contextSelections,
   pageSelections,
-  workingDirectory,
 }: {
   agentSystemContext?: string;
   contextSelections?: ContextSelection[];
   pageSelections?: PageSelection[];
-  workingDirectory?: string;
 }): string | undefined => {
   const parts: string[] = [];
 
   if (agentSystemContext?.trim()) parts.push(agentSystemContext.trim());
-
-  if (workingDirectory?.trim()) {
-    parts.push(
-      [
-        '## Workspace',
-        `You are running on the user's own machine. Your working directory is \`${workingDirectory.trim()}\`.`,
-      ].join('\n'),
-    );
-  }
 
   const selectionContext =
     contextSelections && contextSelections.length > 0
@@ -1830,6 +1820,12 @@ export const executeHeterogeneousAgent = async (
       command: resolveHeterogeneousAgentCommand(adapterType, heterogeneousProvider.command),
       cwd: workingDirectory,
       env: sessionEnv,
+      initialModel:
+        adapterType === 'trae' &&
+        heterogeneousProvider.model &&
+        heterogeneousProvider.model !== HETEROGENEOUS_AGENT_DEFAULT_SELECTION
+          ? heterogeneousProvider.model
+          : undefined,
       resumeSessionId,
       useClaudeCodeSdk: labPreferSelectors.enableClaudeCodeSdk(useUserStore.getState()),
       useCodexAppServer: labPreferSelectors.enableCodexAppServer(useUserStore.getState()),
@@ -2305,9 +2301,6 @@ export const executeHeterogeneousAgent = async (
       agentSystemContext: heterogeneousProvider.systemContext,
       contextSelections,
       pageSelections,
-      // The native CLI session already retains its workspace context. Reinjecting this note on
-      // every resumed turn makes it accumulate in persistent Codex/Claude conversations.
-      workingDirectory: resumeSessionId ? undefined : workingDirectory,
     });
 
     // When resuming, hand main the prior turns so it can rebuild a Claude Code

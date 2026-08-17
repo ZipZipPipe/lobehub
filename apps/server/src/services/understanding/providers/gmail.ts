@@ -1,4 +1,8 @@
-import { ConnectorDataError } from '@lobechat/connector-data';
+import {
+  ConnectorDataError,
+  getConnectorErrorMessage,
+  isConnectorErrorRetryable,
+} from '@lobechat/connector-data';
 import type { GmailMessage } from '@lobechat/connector-data/gmail';
 import { toGmailMessagesXml } from '@lobechat/connector-data/gmail';
 
@@ -24,6 +28,9 @@ const hasGmailReadPermission = (scopes: readonly string[]) =>
       scope.endsWith(permission),
     ),
   );
+
+const getGmailCollectionErrorCode = (reason: unknown) =>
+  reason instanceof ConnectorDataError ? reason.code : 'GMAIL_SEARCH_FAILED';
 
 const evidencePriority = ({ labels }: GmailMessage) => {
   const normalized = new Set(labels.map((label) => label.toUpperCase()));
@@ -113,16 +120,18 @@ export const gmailUnderstandingProvider: UnderstandingProvider = {
     const fulfilled = settled.filter(
       (result): result is PromiseFulfilledResult<GmailMessage[]> => result.status === 'fulfilled',
     );
+    const rejectedReasons = settled.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : [],
+    );
     const errors = settled.flatMap((result, index) =>
       result.status === 'rejected'
         ? [
             {
-              code: 'GMAIL_SEARCH_FAILED',
-              message: 'Gmail search category failed',
+              code: getGmailCollectionErrorCode(result.reason),
+              message: getConnectorErrorMessage(result.reason) ?? 'Gmail search category failed',
               operation: GMAIL_PROFILE_SEARCHES[index].operation,
               provider: 'gmail',
-              retryable:
-                result.reason instanceof ConnectorDataError ? result.reason.retryable : true,
+              retryable: isConnectorErrorRetryable(result.reason),
             },
           ]
         : [],
@@ -137,6 +146,7 @@ export const gmailUnderstandingProvider: UnderstandingProvider = {
     if (selected.length === 0) {
       if (errors.some(({ retryable }) => retryable)) {
         throw new ConnectorDataError({
+          cause: rejectedReasons.length === 1 ? rejectedReasons[0] : rejectedReasons,
           code: 'gmail_evidence_unavailable',
           operation: 'collect',
           provider: 'gmail',
