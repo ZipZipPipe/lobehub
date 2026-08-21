@@ -19,10 +19,10 @@ import { emitAgentSignalSourceEvent } from '@/server/services/agentSignal';
 import { toAgentSignalTraceEvents } from '@/server/services/agentSignal/observability/traceEvents';
 import { extractSelfIterationCompletionPayload } from '@/server/services/agentSignal/services/selfIteration/completion';
 import { instantiateVerifyPlanOnStart, runVerifyOnCompletion } from '@/server/services/verify';
+import { registerWorksForOperation } from '@/server/services/workRegistration';
 import { after } from '@/server/utils/scheduleAfterResponse';
 
 import { CriticalHookDeliveryError, hookDispatcher, type SerializedHook } from './hooks';
-import { registerWorksForOperation } from './workRegistration';
 
 const log = debug('lobe-server:completion-lifecycle');
 
@@ -73,6 +73,8 @@ export interface OperationCompletionInput {
   /** Executed model — the verify gate keys off `op.model`, so hetero backfills it. */
   model?: string | null;
   operationId: string;
+  /** Group orchestration role; members must not trigger user-facing completion recalls. */
+  orchestrationRole?: 'member' | 'supervisor';
   /** Executed provider — see {@link OperationCompletionInput.model}. */
   provider?: string | null;
   /** Serialized webhook hooks (queue mode); ignored in local in-memory mode. */
@@ -517,6 +519,7 @@ export class CompletionLifecycle {
         _hooks: input.serializedHooks,
         agentId: input.agentId,
         assistantMessageId: input.assistantMessageId,
+        orchestrationRole: input.orchestrationRole,
         topicId: input.topicId,
         userId: input.userId ?? this.userId,
       },
@@ -597,7 +600,7 @@ export class CompletionLifecycle {
    */
   async completeOperation(
     input: OperationCompletionInput,
-    reason: 'done' | 'error',
+    reason: 'done' | 'error' | 'interrupted',
     options?: CompleteOperationOptions,
   ): Promise<void> {
     await this.dispatchHooks(input.operationId, this.buildStateFromInput(input), reason, options);

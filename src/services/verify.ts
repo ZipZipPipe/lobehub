@@ -167,7 +167,11 @@ export class VerifyService {
     requirement: string,
   ) => lambdaClient.acceptance.saveGoal.mutate({ requirement, subjectId, subjectType });
 
-  listAcceptances = (): Promise<AcceptanceListItem[]> => lambdaClient.acceptance.list.query();
+  listAcceptances = (options?: { quiet?: boolean }): Promise<AcceptanceListItem[]> =>
+    lambdaClient.acceptance.list.query(
+      undefined,
+      options?.quiet ? { context: { showNotification: false } } : undefined,
+    );
 
   /**
    * Acceptance status for a known set of subjects. `listAcceptances` is capped
@@ -257,6 +261,13 @@ export class VerifyService {
   /** Rename the acceptance's sidebar entry (a metadata title override). */
   renameAcceptance = (id: string, title: string) =>
     lambdaClient.acceptance.rename.mutate({ id, title });
+
+  /**
+   * File the acceptance under a project (`null` takes it out of one). Only the
+   * grouping moves — the delivery and its rounds stay exactly where they are.
+   */
+  setAcceptanceProject = (id: string, projectId: string | null) =>
+    lambdaClient.acceptance.setProject.mutate({ id, projectId });
 
   /** Owner override of the acceptance's decision state from the list. */
   updateAcceptanceStatus = (id: string, status: 'accepted' | 'closed' | 'delivered' | 'rejected') =>

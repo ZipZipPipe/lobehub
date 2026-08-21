@@ -62,6 +62,7 @@ import { QueueService } from '@/server/services/queue';
 import { LocalQueueServiceImpl } from '@/server/services/queue/impls';
 import { ToolExecutionService } from '@/server/services/toolExecution';
 import { BuiltinToolsExecutor } from '@/server/services/toolExecution/builtin';
+import { stateHasEntityFileEdits } from '@/server/services/workRegistration';
 
 import { isAbortError, throwIfAborted } from './abort';
 import {
@@ -94,7 +95,6 @@ import {
   type StepCompletionReason,
   type SubAgentBridgeParams,
 } from './types';
-import { stateHasEntityFileEdits } from './workRegistration';
 
 if (process.env.VERCEL) {
   // Route debug output to stdout (`console.info`) instead of stderr, which
@@ -463,6 +463,8 @@ export class AgentRuntimeService {
       deviceAccessPolicy,
       discordContext,
       evalContext,
+      enableExpertise,
+      expertise,
       executionPlan,
       maxSteps,
       userMemory,
@@ -544,6 +546,8 @@ export class AgentRuntimeService {
       const initialState = {
         activatedStepTools,
         createdAt: new Date().toISOString(),
+        enableExpertise,
+        expertise,
         // Store initialContext for executeSync to use
         initialContext,
         lastModified: new Date().toISOString(),
