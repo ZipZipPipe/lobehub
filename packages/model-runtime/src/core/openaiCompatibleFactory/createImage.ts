@@ -86,7 +86,6 @@ async function generateByImageMode(
     if (userInput.quality === 'hd') {
       userInput.quality = 'high';
     }
-    delete userInput.background;
   }
   // gpt-image-2 dropped input_fidelity ("output is already high fidelity by default").
   // https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide

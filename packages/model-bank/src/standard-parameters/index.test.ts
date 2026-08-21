@@ -7,6 +7,7 @@ describe('meta-schema', () => {
   describe('ModelParamsMetaSchema', () => {
     it('should validate a complete parameter schema', () => {
       const validSchema: ModelParamsSchema = {
+        background: { default: 'auto', enum: ['auto', 'opaque', 'transparent'] },
         prompt: { default: 'test prompt' },
         width: { default: 1024, min: 512, max: 2048, step: 64 },
         height: { default: 1024, min: 512, max: 2048, step: 64 },
@@ -108,6 +109,7 @@ describe('meta-schema', () => {
   describe('extractDefaultValues', () => {
     it('should extract default values from parameter schema', () => {
       const schema: ModelParamsSchema = {
+        background: { default: 'transparent', enum: ['auto', 'opaque', 'transparent'] },
         prompt: { default: 'test prompt' },
         width: { default: 1024, min: 512, max: 2048 },
         height: { default: 768, min: 512, max: 2048 },
@@ -118,6 +120,7 @@ describe('meta-schema', () => {
       const result = extractDefaultValues(schema);
 
       expect(result).toEqual({
+        background: 'transparent',
         prompt: 'test prompt',
         width: 1024,
         height: 768,
@@ -198,6 +201,7 @@ describe('meta-schema', () => {
     it('should infer correct RuntimeImageGenParams type', () => {
       // This is a compile-time test to ensure types are correctly inferred
       const params: RuntimeImageGenParams = {
+        background: 'transparent',
         prompt: 'test',
         width: 1024,
         height: 768,
@@ -207,6 +211,7 @@ describe('meta-schema', () => {
       };
 
       expect(params.prompt).toBe('test');
+      expect(params.background).toBe('transparent');
       expect(params.width).toBe(1024);
       expect(params.seed).toBeNull();
     });

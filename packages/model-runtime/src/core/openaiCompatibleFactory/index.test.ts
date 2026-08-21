@@ -2189,6 +2189,29 @@ describe('LobeOpenAICompatibleFactory', () => {
         });
       });
 
+      it('should send transparent background for gpt-image-2', async () => {
+        const mockResponse = {
+          data: [{ b64_json: 'gpt-image-2-transparent-base64' }],
+        };
+
+        vi.spyOn(instance['client'].images, 'generate').mockResolvedValue(mockResponse as any);
+
+        await (instance as any).createImage({
+          model: 'gpt-image-2',
+          params: {
+            background: 'transparent',
+            prompt: 'An isolated glass sculpture',
+          },
+        });
+
+        expect(instance['client'].images.generate).toHaveBeenCalledWith({
+          background: 'transparent',
+          model: 'gpt-image-2',
+          n: 1,
+          prompt: 'An isolated glass sculpture',
+        });
+      });
+
       it('should route mapped logical image-chat models through chat completions', async () => {
         const mappedInstance = new LobeMockProvider({
           apiKey: 'test',
@@ -2427,6 +2450,7 @@ describe('LobeOpenAICompatibleFactory', () => {
         const payload = {
           model: 'gpt-image-2',
           params: {
+            background: 'transparent',
             imageUrl: 'https://example.com/image.jpg',
             prompt: 'Edit this image with gpt-image-2',
           },
@@ -2437,6 +2461,7 @@ describe('LobeOpenAICompatibleFactory', () => {
         const editArgs = vi.mocked(instance['client'].images.edit).mock.calls[0][0];
         expect(editArgs).not.toHaveProperty('input_fidelity');
         expect(editArgs).toMatchObject({
+          background: 'transparent',
           model: 'gpt-image-2',
           n: 1,
         });

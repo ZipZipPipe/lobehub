@@ -82,6 +82,15 @@ export const ModelParamsMetaSchema = z.object({
     type: z.literal('string').optional(),
   }),
 
+  background: z
+    .object({
+      default: z.string(),
+      description: z.string().optional(),
+      enum: z.array(z.string()),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+
   imageUrl: z
     .object({
       default: z.string().nullish(),
