@@ -11,7 +11,11 @@ import { sanitizeAnthropicThinkingParts } from '../../utils/sanitizeAnthropicThi
 import { sanitizeDeepSeekJsonPayload } from './sanitizePayload';
 
 export const isDeepSeekV4Model = (model: string | undefined) => isDeepSeekV4FamilyModel(model);
+const DEEPSEEK_V4_FLASH_VISION_EXP = 'deepseek-v4-flash-vision-exp';
 const VISION_DOWNGRADE_PLACEHOLDER = '[image omitted: delegated to visual understanding tool]';
+
+const isDeepSeekVisionModel = (model: string | undefined) =>
+  model?.toLowerCase().split('/').at(-1) === DEEPSEEK_V4_FLASH_VISION_EXP;
 
 const downgradeUnsupportedImageParts = (content: unknown) => {
   if (!Array.isArray(content)) return content;
@@ -195,11 +199,14 @@ export const buildDeepSeekOpenAIPayload = (
   const thinkingExplicitlyDisabled = payload.thinking?.type === 'disabled';
   const shouldForceAssistantReasoningContent =
     payload.model === 'deepseek-reasoner' || (isV4Model && !thinkingExplicitlyDisabled);
+  const supportsVision = isDeepSeekVisionModel(payload.model);
 
   // Transform reasoning object to reasoning_content string for multi-turn conversations
   const messages = payload.messages.map((message: any) => {
     const { reasoning, ...rest } = message;
-    const downgradedContent = downgradeUnsupportedImageParts(rest.content);
+    const downgradedContent = supportsVision
+      ? rest.content
+      : downgradeUnsupportedImageParts(rest.content);
     const normalizedRest =
       downgradedContent === rest.content ? rest : { ...rest, content: downgradedContent };
 

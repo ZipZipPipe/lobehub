@@ -97,4 +97,15 @@ describe('DeepSeek models', () => {
     expect(models).toHaveLength(4);
     expect(models.every((m) => typeof m.id === 'string')).toBe(true);
   });
+
+  it('should detect the native vision capability from the model id', async () => {
+    mockClient.models.list.mockResolvedValue({
+      data: [{ id: 'deepseek-v4-flash' }, { id: 'deepseek-v4-flash-vision-exp' }],
+    });
+
+    const models = await fetchModels({ client: mockClient });
+
+    expect(models[0].vision).toBe(false);
+    expect(models[1].vision).toBe(true);
+  });
 });

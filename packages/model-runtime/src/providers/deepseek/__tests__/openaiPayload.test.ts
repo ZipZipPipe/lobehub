@@ -81,6 +81,28 @@ describe('DeepSeek OpenAI-compatible chatCompletion.handlePayload', () => {
     ]);
   });
 
+  it.each(['deepseek-v4-flash-vision-exp', 'deepseek/deepseek-v4-flash-vision-exp'])(
+    'should preserve image_url parts for the native vision model %s',
+    (model) => {
+      const payload = {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What is in this image?' },
+              { type: 'image_url', image_url: { url: 'https://example.com/image.webp' } },
+            ],
+          },
+        ],
+        model,
+      };
+
+      const result = openAIParams.chatCompletion!.handlePayload!(payload as any);
+
+      expect(result.messages).toEqual(payload.messages);
+    },
+  );
+
   it('should handle empty reasoning content', () => {
     const payload = {
       messages: [
