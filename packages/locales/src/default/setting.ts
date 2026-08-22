@@ -263,6 +263,24 @@ export default {
     'Your member permission here is "Can use" — you can view and use it, but not edit. Ask the creator or a workspace owner for edit access.',
   'permission.accessTag.viewOnlyTip':
     'Your member permission here is "Can view" — you can view it, but not use or edit. Ask the creator or a workspace owner for more access.',
+  'permission.collaborators.add': 'Add',
+  'permission.collaborators.addModal.confirm': 'Add',
+  'permission.collaborators.addModal.confirmCount_one': 'Add {{count}} member',
+  'permission.collaborators.addModal.confirmCount_other': 'Add {{count}} members',
+  'permission.collaborators.addModal.empty': 'No members available to add',
+  'permission.collaborators.addModal.noMatch': 'No matching members',
+  'permission.collaborators.addModal.search': 'Search members',
+  'permission.collaborators.addModal.selectionLimit':
+    'You can add up to {{count}} members at a time',
+  'permission.collaborators.addModal.selectedCount_one': '{{count}} member selected',
+  'permission.collaborators.addModal.selectedCount_other': '{{count}} members selected',
+  'permission.collaborators.addModal.title': 'Add collaborators',
+  'permission.collaborators.empty': 'No collaborators yet',
+  'permission.collaborators.libraryDesc':
+    'Collaborators can open this knowledge base and view the files inside even when the access level is "No access"',
+  'permission.collaborators.remove': 'Remove',
+  'permission.collaborators.removeConfirmTitle': 'Remove {{name}}?',
+  'permission.collaborators.title': 'Collaborators',
   'permission.generalAccess.trigger': 'Members: {{level}}',
   'permission.generalAccess.editable': 'Can edit',
   'permission.generalAccess.editableDesc': 'Members can view, use, and edit',
@@ -329,6 +347,12 @@ export default {
   'permission.page.groupModelPolicyFixedDesc':
     'Members can only use the model you set for this group',
   'permission.page.groupModelPolicyMemberDesc': 'Members can use a model they set themselves',
+  'permission.page.groupTopicSharePolicyDesc':
+    "Whether members can publish share links for this group's topics.",
+  'permission.page.groupTopicSharePolicyMemberDesc':
+    "Members can publish share links for any of this group's topics",
+  'permission.page.groupTopicSharePolicyRestrictedDesc':
+    'Only you and workspace owners can publish share links for this group',
   'permission.page.memberGroup': 'Access',
   'permission.page.modelPolicyFixedDesc': 'Members can only use the model you set',
   'permission.page.modelPolicyMemberDesc': 'Members can use a model they set themselves',
@@ -340,6 +364,12 @@ export default {
   'permission.page.privateNotice':
     'This agent is still private. Everything here takes effect once you publish it to the workspace.',
   'permission.page.title': 'Permissions',
+  'permission.page.topicSharePolicyDesc':
+    "Whether members can publish share links for this agent's topics.",
+  'permission.page.topicSharePolicyMemberDesc':
+    "Members can publish share links for any of this agent's topics",
+  'permission.page.topicSharePolicyRestrictedDesc':
+    'Only you and workspace owners can publish share links',
   'permission.page.usableWhenShared': 'Can use when shared',
   'permission.page.viewableWhenShared': 'Can view when shared',
   'permission.saveNoEditPermission':
@@ -373,16 +403,19 @@ export default {
   'heterogeneousStatus.apiMode.configureProvider': 'Go to provider settings',
   'heterogeneousStatus.apiMode.enableInLabs': 'Enable in Labs',
   'heterogeneousStatus.apiMode.labDisabled':
-    'API authentication is a Labs experiment. Enable it to use a configured provider instead of a Claude subscription.',
+    'Provider binding is a Labs experiment. Enable it to use a configured API provider instead of the agent subscription.',
   'heterogeneousStatus.apiMode.localOnly': 'Available only for Desktop local execution',
   'heterogeneousStatus.apiMode.model': 'Model',
   'heterogeneousStatus.apiMode.modelPlaceholder': 'Select a model',
   'heterogeneousStatus.apiMode.noProviders':
     'No enabled provider with an Anthropic-compatible endpoint is configured.',
+  'heterogeneousStatus.apiMode.noResponsesProviders':
+    'No enabled provider with an explicitly supported Responses API endpoint is configured.',
   'heterogeneousStatus.apiMode.smallFastModel': 'Background model',
   'heterogeneousStatus.apiMode.smallFastModelDesc':
     'Used for session titles, summaries, and other background work. Does not change the main conversation.',
   'heterogeneousStatus.apiMode.smallFastModelPlaceholder': 'Same as primary model',
+  'heterogeneousStatus.apiMode.workspaceUnsupported': 'Not available for workspace agents',
   'heterogeneousStatus.auth.api': 'API',
   'heterogeneousStatus.auth.label': 'Auth Method',
   'heterogeneousStatus.auth.subscription': 'Subscription',
@@ -618,22 +651,28 @@ export default {
   'devices.visibilityTabs.workspace': 'Workspace',
   'devices.workingDirectory': 'Working dir: {{path}}',
   'apps.cli.copied': 'Copied',
-  'apps.cli.copy': 'Copy install command',
-  'apps.cli.desc': 'Scripts, devices, and headless work from the command line.',
+  'apps.cli.copy': 'Copy',
+  'apps.cli.desc': 'Scripts, cron jobs, and headless agents — the same LobeHub, from any terminal.',
   'apps.cli.title': 'CLI',
   'apps.desktop.cta': 'Get desktop app',
-  'apps.desktop.desc': 'Local files, system tools, and focused work on this machine.',
+  'apps.desktop.desc': 'Chat, build, and automate in one app, with full access to this machine:',
+  'apps.desktop.features.files.desc': 'read, write, and organize your folders',
+  'apps.desktop.features.files.label': 'Local files',
+  'apps.desktop.features.focus.desc': 'a dedicated window, away from browser tabs',
+  'apps.desktop.features.focus.label': 'Focused work',
+  'apps.desktop.features.tools.desc': 'screenshots, notifications, shell',
+  'apps.desktop.features.tools.label': 'System tools',
   'apps.desktop.inUse': 'In use',
   'apps.desktop.inUseDesc': "You're already in the desktop app.",
   'apps.desktop.title': 'Desktop',
-  'apps.kicker': 'Ways',
-  'apps.messenger.cta': 'Set up Messenger',
-  'apps.messenger.desc': 'Talk to LobeHub in Discord, Feishu, Slack, and the rest.',
+  'apps.messenger.desc':
+    'Talk to your agents where your team already is — replies land back in LobeHub.',
+  'apps.messenger.setup': 'Set up',
   'apps.messenger.title': 'Messenger',
   'apps.mobile.cta': 'Get mobile app',
-  'apps.mobile.desc': 'Start conversations from your phone when you leave the computer.',
+  'apps.mobile.desc': 'Pick up where you left off — your chats, agents, and files travel with you.',
   'apps.mobile.title': 'Mobile',
-  'apps.title': 'Discover more ways to use LobeHub',
+  'apps.title': 'Do more with LobeHub, everywhere you work',
   'checkingPermissions': 'Checking permissions...',
   'danger.reset.action': 'Reset Now',
   'danger.reset.confirm': 'Reset all settings?',
@@ -953,6 +992,11 @@ export default {
   'settingAgent.selectionPolicy.membersCannotSwitchWhenShared': 'Locked when shared',
   'settingAgent.selectionPolicy.membersCanSwitch': 'Can switch',
   'settingAgent.selectionPolicy.membersCanSwitchWhenShared': 'Can switch when shared',
+  // Not a Can-switch / Locked pair like the policies above: sharing is a
+  // capability rather than a setting members flip, so the labels name who holds it.
+  'settingAgent.topicSharePolicy.membersCanShare': 'Members can share',
+  'settingAgent.topicSharePolicy.membersCannotShare': 'Creator and owners only',
+  'settingAgent.topicSharePolicy.title': 'Topic sharing',
   'settingAgent.toolsConfig.title': 'Tools',
   'settingAgent.submit': 'Update Agent',
   'settingAgent.tag.desc': 'Agent tags will be displayed in the Agent Community',
@@ -1491,6 +1535,9 @@ When I am ___, I need ___
   'systemAgent.expertise.modelDesc':
     'Model used to draft expertise domains and extract reusable experience from conversations.',
   'systemAgent.expertise.title': 'Agent Self-Evolution',
+  'systemAgent.goal.modelDesc':
+    'Model used to turn a persistent goal into its standing acceptance criteria.',
+  'systemAgent.goal.title': 'Goal Creation',
   'systemAgent.customPrompt.addPrompt': 'Add Custom Prompt',
   'systemAgent.customPrompt.desc':
     'Once filled out, the system agent will use the custom prompt when generating content',
@@ -3080,6 +3127,9 @@ When I am ___, I need ___
     'Only workspace owners can do this. Ask an owner if you need this changed.',
   'workspace.permission.requiresPrimaryOwner':
     'Only the workspace Owner can delete this workspace. Transfer ownership first if needed.',
+  // Not a role gate: the agent's author reserved topic sharing on the Permission page.
+  'workspace.permission.topicShareRestricted':
+    'This agent only lets its creator and workspace owners share topics. Ask them if you need a link.',
   'workspace.onboarding.title': 'Set up your workspace',
   'workspace.onboarding.stepLabel': 'Step {{current}} of {{total}}',
   'workspace.onboarding.skip': 'Skip',
