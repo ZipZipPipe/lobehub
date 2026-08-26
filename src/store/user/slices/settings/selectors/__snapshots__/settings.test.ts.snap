@@ -173,8 +173,9 @@ exports[`settingsSelectors > defaultAgent > should merge DEFAULT_AGENT and s.set
     "tts": {
       "showAllLocaleVoice": false,
       "sttLocale": "auto",
-      "ttsService": "openai",
+      "ttsService": "elevenlabs",
       "voice": {
+        "elevenlabs": "OEyxkK9dZHAF59ZRc5c2",
         "openai": "alloy",
       },
     },
@@ -220,8 +221,9 @@ exports[`settingsSelectors > defaultAgentConfig > should merge DEFAULT_AGENT_CON
   "tts": {
     "showAllLocaleVoice": false,
     "sttLocale": "auto",
-    "ttsService": "openai",
+    "ttsService": "elevenlabs",
     "voice": {
+      "elevenlabs": "OEyxkK9dZHAF59ZRc5c2",
       "openai": "alloy",
     },
   },
