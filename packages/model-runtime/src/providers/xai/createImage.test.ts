@@ -280,6 +280,54 @@ describe('createXAIImage', () => {
       });
     });
 
+    it('should send Image 2.0 quality and aspect ratio for image editing', async () => {
+      const mockImageUrl = 'https://xai-cdn.com/images/generated/edited-image-2.jpg';
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [{ revised_prompt: 'Edit with Image 2.0', url: mockImageUrl }],
+        }),
+      });
+
+      const payload: CreateImagePayload = {
+        model: 'grok-imagine-image-2.0',
+        params: {
+          aspectRatio: '21:9',
+          imageUrls: [
+            'https://example.com/image1.jpg',
+            'https://example.com/image2.jpg',
+            'https://example.com/image3.jpg',
+          ],
+          prompt: 'Edit with Image 2.0',
+          quality: 'medium',
+          resolution: '2k',
+        },
+      };
+
+      const result = await createXAIImage(payload, mockOptions);
+
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.x.ai/v1/images/edits',
+        expect.objectContaining({
+          body: JSON.stringify({
+            model: 'grok-imagine-image-2.0',
+            prompt: 'Edit with Image 2.0',
+            response_format: 'url',
+            aspect_ratio: '21:9',
+            quality: 'medium',
+            resolution: '2k',
+            images: [
+              { type: 'image_url', url: 'https://example.com/image1.jpg' },
+              { type: 'image_url', url: 'https://example.com/image2.jpg' },
+              { type: 'image_url', url: 'https://example.com/image3.jpg' },
+            ],
+          }),
+        }),
+      );
+      expect(result).toEqual({ imageUrl: mockImageUrl });
+    });
+
     it('should not include aspectRatio in image editing mode', async () => {
       const mockImageUrl = 'https://xai-cdn.com/images/generated/edited-no-aspect.jpg';
 

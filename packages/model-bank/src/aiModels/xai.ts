@@ -246,6 +246,69 @@ const xaiChatModels: AIChatModelCard[] = [
 const xaiImageModels: AIImageModelCard[] = [
   {
     description:
+      'Generate precise, production-ready images from text prompts or edit existing images with natural language and up to three reference images.',
+    displayName: 'Grok Imagine Image 2.0',
+    enabled: true,
+    id: 'grok-imagine-image-2.0',
+    parameters: {
+      aspectRatio: {
+        default: 'auto',
+        enum: [
+          'auto',
+          '1:1',
+          '3:4',
+          '4:3',
+          '9:16',
+          '16:9',
+          '2:3',
+          '3:2',
+          '9:19.5',
+          '19.5:9',
+          '9:20',
+          '20:9',
+          '1:2',
+          '2:1',
+          '21:9',
+          '5:2',
+        ],
+      },
+      imageUrls: { default: [], maxCount: 3 },
+      prompt: {
+        default: '',
+      },
+      quality: {
+        default: 'medium',
+        enum: ['low', 'medium'],
+      },
+      resolution: {
+        default: '1k',
+        enum: ['1k', '2k'],
+      },
+    },
+    pricing: {
+      units: [
+        { name: 'imageInput', rate: 0.01, strategy: 'fixed', unit: 'image' },
+        {
+          lookup: {
+            prices: {
+              low_1k: 0.04,
+              low_2k: 0.06,
+              medium_1k: 0.06,
+              medium_2k: 0.08,
+            },
+            pricingParams: ['quality', 'resolution'],
+          },
+          name: 'imageGeneration',
+          strategy: 'lookup',
+          unit: 'image',
+        },
+      ],
+    },
+    releasedAt: '2026-08-07',
+    type: 'image',
+  },
+  {
+    description:
       'Generate images from text prompts, edit existing images with natural language, or iteratively refine images through multi-turn conversations.',
     displayName: 'Grok Imagine Image Quality',
     enabled: true,

@@ -61,6 +61,28 @@ describe('loadModels', () => {
 });
 
 describe('xAI models', () => {
+  it('includes Grok Imagine Image 2.0 with official generation and editing parameters', () => {
+    const model = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.providerId === ModelProvider.XAI && m.id === 'grok-imagine-image-2.0',
+    );
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        parameters: expect.objectContaining({
+          aspectRatio: expect.objectContaining({
+            enum: expect.arrayContaining(['21:9', '5:2']),
+          }),
+          imageUrls: expect.objectContaining({ maxCount: 3 }),
+          quality: expect.objectContaining({ default: 'medium', enum: ['low', 'medium'] }),
+          resolution: expect.objectContaining({ default: '1k', enum: ['1k', '2k'] }),
+        }),
+        providerId: ModelProvider.XAI,
+        type: 'image',
+      }),
+    );
+  });
+
   it('includes Grok Imagine Video 1.5 Preview as a video model', () => {
     const model = LOBE_DEFAULT_MODEL_LIST.find(
       (m) => m.providerId === ModelProvider.XAI && m.id === 'grok-imagine-video-1.5-preview',

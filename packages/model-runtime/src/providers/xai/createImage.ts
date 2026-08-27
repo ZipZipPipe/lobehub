@@ -21,6 +21,8 @@ interface XAIImageRequest {
     | '20:9'
     | '1:2'
     | '2:1'
+    | '21:9'
+    | '5:2'
     | 'auto';
   image?: {
     type: 'image_url';
@@ -77,8 +79,12 @@ export async function createXAIImage(
       response_format: 'url',
     };
 
-    if (!isImageEdit && params.aspectRatio) {
+    if ((!isImageEdit || model === 'grok-imagine-image-2.0') && params.aspectRatio) {
       requestBody.aspect_ratio = params.aspectRatio as XAIImageRequest['aspect_ratio'];
+    }
+
+    if (model === 'grok-imagine-image-2.0' && params.quality) {
+      requestBody.quality = params.quality as XAIImageRequest['quality'];
     }
 
     if (params.resolution) {
