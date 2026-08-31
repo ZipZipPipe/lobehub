@@ -385,6 +385,54 @@ skips AI generation of the acceptance criteria (required when there is no local 
 key); the criteria editor and budget field are ordinary inputs, while the goal
 description is contenteditable (use `fill`; `type` does not support contenteditable).
 
+#### Reaching the Claude Code usage calendar: a local-execution agent, a live-CLI identity, and a four-table ledger fixture
+
+**Situation:** verifying the quota usage calendar (`AgentQuotaCalendar`), which needs
+both a way to open it and quota history to render.
+
+**Doesn't work:** three separate dead ends.
+
+- Opening the conversation of a heterogeneous agent whose `executionTarget` is
+  `device`. A bound-but-offline device renders the 设备未连接 state and the composer
+  never shows the quota badge, so the panel that owns the calendar entry does not
+  exist. Reads as "this build has no quota UI".
+- Seeding only `agent_quota_windows`. The window rows carry `observed_tokens`, but
+  the UI does not read them: `buildWindowStats` sums the **usage ledger** turns that
+  fall inside each window, and the day cells come from the same ledger. Windows
+  without ledger rows render as 历史未记录，which looks like a broken read model.
+- Assuming the DB account is the one the modal opens. The composer badge reads the
+  **live** identity from the local Claude Code CLI over Electron IPC and passes its
+  `externalAccountId` down; the modal then resolves that against
+  `agent_provider_accounts`. A fixture account whose `external_account_id` differs
+  from the machine's real Claude login yields 账号不可用 with no other signal.
+
+**Works:** set the agent to local execution, then seed four tables against the
+account row the app itself created when it first ingested the live snapshot.
+
+```bash
+# 1. the composer only mounts the quota panel for a local-execution hetero agent
+update agents set agency_config = '{"executionTarget":"local","heterogeneousProvider":{"type":"claude-code","command":"claude"}}'::jsonb where id='<agentId>';
+# 2. reuse the existing account row — its external_account_id already matches the live CLI identity
+select id, external_account_id from agent_provider_accounts where provider='claude-code';
+```
+
+Then insert `agent_quota_usage_ledger` turns (they drive both the day cells and the
+per-window totals), `agent_quota_windows` rows for the concrete reset windows, and
+`agent_quota_snapshots` readings — a reading whose `resets_at` is in the future is
+what makes a window "live" and draws the burn-down curve, and a model-scoped
+`weekly_scoped` reading is what adds the third segment. Derive every timestamp from
+the browser's own timezone, since the calendar groups by local day. After the agent
+config write, clear the SWR cache tiers before reloading or the composer keeps the
+previous execution target.
+
+One seeded value does not survive: opening the composer's quota panel makes the app
+ingest the machine's **live** CLI reading into the same account row. A seeded current
+window is therefore replaced by the real utilization (and the real `resets_at`, which
+merges with a seeded window inside the five-minute tolerance) as soon as the panel
+renders. Seed the history and the ledger, but never assert on the live window's own
+percentage — read it back from `agent_quota_snapshots` and report what the run
+actually rendered.
+
 ### Driving the UI
 
 #### The composer's slash menu needs real key events — `keyboard type` never opens it
@@ -815,6 +863,84 @@ code A/B, re-dispatch after each edit rather than expecting react-refresh to kee
 the messages — and re-run the identical dispatch + expand + scroll sequence on both
 sides so the two frames differ only by the change.
 
+#### A client bucket that keeps reverting mid-run is the gateway `uiMessages` snapshot, not your write
+
+**Situation:** a store bucket (`dbMessagesMap[<key>]`) holds the right messages right
+after a gateway send, then silently loses them a second or two later and stays wrong
+for the rest of the session — while the database is correct the whole time.
+
+**Doesn't work:** treating it as a race in your own write and adding another
+`replaceMessages` / refetch earlier in the flow. The overwrite happens _after_ every
+write you control, so each new attempt is undone the same way. It also looks like a
+stale SWR tier (which it is not — a manual `refreshMessages()` fixes it, so the
+server clearly has the data).
+
+**Works:** the server pushes a canonical `uiMessages` snapshot at `step_start` and
+`agent_runtime_end`, and `gatewayEventHandler` applies it as source of truth. That
+snapshot is built by `AgentRuntimeService.queryUiMessages` from the operation's
+`state.metadata`, so it is only as scoped as that metadata — a field the run needs
+but the snapshot query omits makes every step boundary overwrite the bucket with a
+_differently scoped_ message list. Identify the writer instead of guessing: record
+every `replaceMessages` call with `new Error().stack` into a `window.__RM` ring
+buffer, run the flow once, and read `action` (`gateway/step_start`,
+`gateway/agent_runtime_end`) plus the frame. The `action` label alone names the
+culprit. Verified in this catalogue: a subtopic run whose snapshot lacked `threadId`
+kept replacing the thread's bucket with the topic's main spine.
+
+**Corollary — use the non-gateway path as the control.** The same UI action with
+`chatConfig.disableGatewayMode = true` runs through `sendMessageInServer` and never
+applies a pushed snapshot. If the behavior is correct there and wrong in gateway
+mode, the defect is in the gateway transport or in the server snapshot, and you have
+halved the search space before reading any code.
+
+#### `curl /health` does not prove the local agent-gateway trusts your key — run the JWT probe
+
+**Situation:** restarting the local agent-gateway between acceptance rounds and
+gating on `curl -s -o /dev/null -w '%{http_code}' http://localhost:<port>/health`.
+
+**Doesn't work:** treating a 200 as "the closed loop is up". `/health` answers before
+any key is checked, so it is equally 200 when `.dev.vars` carries a JWKS that has
+nothing to do with the app's. The failure then surfaces far from its cause: runs
+complete server-side (`agent_operations` = `done`, full content in `messages`) while
+the browser's `execServerAgentRuntime` op ends after \~100ms, the assistant bubble
+stays on the `...` placeholder for the rest of the session, and a cold reload shows
+the reply — reading exactly like a client-side streaming regression in the branch
+under test. The tells are `chat().gatewayConnections === {}`, no `GET /ws` in the
+gateway log (only server→gateway `push-event` lines, which use the static service
+token and keep working), and `[Gateway] Auth failed ... signature verification
+failed` in the browser console.
+
+**Works:** after every gateway (re)start, run the decisive handshake and require
+`auth_success` before collecting any evidence:
+
+```bash
+GATEWAY_PORT= < port > .agents/acceptance/scripts/agent-gateway/local-gateway-setup.sh
+GATEWAY_WS=ws://localhost: .agents/acceptance/scripts/agent-gateway/local-gateway-probe.mjs < port > node
+```
+
+`.dev.vars` is regenerated per app instance, so restoring it at teardown (or another
+worktree regenerating it) silently invalidates it for the next run — compare the
+`kid` in `agent-gateway/.dev.vars` against `.records/env/agent-testing-jwks.json`
+when in doubt.
+
+#### A required local service can be someone else's, and `preflight` will not tell you
+
+**Situation:** starting QStash / s3rver for a run through `init-dev-env.sh` in a
+worktree while another agent-testing session is already active on the machine.
+
+**Doesn't work:** trusting that a backgrounded `init-dev-env.sh qstash` (or `s3`)
+came up because `preflight` then reports the service reachable. Both use fixed ports
+(8080 / 29000), so the second starter dies immediately with
+`address already in use` while the sibling session's process keeps answering — and
+`preflight` is a reachability check, so it passes. The run works, but on services it
+does not own.
+
+**Works:** read the start log before assuming ownership
+(`.records/logs/qstash.log`, `.records/logs/s3.log`), and treat "already in use" as
+"this is not mine". It matters at teardown: stopping a service you did not start
+kills the other session's run. Only the dev server (`stop-dev`, which verifies PID
+ownership) and anything you launched on a port you chose yourself are yours to stop.
+
 #### Infinite-scroll failure states
 
 When the fixture is too short for the observer to fire, call the real load-more
@@ -832,6 +958,34 @@ error shapes through a window flag (e.g. plain `Error` vs
 `{ data: { code: 'FORBIDDEN' } }`) and prove HMR liveness with a module-level
 marker before clicking. Snapshot the dirty file first and restore byte-identically
 (cmp), never `git checkout --`.
+
+#### Render Gallery shows "No builtin tool renders registered." after a reload
+
+**Situation:** driving DevDock → Render Gallery to capture builtin-tool
+Inspector/Render evidence, after a renderer reload or an HMR update.
+
+**Doesn't work:** waiting. The gallery reads the builtin registries once through a
+`useMemo` with an empty dependency list, so a panel that mounts before the builtin
+tools finish registering caches an empty list for the lifetime of that mount. It
+renders "No builtin tool renders registered." indefinitely, which reads like the
+registries themselves broke.
+
+**Works:** remount the panel — click the dock's `Render Gallery` button twice
+(close, reopen) and re-select the toolset; the entries appear immediately. To land
+on the gallery straight after a reload, pre-seed the dock instead of clicking
+through it:
+
+```js
+localStorage.setItem(
+  'LOBE_DEV_DOCK_UI',
+  JSON.stringify({
+    ...JSON.parse(localStorage.getItem('LOBE_DEV_DOCK_UI') || '{}'),
+    activePanelId: 'render-gallery',
+    expanded: true,
+    maximized: true,
+  }),
+);
+```
 
 ### Capturing and publishing evidence
 

@@ -12,6 +12,7 @@ export {
   CLAUDE_CODE_API_LOCAL_ONLY_ERROR,
   HETEROGENEOUS_PROVIDER_BINDING_LOCAL_ONLY_ERROR,
   HETEROGENEOUS_PROVIDER_BINDING_PERSONAL_ONLY_ERROR,
+  normalizeAnthropicSdkBaseURL,
   sanitizeClaudeCodeDirectArgs,
   sanitizeClaudeCodeDirectEnv,
 } from './claudeCodeDirectEnv';
@@ -76,12 +77,15 @@ export { getHeterogeneousTypeLabel, HETEROGENEOUS_TYPE_LABELS } from './labels';
 export type {
   CreateAssistantIntent,
   MainAgentIntent,
+  MainAgentInterventionState,
+  MainAgentInterventionTransition,
   MainAgentReduceCtx,
   MainAgentRunState,
   MainAgentTurnToolState,
   MainPersistToolBatchIntent,
   MainRecordUsageIntent,
   MainResolveToolResultIntent,
+  MainSetToolInterventionIntent,
   MainStreamContentIntent,
   MainUpdateToolStateIntent,
   PersistAssistantIntent,
@@ -98,15 +102,26 @@ export type {
   HeterogeneousProviderBindingRuntime,
   ResolveHeterogeneousProviderBindingInput,
   ResolveHeterogeneousProviderBindingResult,
+  ServerDefaultHeterogeneousAgentType,
+  ServerDefaultHeterogeneousCompatibilityProfile,
+  ServerDefaultHeterogeneousIngress,
+  ServerDefaultHeterogeneousModelPolicy,
+  ServerDefaultHeterogeneousTokenHeader,
 } from './providerBinding';
 export {
   formatHeterogeneousProviderBindingError,
   getHeterogeneousProviderBindingCapability,
   getProviderInferenceProtocols,
+  getServerDefaultHeterogeneousAgentConfig,
   HETEROGENEOUS_PROVIDER_BINDING_AGENT_TYPES,
   isHeterogeneousProviderBindingSupported,
+  isServerDefaultHeterogeneousAgentType,
+  isServerDefaultHeterogeneousProfileModel,
   resolveHeterogeneousProviderBinding,
   resolveProviderBindingProtocol,
+  SERVER_DEFAULT_HETEROGENEOUS_AGENT_CONFIG,
+  SERVER_DEFAULT_HETEROGENEOUS_AGENT_TYPES,
+  SERVER_DEFAULT_HETEROGENEOUS_PROFILE_DEFAULT_MODELS,
 } from './providerBinding';
 export { createAdapter, listAgentTypes, listLocalAgentTypes } from './registry';
 export type { HeterogeneousAgentScanMap, HeterogeneousAgentScanStatus } from './scan/types';

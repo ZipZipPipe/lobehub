@@ -3391,9 +3391,6 @@ When I am ___, I need ___
   'tools.builtins.lobe-creds.description':
     'Manage user credentials for authentication, environment variable injection, and API verification — handle API keys, OAuth tokens, and secrets for third-party integrations.',
   'tools.builtins.lobe-creds.title': 'Credentials',
-  'tools.builtins.lobe-cron.description':
-    'Manage scheduled tasks that run automatically at specified times. Create, update, enable/disable, and monitor recurring tasks for your agents.',
-  'tools.builtins.lobe-cron.title': 'Scheduled Tasks',
   'tools.builtins.lobe-group-agent-builder.description':
     'Configure group metadata, members, and shared content for multi-agent groups',
   'tools.builtins.lobe-group-agent-builder.title': 'Group Agent Builder',
@@ -3424,7 +3421,7 @@ When I am ___, I need ___
   'tools.builtins.lobe-skills.description': 'Activate and use reusable skill packages',
   'tools.builtins.lobe-skills.title': 'Skills',
   'tools.builtins.lobe-task.description':
-    'Create, list, edit, and delete tasks with dependencies and review configuration',
+    'Create, schedule, list, edit, and delete tasks with dependencies and review configuration',
   'tools.builtins.lobe-task.title': 'Task Tools',
   'tools.builtins.lobe-topic-reference.description':
     'Retrieve context from referenced topic conversations',
@@ -3527,11 +3524,6 @@ When I am ___, I need ___
 
   'tools.composio.servers.figma.readme':
     'Connect to Figma to access design files and collaborate on projects. View designs, export assets, browse components, and manage your design workflow through natural conversation.',
-
-  'tools.composio.servers.github.description': 'Enhanced GitHub MCP Server',
-
-  'tools.composio.servers.github.readme':
-    'Connect to GitHub to manage repositories, issues, pull requests, and code. Search code, review changes, create branches, and collaborate on software development projects through conversational AI.',
 
   // Composio Servers i18n
   'tools.composio.servers.gmail.description': 'Gmail is a free email service provided by Google',

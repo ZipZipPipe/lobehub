@@ -47,6 +47,21 @@ export interface RecordOperationStartParams {
   trigger?: string;
 }
 
+export interface AgentInterventionDispatchMarker {
+  deduplicationId: string;
+  messageId: string;
+  resolutionRequestId: string;
+  scheduledAt: string;
+  state: 'scheduled';
+}
+
+export interface AgentInterventionPreparationMarker {
+  deduplicationId: string;
+  resolutionRequestId: string;
+  state: 'ready';
+  stepIndex: number;
+}
+
 /** Terminal usage summed across every child operation of one parent. All-zero when it has none. */
 export interface ChildUsageRollup {
   llmCalls: number;
@@ -208,6 +223,57 @@ export class AgentOperationModel {
     return Boolean(row);
   }
 
+  /**
+   * Persist provider enqueue acknowledgement without replacing other runtime
+   * metadata. The provenance request id is checked in SQL so a stale/colliding
+   * operation can never be marked scheduled by another intervention.
+   */
+  async recordAgentInterventionDispatch(
+    operationId: string,
+    marker: AgentInterventionDispatchMarker,
+  ): Promise<boolean> {
+    const [row] = await this.db
+      .update(agentOperations)
+      .set({
+        metadata: sql`coalesce(${agentOperations.metadata}, '{}'::jsonb) || ${JSON.stringify({ agentInterventionDispatch: marker })}::jsonb`,
+      })
+      .where(
+        and(
+          eq(agentOperations.id, operationId),
+          this.ownership(),
+          sql`${agentOperations.metadata}->'agentInterventionContinuation'->>'resolutionRequestId' = ${marker.resolutionRequestId}`,
+        ),
+      )
+      .returning({ id: agentOperations.id });
+    return Boolean(row);
+  }
+
+  /**
+   * Persist the crash-recovery boundary after runtime state and serialized
+   * hooks are complete, but before the first queue publish. A missing runtime
+   * state with this marker is therefore ambiguous (it may already have run)
+   * and must never be rebuilt from scratch.
+   */
+  async recordAgentInterventionPreparation(
+    operationId: string,
+    marker: AgentInterventionPreparationMarker,
+  ): Promise<boolean> {
+    const [row] = await this.db
+      .update(agentOperations)
+      .set({
+        metadata: sql`coalesce(${agentOperations.metadata}, '{}'::jsonb) || ${JSON.stringify({ agentInterventionPreparation: marker })}::jsonb`,
+      })
+      .where(
+        and(
+          eq(agentOperations.id, operationId),
+          this.ownership(),
+          sql`${agentOperations.metadata}->'agentInterventionContinuation'->>'resolutionRequestId' = ${marker.resolutionRequestId}`,
+        ),
+      )
+      .returning({ id: agentOperations.id });
+    return Boolean(row);
+  }
+
   /** Idempotently settle a running operation without rewriting an existing terminal outcome. */
   async settleRunning(
     operationId: string,
@@ -337,6 +403,35 @@ export class AgentOperationModel {
       .where(and(eq(agentOperations.id, operationId), this.ownership()))
       .limit(1);
     return row ?? null;
+  }
+
+  /**
+   * Operations recorded for one topic, newest first — the lookup that turns a
+   * topic id (what a user actually has on hand) into the operation ids their
+   * traces are keyed by. `traceS3Key` rides along so callers can tell "no
+   * snapshot was recorded" apart from "snapshot exists but the fetch failed".
+   */
+  async listByTopic(topicId: string, limit = 20) {
+    return this.db
+      .select({
+        agentId: agentOperations.agentId,
+        createdAt: agentOperations.createdAt,
+        id: agentOperations.id,
+        model: agentOperations.model,
+        parentOperationId: agentOperations.parentOperationId,
+        provider: agentOperations.provider,
+        startedAt: agentOperations.startedAt,
+        status: agentOperations.status,
+        stepCount: agentOperations.stepCount,
+        totalCost: agentOperations.totalCost,
+        totalTokens: agentOperations.totalTokens,
+        traceS3Key: agentOperations.traceS3Key,
+        trigger: agentOperations.trigger,
+      })
+      .from(agentOperations)
+      .where(and(eq(agentOperations.topicId, topicId), this.ownership()))
+      .orderBy(sql`${agentOperations.createdAt} desc`)
+      .limit(limit);
   }
 
   /**

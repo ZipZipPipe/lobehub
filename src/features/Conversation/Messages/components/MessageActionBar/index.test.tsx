@@ -16,7 +16,8 @@ const actionMocks = vi.hoisted(() => ({
   handleDelete: vi.fn(),
 }));
 
-vi.mock('@lobehub/ui', () => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   ActionIconGroup: ({
     items,
     menu,

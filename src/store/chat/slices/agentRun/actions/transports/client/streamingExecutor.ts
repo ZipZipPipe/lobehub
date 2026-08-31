@@ -277,10 +277,11 @@ export class StreamingExecutorActionImpl {
       // no function tools are sent. `platformFilter` still gates availability.
       mergedToolIds,
       // Context-aware builtin manifests: lobe-agent hides callSubAgent in group /
-      // sub-agent runs. Replaces the former dropSubAgentInGroup + applyPluginFilters
-      // isSubAgent hard-coding.
+      // sub-agent runs. Desktop client runs also need the local environment so
+      // local-system can advertise IPC-only capabilities such as direct image reads.
       {
         disableMultimodalAnalysis: shouldDisableMultimodalAnalysis || undefined,
+        executionEnv: isDesktop ? 'local' : undefined,
         isSubAgent,
         scope,
       },

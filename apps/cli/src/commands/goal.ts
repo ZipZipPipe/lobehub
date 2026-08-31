@@ -5,6 +5,7 @@ import pc from 'picocolors';
 import { getTrpcClient } from '../api/client';
 import { outputJson, printTable, truncate } from '../utils/format';
 import { log } from '../utils/logger';
+import { resolveAppUrlBuilder } from './task/url';
 
 const nodeIcon = { decision: '◆', finding: '●', problem: '◇', work: '▣' } as const;
 const terminalOutcomes = new Set(['achieved', 'waiting_human', 'no_progress', 'failed']);
@@ -82,6 +83,7 @@ export function registerGoalCommand(program: Command) {
     .option('--json [fields]', 'Output JSON')
     .action(async (title: string, options) => {
       const client = await getTrpcClient();
+      const buildUrl = await resolveAppUrlBuilder(client);
       const result = await client.goal.create.mutate({
         agentId: options.agent,
         config:
@@ -107,8 +109,43 @@ export function registerGoalCommand(program: Command) {
         title,
         work: options.work,
       });
-      if (options.json !== undefined) return outputJson(result.data, options.json);
+      const url = buildUrl(`/goal/${encodeURIComponent(result.data.id)}`);
+      if (options.json !== undefined) return outputJson({ ...result.data, url }, options.json);
       printGraph(result.data);
+      console.log(`${pc.bold('goal')}: ${url}`);
+    });
+
+  goal
+    .command('list')
+    .description('List goals with their graph roll-up')
+    .option('--agent <id>', 'Filter by responsible agent')
+    .option('--project <id>', 'Filter by project')
+    .option('--status <status...>', 'Filter by lifecycle status')
+    .option('--limit <n>', 'Maximum rows', '50')
+    .option('--json [fields]', 'Output JSON')
+    .action(async (options) => {
+      const result = await (
+        await getTrpcClient()
+      ).goal.list.query({
+        agentId: options.agent,
+        limit: Number.parseInt(options.limit, 10),
+        projectId: options.project,
+        statuses: options.status,
+      });
+      if (options.json !== undefined) return outputJson(result.goals, options.json);
+      if (result.goals.length === 0) return log.info('No goals yet.');
+      printTable(
+        result.goals.map((item) => [
+          item.goal.status,
+          truncate(item.goal.title, 44),
+          `${item.workDone}/${item.workTotal}`,
+          String(item.findingCount),
+          item.pendingDecisions > 0 ? pc.yellow(String(item.pendingDecisions)) : '-',
+          `$${item.totalRunCost.toFixed(2)}`,
+          item.goal.id,
+        ]),
+        ['STATUS', 'TITLE', 'WORK', 'FINDINGS', 'NEEDS YOU', 'COST', 'GOAL ID'],
+      );
     });
 
   const show = async (id: string, options: { json?: boolean | string }) => {
