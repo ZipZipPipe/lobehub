@@ -12,7 +12,7 @@ testProvider({
   provider,
   defaultBaseURL,
   chatDebugEnv: 'DEBUG_GLM_CODING_PLAN_CHAT_COMPLETION',
-  chatModel: 'glm-5.3',
+  chatModel: 'glm-5.3-flash',
   test: {
     skipAPICall: true,
   },

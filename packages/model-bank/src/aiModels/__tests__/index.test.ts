@@ -147,6 +147,31 @@ describe('Kimi Code models', () => {
 });
 
 describe('GLM Coding Plan models', () => {
+  it('includes GLM-5.3-Flash with its official multimodal and reasoning capabilities', () => {
+    const model = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.providerId === ModelProvider.GLMCodingPlan && m.id === 'glm-5.3-flash',
+    );
+
+    expect(model).toEqual(
+      expect.objectContaining({
+        abilities: {
+          files: true,
+          functionCall: true,
+          reasoning: true,
+          structuredOutput: true,
+          video: true,
+          vision: true,
+        },
+        contextWindowTokens: 1_000_000,
+        enabled: true,
+        maxOutput: 131_072,
+        providerId: ModelProvider.GLMCodingPlan,
+        settings: expect.objectContaining({ extendParams: ['glm5_3ReasoningEffort'] }),
+        type: 'chat',
+      }),
+    );
+  });
+
   it('includes GLM-5.3 with its official context, output, and effort capabilities', () => {
     const model = LOBE_DEFAULT_MODEL_LIST.find(
       (m) => m.providerId === ModelProvider.GLMCodingPlan && m.id === 'glm-5.3',

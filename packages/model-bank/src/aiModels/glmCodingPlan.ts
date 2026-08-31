@@ -2,8 +2,34 @@ import { type AIChatModelCard } from '../types/aiModel';
 
 // ref: https://docs.bigmodel.cn/cn/coding-plan/latest-model
 // ref: https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3
+// ref: https://docs.z.ai/guides/vlm/glm-5.3-flash
 
 const glmCodingPlanChatModels: AIChatModelCard[] = [
+  {
+    abilities: {
+      files: true,
+      functionCall: true,
+      reasoning: true,
+      structuredOutput: true,
+      video: true,
+      vision: true,
+    },
+    contextWindowTokens: 1_000_000,
+    description:
+      "GLM-5.3-Flash is the first native multimodal model in Zhipu's GLM-5 series. It combines stronger intelligence than GLM-5.2 with efficient inference, native visual coding, long-context agentic work, and three times the GLM Coding Plan quota of GLM-5.3.",
+    displayName: 'GLM-5.3-Flash',
+    enabled: true,
+    family: 'glm',
+    generation: 'glm-5.3',
+    id: 'glm-5.3-flash',
+    maxOutput: 131_072,
+    organization: 'Zhipu',
+    releasedAt: '2026-08-30',
+    settings: {
+      extendParams: ['glm5_3ReasoningEffort'],
+    },
+    type: 'chat',
+  },
   {
     abilities: {
       functionCall: true,
