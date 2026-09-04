@@ -38,6 +38,7 @@ import {
   readStatus,
   removePid,
   removeStatus,
+  reportDaemonStartupReady,
   spawnDaemon,
   stopDaemon,
   writeStatus,
@@ -177,12 +178,12 @@ export function registerConnectCommand(program: Command) {
     .option('--gateway <url>', 'Device gateway URL')
     .option('--device-id <id>', 'Device ID')
     .option('-v, --verbose', 'Enable verbose logging')
-    .action((options: ConnectOptions) => {
+    .action(async (options: ConnectOptions) => {
       const wasStopped = stopDaemon();
       if (wasStopped) {
         log.info('Stopped existing daemon.');
       }
-      handleDaemonStart({ ...options, daemon: true });
+      await handleDaemonStart({ ...options, daemon: true });
     });
 
   const serviceCmd = connectCmd
@@ -283,7 +284,7 @@ function handleStop() {
   }
 }
 
-function handleDaemonStart(options: ConnectOptions) {
+async function handleDaemonStart(options: ConnectOptions) {
   const existingPid = getRunningDaemonPid();
   if (existingPid !== null) {
     log.error(`Daemon is already running (PID ${existingPid}).`);
@@ -293,7 +294,7 @@ function handleDaemonStart(options: ConnectOptions) {
 
   // Build args to re-run with --daemon-child
   const args = buildDaemonArgs(options);
-  const pid = spawnDaemon(args);
+  const pid = await spawnDaemon(args);
 
   log.info(`Daemon started (PID ${pid}).`);
   log.info(`  Logs: ${getLogPath()}`);
@@ -807,6 +808,8 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
     }
   }
 
+  await reportDaemonStartupReady();
+
   // Connect
   await client.connect();
 
@@ -859,11 +862,16 @@ function bindGatewayClientHandlers(
       log.toolCall(toolCall.apiName, requestId, toolCall.arguments, operationId);
     }
 
+    // Timed on the DEVICE's clock. The server can only see the whole dispatch
+    // round trip, so reporting this back is what separates a slow tool from
+    // slow transport.
+    const startedAt = performance.now();
     const result = await executeToolCall(toolCall.apiName, toolCall.arguments, timeout);
+    const executionTimeMs = Math.round(performance.now() - startedAt);
 
     if (isDaemonChild) {
       appendLog(
-        `[RESULT] ${result.success ? 'OK' : 'FAIL'}${operationId ? ` op=${operationId}` : ''} (${requestId})`,
+        `[RESULT] ${result.success ? 'OK' : 'FAIL'} ${executionTimeMs}ms${operationId ? ` op=${operationId}` : ''} (${requestId})`,
       );
     } else {
       log.toolResult(requestId, result.success, result.content, operationId);
@@ -874,6 +882,7 @@ function bindGatewayClientHandlers(
       result: {
         content: result.content,
         error: result.error,
+        executionTimeMs,
         state: result.state,
         success: result.success,
       },

@@ -1,8 +1,8 @@
 import { getMessageError } from '@lobechat/fetch-sse';
 import { type ChatMessageError } from '@lobechat/types';
 import { AudioPlayer } from '@lobehub/tts/react';
-import { Alert, Flexbox, Highlighter } from '@lobehub/ui';
-import { Button, Select, type SelectProps } from '@lobehub/ui/base-ui';
+import { Flexbox, Highlighter } from '@lobehub/ui';
+import { Alert, Button, Select, type SelectProps } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -13,6 +13,7 @@ vi.mock('./observability', () => ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -35,6 +36,53 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
           url: 'http://localhost:9200',
         }),
     ).not.toThrow();
+  });
+
+  it('rejects an API key over plaintext HTTP even when insecure HTTP is allowed', () => {
+    expect(
+      () =>
+        new ElasticsearchFtsSearchHttpClient({
+          allowInsecureHttp: true,
+          apiKey: 'test-api-key',
+          url: 'http://elasticsearch:9200',
+        }),
+    ).toThrow('must not be sent over plaintext HTTP');
+  });
+
+  it('requires an API key unless insecure private-network access is explicitly allowed', () => {
+    expect(
+      () => new ElasticsearchFtsSearchHttpClient({ url: 'https://search.example.com' }),
+    ).toThrow('API key is required unless ES_ALLOW_INSECURE_HTTP=true');
+  });
+
+  it('sends unauthenticated requests to an explicitly insecure private-network endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ hits: { hits: [] }, took: 1 }), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new ElasticsearchFtsSearchHttpClient({
+      allowInsecureHttp: true,
+      url: 'http://elasticsearch:9200',
+    });
+
+    await client.search({
+      body: { query: { match_all: {} } },
+      entity: 'agents',
+      executedQueryChars: 1,
+      index: 'lobehub-agents',
+      originalQueryChars: 1,
+      pagination: 'bounded',
+      queryFieldCount: 1,
+      truncated: false,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [endpoint, init] = fetchMock.mock.calls[0];
+    expect(String(endpoint)).toBe('http://elasticsearch:9200/lobehub-agents/_search');
+    expect(Object.keys(init.headers)).not.toContain('Authorization');
   });
 
   it('returns no write targets without making requests when no aliases are provided', async () => {
@@ -73,8 +121,12 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
       client.search({
         body: { query: { match_all: {} }, size: 1 },
         entity: 'agents',
+        executedQueryChars: 0,
         index: 'lobehub-dev-agents',
+        originalQueryChars: 0,
         pagination: 'bounded',
+        queryFieldCount: 0,
+        truncated: false,
       }),
     ).resolves.toEqual({
       hits: {
@@ -99,23 +151,38 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
       decodedBytes: expect.any(Number),
       durationMs: expect.any(Number),
       entity: 'agents',
+      errorCode: 'none',
+      executedQueryChars: 0,
       hits: 1,
+      originalQueryChars: 0,
       pagination: 'bounded',
+      queryFieldCount: 0,
       requestBytes: expect.any(Number),
       result: 'success',
       serverTookMs: 12,
+      traceContext: expect.any(String),
+      truncated: false,
+      usage: 'unattributed',
     });
   });
 
-  it('surfaces HTTP failures without copying response payloads into the error', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ error: 'sensitive backend detail' }), { status: 503 }),
-        ),
+  it('classifies nested clause-limit failures without copying response payloads into the error', async () => {
+    const response = new Response(
+      JSON.stringify({
+        error: {
+          caused_by: {
+            reason: 'too many nested clauses: secret-query-fragment',
+            type: 'too_many_clauses',
+          },
+          reason: 'all shards failed',
+          root_cause: [{ type: 'query_shard_exception' }],
+          type: 'search_phase_execution_exception',
+        },
+      }),
+      { status: 400 },
     );
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
     const client = new ElasticsearchFtsSearchHttpClient({
       apiKey: 'test-api-key',
       url: 'https://search.example.com',
@@ -125,16 +192,73 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
       client.search({
         body: { query: { match_all: {} } },
         entity: 'agents',
+        executedQueryChars: 96,
         index: 'lobehub-dev-agents',
+        originalQueryChars: 7000,
         pagination: 'bounded',
+        queryFieldCount: 8,
+        truncated: true,
       }),
     ).rejects.toMatchObject({
-      message: 'Elasticsearch search request failed (503)',
+      errorCode: 'too_many_clauses',
+      message: 'Elasticsearch search request failed (400, too_many_clauses)',
+      status: 400,
+    });
+    expect(response.bodyUsed).toBe(true);
+    expect(mocks.recordSearchRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entity: 'agents',
+        errorCode: 'too_many_clauses',
+        result: 'http_error',
+      }),
+    );
+    expect(errorSpy).toHaveBeenCalledWith('[fts-search] Elasticsearch request failed', {
+      entity: 'agents',
+      errorCode: 'too_many_clauses',
+      executedQueryChars: 96,
+      originalQueryChars: 7000,
+      queryFieldCount: 8,
+      requestBytes: expect.any(Number),
+      status: 400,
+      traceContext: expect.any(String),
+      traceId: expect.any(String),
+      truncated: true,
+      usage: 'unattributed',
+    });
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('secret-query-fragment');
+  });
+
+  it('classifies generic server failures without exposing the response body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ error: 'sensitive backend detail' }), { status: 503 }),
+        ),
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const client = new ElasticsearchFtsSearchHttpClient({
+      apiKey: 'test-api-key',
+      url: 'https://search.example.com',
+    });
+
+    await expect(
+      client.search({
+        body: { query: { match_all: {} } },
+        entity: 'agents',
+        executedQueryChars: 0,
+        index: 'lobehub-dev-agents',
+        originalQueryChars: 0,
+        pagination: 'bounded',
+        queryFieldCount: 0,
+        truncated: false,
+      }),
+    ).rejects.toMatchObject({
+      errorCode: 'server_error',
+      message: 'Elasticsearch search request failed (503, server_error)',
       status: 503,
     });
-    expect(mocks.recordSearchRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ entity: 'agents', result: 'http_error' }),
-    );
   });
 
   it('rejects malformed successful responses', async () => {
@@ -156,8 +280,12 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
       client.search({
         body: { query: { match_all: {} } },
         entity: 'agents',
+        executedQueryChars: 0,
         index: 'lobehub-dev-agents',
+        originalQueryChars: 0,
         pagination: 'bounded',
+        queryFieldCount: 0,
+        truncated: false,
       }),
     ).rejects.toThrow('Elasticsearch search response has an invalid shape');
     expect(mocks.recordSearchRequest).toHaveBeenCalledWith(
@@ -173,8 +301,12 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
     const input = {
       body: { query: { match_all: {} } },
       entity: 'agents' as const,
+      executedQueryChars: 0,
       index: 'lobehub-dev-agents',
+      originalQueryChars: 0,
       pagination: 'bounded' as const,
+      queryFieldCount: 0,
+      truncated: false,
     };
 
     vi.stubGlobal(
@@ -240,18 +372,12 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
         Response.json({
           'lobehub-agents-v2': {
             mappings: {
-              fts_search_sync_deleted: {
-                full_name: 'fts_search_sync_deleted',
-                mapping: { fts_search_sync_deleted: { type: 'boolean' } },
-              },
+              properties: { fts_search_sync_deleted: { type: 'boolean' } },
             },
           },
           'lobehub-topics-v2': {
             mappings: {
-              fts_search_sync_deleted: {
-                full_name: 'fts_search_sync_deleted',
-                mapping: { fts_search_sync_deleted: { type: 'boolean' } },
-              },
+              properties: { fts_search_sync_deleted: { type: 'boolean' } },
             },
           },
         }),
@@ -267,7 +393,7 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
     ).resolves.toBeUndefined();
     expect(fetchMock.mock.calls.map(([url]) => url.toString())).toEqual([
       'https://search.example.com/_alias/lobehub-agents,lobehub-topics',
-      'https://search.example.com/lobehub-agents-v2,lobehub-topics-v2/_mapping/field/fts_search_sync_deleted',
+      'https://search.example.com/lobehub-agents-v2,lobehub-topics-v2?filter_path=*.mappings.properties.fts_search_sync_deleted',
     ]);
   });
 
@@ -286,16 +412,12 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
           Response.json({
             'lobehub-agents-v2': {
               mappings: {
-                fts_search_sync_deleted: {
-                  mapping: { fts_search_sync_deleted: { type: 'boolean' } },
-                },
+                properties: { fts_search_sync_deleted: { type: 'boolean' } },
               },
             },
             'lobehub-topics-v2': {
               mappings: {
-                fts_search_sync_deleted: {
-                  mapping: { fts_search_sync_deleted: { type: 'boolean' } },
-                },
+                properties: { fts_search_sync_deleted: { type: 'boolean' } },
               },
             },
           }),
@@ -505,9 +627,7 @@ describe('ElasticsearchFtsSearchHttpClient', () => {
           Response.json({
             'lobehub-agents-v2': {
               mappings: {
-                fts_search_sync_deleted: {
-                  mapping: { fts_search_sync_deleted: { type: 'boolean' } },
-                },
+                properties: { fts_search_sync_deleted: { type: 'boolean' } },
               },
             },
           }),

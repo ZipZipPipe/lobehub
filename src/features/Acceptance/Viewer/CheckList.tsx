@@ -51,6 +51,7 @@ import {
 } from '../Report/MarkdownEvidence';
 import { hasRenderableEvidence, readVisualizationManifest } from '../Report/visualization';
 import { VisualizationDeltaBadge, VisualizationRenderer } from '../Report/VisualizationRenderer';
+import { checkDisplayTitle } from '../utils';
 import { AnnotatedImage } from './Annotation';
 import { AttachmentThumbs } from './attachments';
 import { openCheckRejectModal } from './CheckRejectModal';
@@ -609,10 +610,11 @@ const EvidenceList = memo<{
         }
         if (item.content && markdownTextEvidenceTypes.has(item.type))
           return (
-            <Flexbox gap={4} key={item.id}>
-              <CollapsibleMarkdownEvidence>{item.content}</CollapsibleMarkdownEvidence>
-              {caption}
-            </Flexbox>
+            // An authored alt/description becomes the fold row's title itself —
+            // the supplement below the row duplicated it one line later.
+            <CollapsibleMarkdownEvidence key={item.id} title={description ?? undefined}>
+              {item.content}
+            </CollapsibleMarkdownEvidence>
           );
         if (item.content)
           return (
@@ -955,6 +957,7 @@ const CheckRow = memo<{
     // unreviewed check would push the evidence the reviewer came for below the fold.
     const [proposalOpen, setProposalOpen] = useState(false);
     const meta = STATE_META[check.state];
+    const title = checkDisplayTitle(check.title, t('acceptance.checks.holisticTitle'));
     const counts = evidenceCounts(check.evidence);
     const visualization = readVisualizationManifest(check.result?.metadata);
 
@@ -996,7 +999,7 @@ const CheckRow = memo<{
     const openReject = (fromProposal?: CheckProposal) =>
       openCheckRejectModal({
         checkDescription: check.planItem?.description,
-        checkTitle: `C${check.seq} · ${check.title}`,
+        checkTitle: `C${check.seq} · ${title}`,
         draftKey: check.id,
         evidence: check.evidence
           .filter((item) => isAnnotatable(item))
@@ -1152,7 +1155,7 @@ const CheckRow = memo<{
                 className={expanded ? undefined : styles.titleEllipsis}
                 style={{ fontSize: 13, minWidth: 0 }}
               >
-                {check.title}
+                {title}
               </Text>
               {!check.required && (
                 <Tooltip title={t('acceptance.checks.notRequiredHint')}>
@@ -1491,6 +1494,7 @@ const CheckRow = memo<{
                 <Flexbox gap={10} style={{ marginBlockStart: 6 }}>
                   {hasAnnotatableEvidence(check) && (
                     <Button
+                      outdent
                       icon={<Icon icon={Images} />}
                       style={{ alignSelf: 'flex-start' }}
                       type={'text'}

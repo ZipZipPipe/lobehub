@@ -10,9 +10,16 @@ import { Fragment, memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { TASK_STATUS_VISUALS } from '@/components/ExecutionStatus';
+import { openAddGoalTaskModal } from '@/features/AgentGoals/AddTaskModal';
 import RunningGlyph from '@/features/Home/components/RunningGlyph';
 import { useActivityTime } from '@/hooks/useActivityTime';
 
+import {
+  coordinatorGateReason,
+  coordinatorNodeTitleKey,
+  coordinatorReasonCopy,
+  viewGateKind,
+} from './coordinatorCopy';
 import type { FrontierItem, GoalGraphView, GoalNodeView } from './goalGraphViewModel';
 import { useElapsed } from './useElapsed';
 
@@ -53,8 +60,9 @@ const styles = createStaticStyles(({ css }) => ({
     }
   `,
   body: css`
-    padding-block: 2px 14px;
-    padding-inline: 46px 12px;
+    /* Aligned with the row title (glyph + gap), not floated on its own indent. */
+    padding-block: 8px 14px;
+    padding-inline: 26px 12px;
   `,
   deps: css`
     font-family: ${cssVar.fontFamilyCode};
@@ -71,7 +79,6 @@ const styles = createStaticStyles(({ css }) => ({
   `,
   label: css`
     font-size: 12px;
-    font-weight: 600;
     color: ${cssVar.colorTextSecondary};
   `,
   list: css`
@@ -102,8 +109,7 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 export interface FrontierActions {
-  addTask: (title: string) => Promise<void>;
-  advance: () => void;
+  addTask: (title: string, description?: string) => Promise<void>;
   decide: (decisionId: string, optionId: string, resolution?: string) => void;
 }
 
@@ -112,6 +118,8 @@ interface FrontierProps {
   canEdit: boolean;
   graph: GoalGraphView;
   onSelect: (nodeId: string) => void;
+  /** The coordinator is still decomposing — the empty list is a promise, not a lull. */
+  planning?: boolean;
 }
 
 /** Server option ids are stable; their labels are English strings from the coordinator. */
@@ -179,6 +187,18 @@ const RowGlyph = memo<{ kind: FrontierItem['kind']; view: GoalNodeView }>(({ kin
 
 RowGlyph.displayName = 'GoalFrontierRowGlyph';
 
+const AttemptReason = memo<{ reason?: string | null }>(({ reason }) => {
+  const { t } = useTranslation('chat');
+  const copy = coordinatorReasonCopy(reason);
+  return (
+    <Text ellipsis fontSize={12} style={{ flex: 1, minWidth: 0 }} type={'secondary'}>
+      {copy ? t(copy.key as any, copy.params) : (reason ?? '')}
+    </Text>
+  );
+});
+
+AttemptReason.displayName = 'GoalAttemptReason';
+
 const AttemptLedger = memo<{ view: GoalNodeView }>(({ view }) => {
   const { t } = useTranslation('chat');
   if (view.attempts.length === 0) return null;
@@ -215,9 +235,7 @@ const AttemptLedger = memo<{ view: GoalNodeView }>(({ view }) => {
           >
             {t(`goalProcess.attempts.${attempt.outcome}` as const)}
           </Text>
-          <Text ellipsis fontSize={12} style={{ flex: 1, minWidth: 0 }} type={'secondary'}>
-            {attempt.reason ?? ''}
-          </Text>
+          <AttemptReason reason={attempt.reason} />
         </Flexbox>
       ))}
     </Flexbox>
@@ -252,7 +270,7 @@ DoneTime.displayName = 'GoalDoneTime';
 
 const StaleBody = memo<{ view: GoalNodeView }>(({ view }) => {
   const { t } = useTranslation('chat');
-  const { text } = useActivityTime(view.node.updatedAt);
+  const { text } = useActivityTime(view.heartbeatAt);
   return (
     <Text fontSize={13} type={'secondary'}>
       {t('goalProcess.stale.description', { duration: text })}
@@ -268,7 +286,7 @@ const FrontierRow = memo<{
   item: FrontierItem;
   numbers: Map<string, number>;
   onSelect: (nodeId: string) => void;
-  /** A gate's ledger is the ledger of the Work it was opened for. */
+  /** A gate's ledger is the ledger of the Task it was opened for. */
   subject?: GoalNodeView;
 }>(({ actions, canEdit, item, numbers, onSelect, subject }) => {
   const { t } = useTranslation('chat');
@@ -278,20 +296,28 @@ const FrontierRow = memo<{
   const { node } = view;
   const deps = view.dependsOn.map((id) => numbers.get(id)).filter(Boolean);
 
+  // Coordinator-authored gates carry English strings; recognized shapes render
+  // in the user's language, arbitrary gates keep their stored copy.
+  const coordinatorTitleKey = coordinatorNodeTitleKey(view);
+  const gateKind = item.kind === 'gate' ? viewGateKind(view) : undefined;
+  const rawGateReason = gateKind ? coordinatorGateReason(view.decision?.question) : undefined;
+  const gateReasonCopy = coordinatorReasonCopy(rawGateReason);
+  const gateReasonText = gateReasonCopy
+    ? t(gateReasonCopy.key as any, gateReasonCopy.params)
+    : rawGateReason;
+
+  // Gate rows carry no tag: the expanded card with its action buttons already
+  // says "this needs you", and a warning chip next to it is noise.
   const tag =
-    item.kind === 'gate'
-      ? { color: 'warning', text: t('goalProcess.tag.needsDecision') }
-      : item.kind === 'stale'
-        ? { color: 'error', text: t('goalProcess.tag.lost') }
-        : item.kind === 'done'
-          ? {
-              color: undefined,
-              text:
-                node.status === 'resolved'
-                  ? t('goalProcess.tag.done')
-                  : t('goalProcess.tag.retired'),
-            }
-          : null;
+    item.kind === 'stale'
+      ? { color: 'error', text: t('goalProcess.tag.lost') }
+      : item.kind === 'done'
+        ? {
+            color: undefined,
+            text:
+              node.status === 'resolved' ? t('goalProcess.tag.done') : t('goalProcess.tag.retired'),
+          }
+        : null;
 
   const stop = (event: React.MouseEvent) => event.stopPropagation();
 
@@ -307,7 +333,7 @@ const FrontierRow = memo<{
         {view.seq !== undefined && <span className={styles.num}>#{view.seq}</span>}
         <RowGlyph kind={item.kind} view={view} />
         <Text ellipsis style={{ flexShrink: 1, maxWidth: '60%', minWidth: 0 }} weight={500}>
-          {node.title}
+          {coordinatorTitleKey ? t(coordinatorTitleKey as any) : node.title}
         </Text>
         {tag && (
           <Tag color={tag.color} size={'small'}>
@@ -323,77 +349,51 @@ const FrontierRow = memo<{
         <Flexbox horizontal align={'center'} gap={8} style={{ flex: 'none' }}>
           {item.kind === 'running' && <RunningClock startedAt={view.startedAt} />}
           {item.kind === 'done' && <DoneTime view={view} />}
-          {item.kind === 'stale' && canEdit && (
-            <Button
-              size={'small'}
-              type={'primary'}
-              onClick={(event) => {
-                stop(event);
-                actions.advance();
-              }}
-            >
-              {t('goalProcess.advance.label')}
-            </Button>
-          )}
-          {item.kind === 'gate' &&
-            canEdit &&
-            view.decision?.options?.map((option) => (
-              <Tooltip key={option.id} title={option.description}>
-                <Button
-                  size={'small'}
-                  type={option.id === view.decision?.recommendedOptionId ? 'primary' : 'default'}
-                  onClick={(event) => {
-                    stop(event);
-                    actions.decide(view.decision!.id, option.id, note.trim() || undefined);
-                  }}
-                >
-                  {optionLabel(option)}
-                </Button>
-              </Tooltip>
-            ))}
         </Flexbox>
       </Flexbox>
 
       {item.rank === 0 && (
-        <Flexbox className={styles.body} gap={12} onClick={stop}>
+        <Flexbox className={styles.body} gap={14} onClick={stop}>
           {item.kind === 'gate' && view.decision && (
-            <>
-              <Flexbox gap={4}>
-                <span className={styles.label}>{t('goalProcess.gate.why')}</span>
-                <Text fontSize={13}>{view.decision.question}</Text>
-              </Flexbox>
-              {!!view.decision.options?.length && (
-                <Flexbox gap={6}>
-                  <span className={styles.label}>{t('goalProcess.gate.options')}</span>
-                  {view.decision.options.map((option) => (
-                    <div className={styles.option} key={option.id}>
-                      <Text fontSize={13} weight={500}>
-                        {optionLabel(option)}
-                        {option.id === view.decision?.recommendedOptionId
-                          ? `（${t('goalProcess.gate.recommended')}）`
-                          : ''}
-                      </Text>
-                      <Text fontSize={13} type={'secondary'}>
-                        {option.description ?? ''}
-                      </Text>
-                    </div>
-                  ))}
-                </Flexbox>
-              )}
-            </>
+            // State the problem itself, in the user's language when the
+            // coordinator's vocabulary is recognized — the buttons below
+            // already carry the choices, so no extra framing sentence.
+            <Text fontSize={13} weight={500}>
+              {gateReasonText ?? view.decision.question}
+            </Text>
           )}
           {item.kind === 'stale' && <StaleBody view={view} />}
           <AttemptLedger view={subject ?? view} />
           {item.kind === 'gate' && canEdit && (
-            <Flexbox gap={4}>
-              <span className={styles.label}>{t('goalProcess.gate.noteLabel')}</span>
-              <TextArea
-                autoSize={{ maxRows: 3, minRows: 1 }}
-                placeholder={t('goalProcess.gate.notePlaceholder')}
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-              />
-            </Flexbox>
+            <>
+              <Flexbox gap={4}>
+                <span className={styles.label}>{t('goalProcess.gate.noteLabel')}</span>
+                <TextArea
+                  autoSize={{ maxRows: 3, minRows: 1 }}
+                  placeholder={t('goalProcess.gate.notePlaceholder')}
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                />
+              </Flexbox>
+              {/* Actions close the card: read the situation, add guidance, then decide. */}
+              <Flexbox horizontal gap={8}>
+                {view.decision?.options?.map((option) => (
+                  <Tooltip key={option.id} title={option.description}>
+                    <Button
+                      type={
+                        option.id === view.decision?.recommendedOptionId ? 'primary' : 'default'
+                      }
+                      onClick={(event) => {
+                        stop(event);
+                        actions.decide(view.decision!.id, option.id, note.trim() || undefined);
+                      }}
+                    >
+                      {optionLabel(option)}
+                    </Button>
+                  </Tooltip>
+                ))}
+              </Flexbox>
+            </>
           )}
         </Flexbox>
       )}
@@ -403,66 +403,24 @@ const FrontierRow = memo<{
 
 FrontierRow.displayName = 'GoalFrontierRow';
 
-const AddTaskRow = memo<{ onAdd: (title: string) => Promise<void> }>(({ onAdd }) => {
+/** Opening a modal keeps the frontier header quiet — the brief gets a real form. */
+const AddTaskButton = memo<{ onAdd: FrontierActions['addTask'] }>(({ onAdd }) => {
   const { t } = useTranslation('chat');
-  const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    if (!title.trim() || busy) return;
-    setBusy(true);
-    try {
-      await onAdd(title.trim());
-      setTitle('');
-      setOpen(false);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!open)
-    return (
-      <Button
-        icon={<Icon icon={Plus} />}
-        size={'small'}
-        type={'text'}
-        onClick={() => setOpen(true)}
-      >
-        {t('goalProcess.frontier.add')}
-      </Button>
-    );
-
   return (
-    <Flexbox horizontal align={'center'} gap={8}>
-      <TextArea
-        autoFocus
-        autoSize={{ maxRows: 2, minRows: 1 }}
-        placeholder={t('goalProcess.frontier.add')}
-        style={{ width: 260 }}
-        value={title}
-        onChange={(event) => setTitle(event.target.value)}
-        onPressEnter={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      />
-      <Button
-        disabled={!title.trim()}
-        loading={busy}
-        size={'small'}
-        type={'primary'}
-        onClick={submit}
-      >
-        {t('goalProcess.frontier.add')}
-      </Button>
-    </Flexbox>
+    <Button
+      icon={<Icon icon={Plus} />}
+      size={'small'}
+      type={'text'}
+      onClick={() => openAddGoalTaskModal({ onAdd })}
+    >
+      {t('goalProcess.frontier.add')}
+    </Button>
   );
 });
 
-AddTaskRow.displayName = 'GoalAddTaskRow';
+AddTaskButton.displayName = 'GoalAddTaskButton';
 
-const Frontier = memo<FrontierProps>(({ actions, canEdit, graph, onSelect }) => {
+const Frontier = memo<FrontierProps>(({ actions, canEdit, graph, onSelect, planning }) => {
   const { t } = useTranslation('chat');
   const [showBlocked, setShowBlocked] = useState(false);
 
@@ -487,25 +445,36 @@ const Frontier = memo<FrontierProps>(({ actions, canEdit, graph, onSelect }) => 
             </Text>
           )}
         </Flexbox>
-        {canEdit && <AddTaskRow onAdd={actions.addTask} />}
+        {canEdit && <AddTaskButton onAdd={actions.addTask} />}
       </Flexbox>
 
       <div className={styles.list}>
         <Block gap={0} padding={2} variant={'borderless'}>
-          {graph.frontier.length === 0 && (
-            <Flexbox gap={2} padding={12}>
-              <Text weight={500}>
-                {achieved
-                  ? t('goalProcess.frontier.achievedTitle')
-                  : t('goalProcess.frontier.emptyTitle')}
-              </Text>
-              <Text fontSize={12} type={'secondary'}>
-                {achieved
-                  ? t('goalProcess.frontier.achievedDescription')
-                  : t('goalProcess.frontier.emptyDescription')}
-              </Text>
-            </Flexbox>
-          )}
+          {graph.frontier.length === 0 &&
+            (planning ? (
+              <Flexbox horizontal align={'center'} gap={10} padding={12}>
+                <RunningGlyph size={16} />
+                <Flexbox gap={2}>
+                  <Text weight={500}>{t('goalProcess.planning.title')}</Text>
+                  <Text fontSize={12} type={'secondary'}>
+                    {t('goalProcess.planning.description')}
+                  </Text>
+                </Flexbox>
+              </Flexbox>
+            ) : (
+              <Flexbox gap={2} padding={12}>
+                <Text weight={500}>
+                  {achieved
+                    ? t('goalProcess.frontier.achievedTitle')
+                    : t('goalProcess.frontier.emptyTitle')}
+                </Text>
+                <Text fontSize={12} type={'secondary'}>
+                  {achieved
+                    ? t('goalProcess.frontier.achievedDescription')
+                    : t('goalProcess.frontier.emptyDescription')}
+                </Text>
+              </Flexbox>
+            ))}
           {graph.frontier.map((item, index) => (
             <Fragment key={item.key}>
               {index > 0 && <Divider dashed style={{ margin: 0 }} />}

@@ -142,6 +142,10 @@ const {
   cursorAcpSessionConstructMock,
   cursorAcpSessionInterruptMock,
   cursorAcpSessionRunMock,
+  droidAcpSessionCloseMock,
+  droidAcpSessionConstructMock,
+  droidAcpSessionInterruptMock,
+  droidAcpSessionRunMock,
   grokAcpSessionCloseMock,
   grokAcpSessionConstructMock,
   grokAcpSessionInterruptMock,
@@ -168,6 +172,10 @@ const {
   cursorAcpSessionConstructMock: vi.fn(),
   cursorAcpSessionInterruptMock: vi.fn(),
   cursorAcpSessionRunMock: vi.fn(),
+  droidAcpSessionCloseMock: vi.fn(),
+  droidAcpSessionConstructMock: vi.fn(),
+  droidAcpSessionInterruptMock: vi.fn(),
+  droidAcpSessionRunMock: vi.fn(),
   grokAcpSessionCloseMock: vi.fn(),
   grokAcpSessionConstructMock: vi.fn(),
   grokAcpSessionInterruptMock: vi.fn(),
@@ -426,12 +434,52 @@ vi.mock('@lobechat/heterogeneous-agents/spawn', async (importOriginal) => {
     }
   }
 
+  class MockDroidAcpSession {
+    constructor(private readonly options: any) {
+      droidAcpSessionConstructMock(options);
+    }
+
+    close() {
+      droidAcpSessionCloseMock();
+    }
+
+    interrupt() {
+      droidAcpSessionInterruptMock();
+    }
+
+    async run() {
+      if (droidAcpSessionRunMock.getMockImplementation()) {
+        return droidAcpSessionRunMock(this.options);
+      }
+      const now = Date.now();
+      this.options.onRuntimeStatus({
+        activeTasks: [],
+        lastEventAt: now,
+        operationId: this.options.operationId,
+        sessionId: this.options.sessionId,
+        state: 'running',
+        transport: 'droid-acp',
+      });
+      this.options.onSessionId('droid_session_1');
+      await this.options.onEvents([
+        {
+          data: { stopReason: 'end_turn' },
+          operationId: this.options.operationId,
+          stepIndex: 0,
+          timestamp: now,
+          type: 'agent_runtime_end',
+        },
+      ]);
+    }
+  }
+
   return {
     ...actual,
     ClaudeAgentSdkSession: MockClaudeAgentSdkSession,
     CodexAppServerClient: MockCodexAppServerClient,
     CodexThreadSession: MockCodexThreadSession,
     CursorAcpSession: MockCursorAcpSession,
+    DroidAcpSession: MockDroidAcpSession,
     isCodexAppServerCompatibilityError: (error: Error) =>
       error.name === 'CodexAppServerConnectionError',
     GrokAcpSession: MockGrokAcpSession,
@@ -606,6 +654,10 @@ describe('HeterogeneousAgentCtr', () => {
     traeAcpSessionConstructMock.mockReset();
     traeAcpSessionInterruptMock.mockReset();
     traeAcpSessionRunMock.mockReset();
+    droidAcpSessionCloseMock.mockReset();
+    droidAcpSessionConstructMock.mockReset();
+    droidAcpSessionInterruptMock.mockReset();
+    droidAcpSessionRunMock.mockReset();
     mockGetAllWindows.mockReset();
     platformMock.mockReturnValue('linux');
     vi.mocked(existsSync).mockReturnValue(true);
@@ -2295,7 +2347,7 @@ describe('HeterogeneousAgentCtr', () => {
         ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
       ).rejects.toThrow('Codex CLI was not found');
 
-      expect(detect).toHaveBeenCalledWith('codex', true);
+      expect(detect).toHaveBeenCalledWith('codex');
       expect(spawnCalls).toHaveLength(0);
     });
 
@@ -2483,7 +2535,7 @@ describe('HeterogeneousAgentCtr', () => {
       ).rejects.toThrow('Codex CLI was not found');
 
       expect(statSync).toHaveBeenCalledWith(FAKE_DESKTOP_PATH, expect.anything());
-      expect(detect).toHaveBeenCalledWith('codex', true);
+      expect(detect).toHaveBeenCalledWith('codex');
     });
 
     it('reports a missing working directory instead of claiming the Codex CLI is missing', async () => {
@@ -2528,7 +2580,7 @@ describe('HeterogeneousAgentCtr', () => {
         ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
       ).rejects.toThrow('Claude Code CLI was not found');
 
-      expect(detect).toHaveBeenCalledWith('claude', true);
+      expect(detect).toHaveBeenCalledWith('claude');
       expect(spawnCalls).toHaveLength(0);
     });
 
@@ -2548,7 +2600,7 @@ describe('HeterogeneousAgentCtr', () => {
         ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
       ).rejects.toThrow('CodeBuddy CLI was not found');
 
-      expect(detect).toHaveBeenCalledWith('codebuddy', true);
+      expect(detect).toHaveBeenCalledWith('codebuddy');
       expect(spawnCalls).toHaveLength(0);
     });
 
@@ -2565,7 +2617,7 @@ describe('HeterogeneousAgentCtr', () => {
         ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
       ).rejects.toThrow('Amp CLI was not found');
 
-      expect(detect).toHaveBeenCalledWith('amp', true);
+      expect(detect).toHaveBeenCalledWith('amp');
       expect(spawnCalls).toHaveLength(0);
     });
 
@@ -2585,7 +2637,7 @@ describe('HeterogeneousAgentCtr', () => {
         ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
       ).rejects.toThrow('OpenCode CLI was not found');
 
-      expect(detect).toHaveBeenCalledWith('opencode', true);
+      expect(detect).toHaveBeenCalledWith('opencode');
       expect(spawnCalls).toHaveLength(0);
     });
 
@@ -3434,6 +3486,112 @@ describe('HeterogeneousAgentCtr', () => {
         message: 'Pi could not authenticate. Run `pi`, use `/login`, then retry.',
         stderr: 'No API key found for provider anthropic',
       });
+    });
+  });
+
+  describe('sendPrompt (droid)', () => {
+    it('routes Factory Droid through ACP and persists the native session id', async () => {
+      const send = vi.fn();
+      mockGetAllWindows.mockReturnValue([
+        {
+          isDestroyed: () => false,
+          webContents: { send },
+        },
+      ]);
+      const ctr = new HeterogeneousAgentCtr({
+        appStoragePath,
+        storeManager: { get: vi.fn() },
+      } as any);
+      const { sessionId } = await ctr.startSession({
+        agentType: 'droid',
+        args: ['--tag', 'lobe'],
+        command: 'droid',
+        initialModel: 'gpt-5.4',
+        resumeSessionId: 'droid_session_old',
+      });
+
+      await ctr.sendPrompt({ operationId: 'op-droid', prompt: 'inspect this repo', sessionId });
+
+      expect(spawnCalls).toHaveLength(0);
+      expect(droidAcpSessionConstructMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          args: ['--tag', 'lobe'],
+          clientVersion: '1.0.0-test',
+          commandPath: 'droid',
+          cwd: FAKE_DESKTOP_PATH,
+          initialModel: 'gpt-5.4',
+          operationId: 'op-droid',
+          prompt: [{ text: 'inspect this repo', type: 'text' }],
+          resumeSessionId: 'droid_session_old',
+          sessionId,
+        }),
+      );
+      await expect(ctr.getSessionInfo({ sessionId })).resolves.toEqual({
+        agentSessionId: 'droid_session_1',
+      });
+      expect(send).toHaveBeenCalledWith('heteroAgentRuntimeStatus', {
+        activeTasks: [],
+        lastEventAt: expect.any(Number),
+        operationId: 'op-droid',
+        sessionId,
+        state: 'running',
+        transport: 'droid-acp',
+      });
+      expect(send).toHaveBeenCalledWith('heteroAgentSessionComplete', { sessionId });
+    });
+
+    it('classifies a missing Droid ACP session for resume fallback', async () => {
+      const send = vi.fn();
+      mockGetAllWindows.mockReturnValue([
+        {
+          isDestroyed: () => false,
+          webContents: { send },
+        },
+      ]);
+      const missingSessionError = new AcpRpcResponseError('session/load', {
+        code: -32_603,
+        data: { details: 'Session missing-droid-session not found' },
+        message: 'Failed to load session',
+      });
+      droidAcpSessionRunMock.mockImplementation(async (options) => {
+        await options.onStderr('Droid ACP diagnostic\n');
+        throw missingSessionError;
+      });
+      const ctr = new HeterogeneousAgentCtr({
+        appStoragePath,
+        storeManager: { get: vi.fn() },
+      } as any);
+      const { sessionId } = await ctr.startSession({
+        agentType: 'droid',
+        command: 'droid',
+        cwd: '/Users/fake/projects/repo',
+        resumeSessionId: 'missing-droid-session',
+      });
+
+      await expect(
+        ctr.sendPrompt({ operationId: 'op-droid-resume', prompt: 'continue', sessionId }),
+      ).rejects.toThrow(
+        'The saved Factory Droid session could not be found, so a new conversation will start.',
+      );
+
+      expect(send).toHaveBeenCalledWith('heteroAgentSessionError', {
+        error: {
+          agentType: 'droid',
+          code: HeterogeneousAgentSessionErrorCode.ResumeThreadNotFound,
+          command: 'droid',
+          details: {
+            code: -32_603,
+            data: { details: 'Session missing-droid-session not found' },
+          },
+          message:
+            'The saved Factory Droid session could not be found, so a new conversation will start.',
+          resumeSessionId: 'missing-droid-session',
+          stderr: missingSessionError.message,
+          workingDirectory: '/Users/fake/projects/repo',
+        },
+        sessionId,
+      });
+      expect(send).not.toHaveBeenCalledWith('heteroAgentSessionComplete', { sessionId });
     });
   });
 

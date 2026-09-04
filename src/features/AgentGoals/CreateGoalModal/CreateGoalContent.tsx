@@ -7,7 +7,7 @@ import { useEditor } from '@lobehub/editor/react';
 import { Flexbox, Icon } from '@lobehub/ui';
 import { ActionIcon, Button, Text, toast, useModalContext } from '@lobehub/ui/base-ui';
 import { InputNumber } from 'antd';
-import { createGlobalStyle, createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles, cssVar } from 'antd-style';
 import {
   ArrowLeft,
   Paperclip,
@@ -21,6 +21,7 @@ import {
 import { type KeyboardEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import GeneratingBorder from '@/components/GeneratingBorder';
 import NeuralNetworkLoading from '@/components/NeuralNetworkLoading';
 import {
   CriterionList,
@@ -133,65 +134,9 @@ const styles = createStaticStyles(({ css }) => ({
     padding-inline: 16px;
   `,
   inputShell: css`
-    position: relative;
-
     overflow: hidden;
-
     min-height: 208px;
-    border-radius: 8px;
-
     background: ${cssVar.colorBgElevated};
-  `,
-  inputShellLoading: css`
-    background: ${cssVar.colorBgElevated};
-
-    &::after {
-      pointer-events: none;
-      content: '';
-
-      position: absolute;
-      z-index: 1;
-      inset: 0;
-
-      padding: 2px;
-      border-radius: inherit;
-
-      background: conic-gradient(
-        from var(--goal-border-angle),
-        ${cssVar.colorBorderSecondary} 0deg 210deg,
-        #ff3d8d 238deg,
-        #8b5cf6 258deg,
-        #00c8ff 278deg,
-        #22e6a8 298deg,
-        #ffd43b 318deg,
-        #ff6b35 338deg,
-        ${cssVar.colorBorderSecondary} 360deg
-      );
-
-      mask:
-        linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
-
-      animation: goal-input-flow 1.8s linear infinite;
-
-      mask-composite: exclude;
-    }
-
-    @keyframes goal-input-flow {
-      from {
-        --goal-border-angle: 0deg;
-      }
-
-      to {
-        --goal-border-angle: 360deg;
-      }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      &::after {
-        animation: none;
-      }
-    }
   `,
   instructionEditor: css`
     min-height: 36px;
@@ -241,14 +186,6 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorText};
   `,
 }));
-
-const GoalBorderFlowStyle = createGlobalStyle`
-  @property --goal-border-angle {
-    inherits: false;
-    initial-value: 0deg;
-    syntax: '<angle>';
-  }
-`;
 
 const GENERATION_ESTIMATE_SECONDS = 90;
 
@@ -436,24 +373,32 @@ const CreateGoalContent = memo<CreateGoalContentProps>((props) => {
       const graph = await goalService.create({
         agentId,
         config: {
-          recovery: { maxAttemptsPerWork: resolveGoalAttemptBudget(plan.maxIterations) },
+          recovery: { maxAttemptsPerTask: resolveGoalAttemptBudget(plan.maxIterations) },
         },
-        // `maxIterations` is the per-Work attempt budget above; it is not the
-        // graph-wide round cap, which counts runs across every Work and would
+        // `maxIterations` is the per-Task attempt budget above; it is not the
+        // graph-wide round cap, which counts runs across every Task and would
         // strand the fourth task of a goal whose limit is three attempts.
+        // Structured criteria persist alongside the prose requirement: the goal
+        // page shows/edits them and the terminal acceptance is gated on them.
+        criteria: reviewedCriteria.map(({ description, instruction: how, title: name }) => ({
+          description,
+          instruction: how,
+          title: name,
+        })),
         maxTotalCost: budget.maxTotalCost ?? undefined,
+        // No seed tasks: the coordinator plans the decomposition on first
+        // advance, turning a complex ask into several explorable directions.
+        problemDescription: instruction,
         projectId,
         requirement: buildGoalRequirement(title, reviewedCriteria, budget.requirement),
         title,
-        work: [{ description: instruction, title }],
       });
-      // `goal.create` already queued an advance; this runs the same driver so
-      // the goal is visibly moving by the time the modal closes even where the
-      // queue is unavailable. It must be `advance`, not a single tick: whichever
-      // driver claims the Work has to carry it past binding the task into
-      // actually starting it, and the loser stops at `waiting_external`.
-      await goalService.advance(graph.goal.id);
-
+      // `goal.create` already queued the first advance server-side, but on a
+      // queue-less serverless deployment that kickoff is an in-process timer
+      // the host may freeze before firing. This request-bound advance is the
+      // durable fallback — fired and forgotten so the modal still closes
+      // immediately; the server dedupes a raced decomposition.
+      void goalService.advance(graph.goal.id).catch(() => {});
       close();
       onCreated?.({ agentId: graph.goal.agentId ?? undefined, goalId: graph.goal.id });
     } catch (error) {
@@ -488,7 +433,6 @@ const CreateGoalContent = memo<CreateGoalContentProps>((props) => {
 
   return (
     <Flexbox onKeyDown={handleKeyDown}>
-      <GoalBorderFlowStyle />
       <Flexbox horizontal className={styles.head}>
         <Flexbox flex={1} gap={6}>
           {step === 'review' && (
@@ -517,9 +461,7 @@ const CreateGoalContent = memo<CreateGoalContentProps>((props) => {
           )}
           {step !== 'review' && (
             <>
-              <div
-                className={`${styles.inputShell} ${step === 'preparing' ? styles.inputShellLoading : ''}`}
-              >
+              <GeneratingBorder className={styles.inputShell} generating={step === 'preparing'}>
                 <EditorCanvas
                   disabled={!canCreate || step === 'preparing'}
                   editor={editor}
@@ -530,7 +472,7 @@ const CreateGoalContent = memo<CreateGoalContentProps>((props) => {
                   style={{ fontSize: 14, minHeight: 206, padding: 16 }}
                   onContentChange={handleContentChange}
                 />
-              </div>
+              </GeneratingBorder>
               {step === 'preparing' ? (
                 <Flexbox
                   horizontal

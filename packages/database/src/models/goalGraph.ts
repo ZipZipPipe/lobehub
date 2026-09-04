@@ -10,8 +10,9 @@ import type {
   GoalNodeKind,
   GoalNodeStatus,
   GoalNodeWorkVersionRelation,
+  GoalStatus,
 } from '@lobechat/types';
-import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 
 import { goals } from '../schemas/goal';
 import {
@@ -21,6 +22,7 @@ import {
   goalNodes,
   goalNodeWorkVersions,
 } from '../schemas/goalGraph';
+import { tasks } from '../schemas/task';
 import { works, workVersions } from '../schemas/work';
 import type { LobeChatDatabase, Transaction } from '../type';
 import { buildWorkspaceWhere } from '../utils/workspace';
@@ -122,7 +124,8 @@ export class GoalGraphModel {
         .select()
         .from(goalEvents)
         .where(eq(goalEvents.goalId, goalId))
-        .orderBy(asc(goalEvents.createdAt)),
+        .orderBy(desc(goalEvents.createdAt))
+        .limit(GoalGraphModel.GRAPH_EVENT_LIMIT),
       this.db
         .select({ link: goalNodeWorkVersions })
         .from(goalNodeWorkVersions)
@@ -139,6 +142,57 @@ export class GoalGraphModel {
       nodes,
       workVersions: linkedWorkVersions.map(({ link }) => link),
     };
+  };
+
+  /**
+   * How many events one graph read carries.
+   *
+   * `getGraph` backs both the coordinator (which never reads events) and the
+   * detail page (which polls it every few seconds and renders the most recent
+   * lifecycle entries), so the read has to be bounded: a long-horizon goal
+   * accumulates events for months and an unbounded query made every poll's
+   * payload — and the client's rebuild cost — grow linearly with goal age.
+   * Newest wins: the audit trail's full history stays queryable in the
+   * database, and the trajectory (`lh trace goal`) already records decisions
+   * with more fidelity than these events ever carried.
+   */
+  static readonly GRAPH_EVENT_LIMIT = 200;
+
+  /**
+   * Record a goal-level lifecycle transition as an event.
+   *
+   * `goal_events` carries `entity_type = 'goal'` and the lifecycle event types
+   * (`activated`, `resolved`, `rejected`, `retired`) for exactly this, but no
+   * writer used them — a goal's planning → running → paused → achieved moves
+   * were invisible on its own timeline, only node transitions ever got one.
+   * Called alongside the row update in `GoalService.transitionStatus`; kept
+   * separate because the `goals` row update lives on `GoalModel` and must not
+   * depend on this model's actor.
+   */
+  recordGoalStatus = async (
+    goalId: string,
+    from: GoalStatus,
+    to: GoalStatus,
+    reason?: string,
+  ): Promise<void> => {
+    if (from === to) return;
+    const eventType: GoalEventType =
+      to === 'running'
+        ? 'activated'
+        : to === 'achieved'
+          ? 'resolved'
+          : to === 'failed' || to === 'canceled'
+            ? 'rejected'
+            : 'updated';
+    await this.db.insert(goalEvents).values({
+      actorId: this.actor?.id ?? this.userId,
+      actorType: this.actor?.type ?? 'user',
+      entityId: goalId,
+      entityType: 'goal',
+      eventType,
+      goalId,
+      reason: reason ?? `status ${from} → ${to}`,
+    });
   };
 
   attachWorkVersion = async (
@@ -185,6 +239,28 @@ export class GoalGraphModel {
       });
       return link;
     });
+
+  /**
+   * How many of a goal's tasks are occupying a concurrency slot.
+   *
+   * Counted in the database rather than from a graph snapshot so it can be read
+   * inside the same transaction as the dispatch claim — two advances that each
+   * counted from their own snapshot would both see room and both start work.
+   */
+  countRunningTasks = async (goalId: string): Promise<number> => {
+    const [row] = await this.db
+      .select({ count: count() })
+      .from(goalNodes)
+      .innerJoin(tasks, eq(goalNodes.taskId, tasks.id))
+      .where(
+        and(
+          eq(goalNodes.goalId, goalId),
+          eq(goalNodes.kind, 'task'),
+          inArray(tasks.status, ['running', 'scheduled']),
+        ),
+      );
+    return row?.count ?? 0;
+  };
 
   createNode = async (goalId: string, input: CreateNodeInput) =>
     this.db.transaction(async (tx) => {
@@ -277,7 +353,7 @@ export class GoalGraphModel {
           and(
             eq(goalNodes.goalId, goalId),
             eq(goalNodes.id, nodeId),
-            eq(goalNodes.kind, 'work'),
+            eq(goalNodes.kind, 'task'),
             isNull(goalNodes.taskId),
           ),
         )
@@ -292,7 +368,7 @@ export class GoalGraphModel {
       return node;
     });
 
-  claimWorkNode = async (goalId: string, nodeId: string, staleBefore: Date) =>
+  claimTaskNode = async (goalId: string, nodeId: string, staleBefore: Date) =>
     this.db.transaction(async (tx) => {
       if (!(await this.ownedGoal(goalId, tx))) return undefined;
       const [node] = await tx
@@ -302,7 +378,7 @@ export class GoalGraphModel {
           and(
             eq(goalNodes.goalId, goalId),
             eq(goalNodes.id, nodeId),
-            eq(goalNodes.kind, 'work'),
+            eq(goalNodes.kind, 'task'),
             or(
               eq(goalNodes.status, 'proposed'),
               and(eq(goalNodes.status, 'active'), lt(goalNodes.updatedAt, staleBefore)),
@@ -316,6 +392,26 @@ export class GoalGraphModel {
         entityId: node.id,
         entityType: 'node',
         eventType: 'activated',
+      });
+      return node;
+    });
+
+  /** Rewrite a node's description — e.g. the planner replacing the seeded requirement blob with its own problem statement. */
+  updateNodeDescription = async (goalId: string, nodeId: string, description: string) =>
+    this.db.transaction(async (tx) => {
+      if (!(await this.ownedGoal(goalId, tx))) return undefined;
+      const [node] = await tx
+        .update(goalNodes)
+        .set({ description, updatedAt: new Date() })
+        .where(and(eq(goalNodes.goalId, goalId), eq(goalNodes.id, nodeId)))
+        .returning();
+      if (!node) return undefined;
+      await this.appendEvent(tx, goalId, {
+        entityId: node.id,
+        entityType: 'node',
+        eventType: 'updated',
+        reason: 'Planner refined the description',
+        taskId: node.taskId ?? undefined,
       });
       return node;
     });

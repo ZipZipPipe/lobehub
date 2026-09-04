@@ -28,6 +28,8 @@ import VirtualizedList from './components/VirtualizedList';
 import { useAgentSignalReceipts } from './hooks/useAgentSignalReceipts';
 import { useMessageRefreshError } from './hooks/useMessageRefreshError';
 import { resolveMessageListFeedback } from './resolveMessageListFeedback';
+import type { MessageDeepLink } from './utils/messageDeepLink';
+import { resolveMessageDeepLink } from './utils/messageDeepLink';
 
 const MessageAuthorConfigLoader = memo<{ agentId: string; isLogin: boolean | undefined }>(
   ({ agentId, isLogin }) => {
@@ -77,6 +79,8 @@ export interface ChatListProps {
    * Custom item renderer. If not provided, uses default ChatItem.
    */
   itemContent?: (index: number, id: string) => ReactNode;
+  /** Message hash target to locate after the virtual list has rendered. */
+  messageDeepLink?: MessageDeepLink;
   /**
    * Force showing welcome component even when messages exist
    */
@@ -100,6 +104,7 @@ const ChatList = memo<ChatListProps>(
     headerSlot,
     welcome,
     itemContent,
+    messageDeepLink,
     showWelcome,
   }) => {
     // Fetch messages (SWR key is null when skipFetch is true)
@@ -141,11 +146,16 @@ const ChatList = memo<ChatListProps>(
       [allDisplayMessages, filterItem],
     );
     const displayMessageIds = useMemo(() => displayMessages.map((m) => m.id), [displayMessages]);
+    const resolvedMessageDeepLink = useMemo(
+      () => resolveMessageDeepLink(displayMessages, messageDeepLink),
+      [displayMessages, messageDeepLink],
+    );
     const overlayHeight = useConversationStore(inputSelectors.chatInputOverlayHeight);
     const latestMessageId = displayMessageIds.at(-1);
 
-    // Skip fetching notebook and memories for share pages (they require authentication)
-    const isSharePage = !!context.topicShareId;
+    // Skip fetching notebook and memories for share pages — topic shares may be
+    // anonymous, and agent-share visitors are not the owner these APIs scope to.
+    const isSharePage = !!context.topicShareId || !!context.agentShareId;
     // TODO: Migrate Agent Signal receipts behind a dedicated user-visible receipt capability.
     const canShowAgentSignalReceipts = enableAgentSelfIteration === true && !isSharePage;
     const { receiptsByAnchor } = useAgentSignalReceipts({
@@ -163,9 +173,14 @@ const ChatList = memo<ChatListProps>(
     // an arbitrary author's agent; without this they render "未命名助理".
     // Idempotent: SWR dedupes against any route-level init by the same key,
     // and is gated on isLogin (no fetch for anonymous share viewers).
+    // Agent-share visitors are signed in but NOT the owner: the owner-scoped
+    // config API resolves to null and `markAgentNotFound` would wipe the
+    // share-seeded agentMap entry, so skip the fetch entirely — the visitor
+    // page already seeds the meta from `getSharedAgent`.
     const isLogin = useUserStore(authSelectors.isLogin);
+    const isAgentShareVisitor = !!context.agentShareId;
     const useFetchAgentConfig = useAgentStore((s) => s.useFetchAgentConfig);
-    useFetchAgentConfig(isLogin, context.agentId);
+    useFetchAgentConfig(isLogin && !isAgentShareVisitor, context.agentId);
     const messageAuthorAgentIds = useMemo(
       () =>
         [...new Set(displayMessages.map((message) => message.agentId).filter(Boolean))].filter(
@@ -265,6 +280,7 @@ const ChatList = memo<ChatListProps>(
             footerSlot={footerSlot}
             headerSlot={headerSlot}
             itemContent={itemContent ?? defaultItemContent}
+            messageDeepLink={resolvedMessageDeepLink}
           />
         </MessageActionProvider>
       );
@@ -272,7 +288,11 @@ const ChatList = memo<ChatListProps>(
     return (
       <Flexbox style={{ height: '100%', minHeight: 0 }}>
         {messageAuthorAgentIds.map((agentId) => (
-          <MessageAuthorConfigLoader agentId={agentId} isLogin={isLogin} key={agentId} />
+          <MessageAuthorConfigLoader
+            agentId={agentId}
+            isLogin={isLogin && !isAgentShareVisitor}
+            key={agentId}
+          />
         ))}
         <Flexbox flex={1} style={{ minHeight: 0 }}>
           {content}

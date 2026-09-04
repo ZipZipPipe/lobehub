@@ -16,7 +16,14 @@ import {
   ShapesIcon,
   SquarePlay,
 } from 'lucide-react';
-import { createElement, isValidElement, type ReactElement, type ReactNode, Suspense } from 'react';
+import {
+  createElement,
+  isValidElement,
+  lazy,
+  type ReactElement,
+  type ReactNode,
+  Suspense,
+} from 'react';
 import type { RouteObject } from 'react-router';
 
 import {
@@ -26,15 +33,20 @@ import {
 } from '@/business/client/BusinessDesktopRoutes';
 import BrandTextLoading from '@/components/Loading/BrandTextLoading';
 import AppsSkeleton from '@/components/Skeleton/Apps';
+import CommunityListSkeleton from '@/components/Skeleton/CommunityList';
 import ConversationLayoutSkeleton from '@/components/Skeleton/Conversation/Layout';
 import ConversationSegmentSkeleton from '@/components/Skeleton/Conversation/Segment';
 import GenerationSkeleton from '@/components/Skeleton/Generation';
 import HomeSkeleton from '@/components/Skeleton/Home';
 import MemorySkeleton from '@/components/Skeleton/Memory';
+import ResourceHomeSkeleton from '@/components/Skeleton/ResourceHome';
 import RouteSegmentSkeleton from '@/components/Skeleton/RouteSegment';
 import { createSurfaceSkeleton } from '@/components/Skeleton/Surface';
 import { agentDocumentRouteMeta } from '@/features/AgentDocumentPage/routeMeta';
 import { goalDetailRouteMeta, goalsRouteMeta } from '@/features/AgentGoals/routeMeta';
+import AgentRouteSwitch from '@/features/AgentRoute/AgentRouteSwitch';
+import AgentShareLegacyRedirect from '@/features/AgentShareVisitor/LegacyRedirect';
+import { agentShareVisitorRouteMeta } from '@/features/AgentShareVisitor/routeMeta';
 import { taskRouteMeta, tasksRouteMeta } from '@/features/AgentTasks/routeMeta';
 import { agentsRouteMeta } from '@/features/AgentViewAll/routeMeta';
 import { pageRouteMeta } from '@/features/Pages/routeMeta';
@@ -48,6 +60,7 @@ import {
   agentProfileRouteMeta,
   agentRouteMeta,
   agentSelfLearningRouteMeta,
+  agentShareRouteMeta,
   agentStatisticsRouteMeta,
   topicsRouteMeta,
 } from '@/routes/(main)/agent/features/routeMeta';
@@ -58,9 +71,17 @@ import {
 } from '@/routes/(main)/group/features/routeMeta';
 import AppShellSkeleton, { APP_SHELL_FALLBACK_ID } from '@/spa/BootShell/AppShellSkeleton';
 import { loadRouteWithBuiltinToolSurfaces } from '@/spa/initialize/toolSurfaces';
-import { routeMeta } from '@/spa/router/routeMeta';
+import { routeMeta, type RouteSkeletonProps } from '@/spa/router/routeMeta';
 import { SettingsTabs } from '@/store/global/initialState';
 import { dynamicElement, dynamicLayout, ErrorBoundary, redirectElement } from '@/utils/router';
+
+const LazyResourceCategorySkeleton = lazy(() => import('@/features/ResourceHome/Skeleton'));
+
+export const ResourceCategorySkeleton = (props: RouteSkeletonProps) => (
+  <Suspense fallback={null}>
+    <LazyResourceCategorySkeleton {...props} />
+  </Suspense>
+);
 
 const agentChatElement = dynamicElement(
   () => loadRouteWithBuiltinToolSurfaces(() => import('@/routes/(main)/agent')),
@@ -218,6 +239,14 @@ export const sharedMainAreaChildren: RouteObject[] = [
             handle: { meta: agentStatisticsRouteMeta },
             path: 'statistics',
           },
+          {
+            element: dynamicElement(
+              () => import('@/routes/(main)/agent/share'),
+              'Desktop > Chat > Share',
+            ),
+            handle: { meta: agentShareRouteMeta },
+            path: 'share',
+          },
           // Legacy `/agent/:aid/stats` URLs — kept for deep-links.
           {
             element: redirectElement('../statistics'),
@@ -316,10 +345,25 @@ export const sharedMainAreaChildren: RouteObject[] = [
             path: 'task/:taskId',
           },
         ],
-        element: dynamicLayout(
-          () => import('@/routes/(main)/agent/_layout'),
-          'Desktop > Chat > Layout',
-          { preloadId: 'agent' },
+        // `/agent/:aid` serves both the creator's own agent and the agent-share
+        // visitor surface; the param decides which — see `AgentRouteSwitch`.
+        // The switch is not a `Suspense`, so `withSegmentFallback` cannot swap
+        // the branding loader for a segment skeleton here — both branches (and
+        // the switch's own resolving state) carry it explicitly instead.
+        element: (
+          <AgentRouteSwitch
+            fallback={<RouteSegmentSkeleton />}
+            ownElement={dynamicLayout(
+              () => import('@/routes/(main)/agent/_layout'),
+              'Desktop > Chat > Layout',
+              { fallback: <RouteSegmentSkeleton />, preloadId: 'agent' },
+            )}
+            shareElement={dynamicElement(
+              () => import('@/features/AgentShareVisitor/Page'),
+              'Desktop > Share > Agent',
+              { fallback: <ConversationLayoutSkeleton /> },
+            )}
+          />
         ),
         errorElement: <ErrorBoundary />,
         path: ':aid',
@@ -502,7 +546,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
           'Desktop > Discover > List > Layout',
           { preloadId: 'community' },
         ),
-        handle: { meta: routeMeta({ Skeleton: createSurfaceSkeleton('grid') }) },
+        handle: { meta: routeMeta({ Skeleton: CommunityListSkeleton }) },
       },
       // Detail routes (with DetailLayout)
       {
@@ -593,7 +637,11 @@ export const sharedMainAreaChildren: RouteObject[] = [
               { preloadId: 'resource' },
             ),
             handle: {
-              meta: routeMeta({ icon: LibraryBigIcon, titleKey: 'navigation.resources' }),
+              meta: routeMeta({
+                icon: LibraryBigIcon,
+                Skeleton: ResourceHomeSkeleton,
+                titleKey: 'navigation.resources',
+              }),
             },
             index: true,
           },
@@ -631,6 +679,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
           'Desktop > Resource > Home > Layout',
           { preloadId: 'resource' },
         ),
+        handle: { meta: routeMeta({ Skeleton: ResourceCategorySkeleton }) },
       },
       // Library routes (knowledge base detail)
       {
@@ -832,6 +881,25 @@ export const sharedMainAreaChildren: RouteObject[] = [
             ),
             path: 'experiments/:experimentId',
           },
+          // A dataset and a case are addressable on their own — a dataset need
+          // not belong to a benchmark, so a benchmark id cannot be part of
+          // their canonical path. They live in the home group to keep the eval
+          // workspace sidebar; the bench group's sidebar is benchmark-scoped
+          // and has nothing to show for a dataset that belongs to none.
+          {
+            element: dynamicElement(
+              () => import('@/routes/(main)/eval/datasets/[datasetId]'),
+              'Desktop > Eval > Dataset Detail',
+            ),
+            path: 'datasets/:datasetId',
+          },
+          {
+            element: dynamicElement(
+              () => import('@/routes/(main)/eval/cases/[caseId]'),
+              'Desktop > Eval > Test Case Detail',
+            ),
+            path: 'cases/:caseId',
+          },
         ],
         element: dynamicElement(
           () => import('@/routes/(main)/eval/(home)/_layout'),
@@ -870,9 +938,11 @@ export const sharedMainAreaChildren: RouteObject[] = [
             path: 'runs/:runId',
           },
           {
+            // Legacy shape, kept so existing links still resolve; it redirects
+            // to the benchmark-free `/eval/datasets/:datasetId`.
             element: dynamicElement(
               () => import('@/routes/(main)/eval/bench/[benchmarkId]/datasets/[datasetId]'),
-              'Desktop > Eval > Dataset Detail',
+              'Desktop > Eval > Dataset Detail (legacy redirect)',
             ),
             path: 'datasets/:datasetId',
           },
@@ -1478,6 +1548,14 @@ export const createSharedDesktopRoutes = ({
     }),
     errorElement: <ErrorBoundary />,
     path: '/',
+  },
+  {
+    // Legacy agent-share visitor links: the surface now lives at
+    // `/agent/:slugOrId`, next to the creator's own agent page.
+    element: <AgentShareLegacyRedirect />,
+    errorElement: <ErrorBoundary />,
+    handle: { meta: agentShareVisitorRouteMeta },
+    path: '/share/agent/:slugOrId',
   },
   ...BusinessDesktopRoutesWithoutMainLayout,
   ...platformRoutes,
