@@ -94,6 +94,39 @@ vi.mock('@/features/Acceptance', async () => ({
   },
 }));
 
+// The result panel mounts the real Acceptance atoms; the assertions only care
+// that the right atoms land in the right scope, not their internals.
+vi.mock('@/features/Acceptance/Viewer/AcceptanceScope', () => ({
+  AcceptanceBundleGate: ({ children }: { children: ReactNode }) => <>{children}</>,
+  AcceptanceScope: ({
+    acceptanceId,
+    children,
+    embedded,
+  }: {
+    acceptanceId: string;
+    children: ReactNode;
+    embedded?: boolean;
+  }) => (
+    <div
+      data-acceptance-id={acceptanceId}
+      data-embedded={embedded ? '' : undefined}
+      data-testid="acceptance-scope"
+    >
+      {children}
+    </div>
+  ),
+}));
+
+vi.mock('@/features/Acceptance/Viewer/AcceptanceCheckInventory', () => ({
+  default: ({ toolbar }: { toolbar?: ReactNode }) => (
+    <div data-testid="acceptance-check-inventory">{toolbar}</div>
+  ),
+}));
+
+vi.mock('@/features/Acceptance/Viewer/AcceptanceDecision', () => ({
+  default: () => <div data-testid="acceptance-decision" />,
+}));
+
 vi.mock('@/services/verify', () => ({
   verifyService: {
     deleteAcceptance: (id: string) => mocks.deleteAcceptance(id),
@@ -230,6 +263,47 @@ describe('TaskAcceptance', () => {
     fireEvent.click(screen.getByText('taskDetail.acceptance.openReport'));
     expect(mocks.toggleTaskAgentPanel).toHaveBeenCalledWith(true);
     expect(mocks.openAcceptance).toHaveBeenCalledWith('acceptance-1');
+  });
+
+  it('mounts the live Acceptance checklist and decision bar in the task result panel', () => {
+    mocks.acceptanceSubject = { id: 'acceptance-1' };
+    mocks.bundle = {
+      acceptance: { id: 'acceptance-1', requirement: 'Everything is verifiable.' },
+      checks: [{ category: 'Setup', id: 'c1', seq: 1, title: 'Create task' }],
+      isOwner: true,
+    };
+
+    render(<TaskAcceptance variant={'result'} />);
+
+    const scope = screen.getByTestId('acceptance-scope');
+    expect(scope).toHaveAttribute('data-acceptance-id', 'acceptance-1');
+    expect(scope).toHaveAttribute('data-embedded');
+    expect(screen.getByTestId('acceptance-check-inventory')).toBeInTheDocument();
+    expect(screen.getByTestId('acceptance-decision')).toBeInTheDocument();
+    // No collapsible 交付验收 section header — the inventory brings its own.
+    expect(screen.queryByText('taskDetail.acceptance.title')).not.toBeInTheDocument();
+  });
+
+  it('keeps the report link reachable from the inventory toolbar in the result panel', () => {
+    mocks.acceptanceSubject = { id: 'acceptance-1' };
+    mocks.bundle = {
+      acceptance: { id: 'acceptance-1', requirement: 'Everything is verifiable.' },
+      checks: [{ category: 'Setup', id: 'c1', seq: 1, title: 'Create task' }],
+      isOwner: true,
+    };
+
+    render(<TaskAcceptance variant={'result'} />);
+
+    fireEvent.click(screen.getByText('taskDetail.acceptance.openReport'));
+    expect(mocks.toggleTaskAgentPanel).toHaveBeenCalledWith(true);
+    expect(mocks.openAcceptance).toHaveBeenCalledWith('acceptance-1');
+  });
+
+  it('falls back to the configured criteria in the result panel before an acceptance exists', () => {
+    render(<TaskAcceptance variant={'result'} />);
+
+    expect(screen.getByTestId('task-acceptance-criteria')).toBeInTheDocument();
+    expect(screen.queryByTestId('acceptance-scope')).not.toBeInTheDocument();
   });
 
   it('groups a checklist with more than 10 checks', () => {

@@ -10,6 +10,7 @@ export type ApiType =
   | 'deepseek'
   | 'fal'
   | 'google'
+  | 'meta'
   | 'minimax'
   | 'moonshot'
   | 'openai'

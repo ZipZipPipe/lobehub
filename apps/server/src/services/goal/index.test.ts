@@ -8,8 +8,10 @@ import { AcceptanceModel } from '@/database/models/acceptance';
 import { AgentOperationModel } from '@/database/models/agentOperation';
 import { GoalModel } from '@/database/models/goal';
 import { GoalGraphModel } from '@/database/models/goalGraph';
+import { MetricModel } from '@/database/models/metric';
 import { TaskModel } from '@/database/models/task';
 import { TaskTopicModel } from '@/database/models/taskTopic';
+import { WorkModel } from '@/database/models/work';
 import {
   acceptances,
   agentOperations,
@@ -19,6 +21,8 @@ import {
   goalNodeDecisions,
   goalNodes,
   goals,
+  metricPoints,
+  metrics,
   tasks,
   taskTopics,
   topics,
@@ -52,6 +56,8 @@ afterEach(async () => {
   await serverDB.delete(goalEvents);
   await serverDB.delete(goalNodes);
   await serverDB.delete(goals);
+  await serverDB.delete(metricPoints);
+  await serverDB.delete(metrics);
   await serverDB.delete(acceptances);
   await serverDB.delete(agentOperations);
   await serverDB.delete(taskTopics);
@@ -343,6 +349,79 @@ describe('GoalService', () => {
     });
   });
 
+  it('links what the task delivered to its node, and skips the task Work itself', async () => {
+    // The deliverable used to survive only as a URL inside the finding's prose:
+    // the graph recorded that a task finished but not what came out of it.
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const workModel = new WorkModel(serverDB, userId);
+    const graph = await service.create({ tasks: ['Deliver me'], title: 'Harvest deliverables' });
+    const created = await service.tick(graph.goal.id);
+    await serverDB.insert(taskTopics).values({
+      handoff: { summary: 'Delivered', title: 'Delivered title' },
+      operationId: 'op-delivered',
+      seq: 1,
+      status: 'completed',
+      taskId: created.taskId!,
+      userId,
+    });
+    await workModel.registerExternal({
+      changeType: 'created',
+      identifier: 'ENG-7',
+      resourceId: 'lobehub/lobehub#7',
+      resourceType: 'github_issue',
+      rootOperationId: 'op-delivered',
+      title: 'The delivered issue',
+      toolIdentifier: 'lobe-github',
+      toolName: 'createIssue',
+    });
+    await taskModel.updateStatus(created.taskId!, 'completed');
+
+    await service.tick(graph.goal.id);
+
+    const snapshot = await service.graph(graph.goal.id);
+    const linked = snapshot.workVersions.filter((link) => link.nodeId === created.nodeId);
+    expect(linked.some((link) => link.work?.title === 'The delivered issue')).toBe(true);
+    // The responsible task's own Work is still linked — it is the execution
+    // container, and the client is what filters it out of the deliverable list.
+    expect(linked.some((link) => link.work?.type === 'task')).toBe(true);
+  });
+
+  it('re-settling a task does not duplicate its deliverable links', async () => {
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const workModel = new WorkModel(serverDB, userId);
+    const graph = await service.create({ tasks: ['Deliver me'], title: 'Idempotent harvest' });
+    const created = await service.tick(graph.goal.id);
+    await serverDB.insert(taskTopics).values({
+      handoff: { summary: 'Delivered', title: 'Delivered title' },
+      operationId: 'op-delivered',
+      seq: 1,
+      status: 'completed',
+      taskId: created.taskId!,
+      userId,
+    });
+    await workModel.registerExternal({
+      changeType: 'created',
+      resourceId: 'lobehub/lobehub#8',
+      resourceType: 'github_issue',
+      rootOperationId: 'op-delivered',
+      title: 'Delivered once',
+      toolIdentifier: 'lobe-github',
+      toolName: 'createIssue',
+    });
+    await taskModel.updateStatus(created.taskId!, 'completed');
+
+    await service.tick(graph.goal.id);
+    await service.tick(graph.goal.id);
+
+    const snapshot = await service.graph(graph.goal.id);
+    const delivered = snapshot.workVersions.filter(
+      (link) => link.nodeId === created.nodeId && link.work?.title === 'Delivered once',
+    );
+    expect(delivered).toHaveLength(1);
+  });
+
   it('leaves a fresh dispatch claim alone', async () => {
     // The same shape a moment after the claim is just a run about to start.
     vi.spyOn(TaskRunnerService.prototype, 'runTask').mockRejectedValue(new Error('worker died'));
@@ -382,6 +461,71 @@ describe('GoalService', () => {
     const raised = await service.setBudget(graph.goal.id, { maxRounds: 5 });
 
     expect(raised?.status).not.toBe('paused');
+  });
+
+  it('ships the spend the budget is enforced against with the graph', async () => {
+    // The header renders `spent / cap` as one fraction, so the number it shows
+    // has to be the number the coordinator will stop on — not the goal list's
+    // subtree roll-up, which counts Tasks the graph's Tasks spawned.
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({
+      maxTotalCost: 10,
+      tasks: ['Costs money'],
+      title: 'Spend',
+    });
+    const created = await service.tick(graph.goal.id);
+
+    await serverDB
+      .insert(topics)
+      .values({ id: 'tpc_spend_1', totalCost: 6.4, totalTokens: 1200, userId });
+    await serverDB
+      .insert(taskTopics)
+      .values({ seq: 1, taskId: created.taskId!, topicId: 'tpc_spend_1', userId });
+    // A run that has not settled is a round with no cost yet.
+    await serverDB.insert(topics).values({ id: 'tpc_spend_2', userId });
+    await serverDB
+      .insert(taskTopics)
+      .values({ seq: 2, taskId: created.taskId!, topicId: 'tpc_spend_2', userId });
+
+    const { spend } = await service.graph(graph.goal.id);
+
+    expect(spend).toMatchObject({ runs: 2, totalCost: 6.4, totalTokens: 1200 });
+    // The cost panel lists WHERE the money went, so the same read carries the
+    // per-Task split rather than only the total the budget is checked against.
+    expect(spend?.byTask).toEqual([
+      { runs: 2, taskId: created.taskId!, totalCost: 6.4, totalTokens: 1200 },
+    ]);
+  });
+
+  it('keeps an existing deadline when only the cost cap is edited', async () => {
+    // The budget panel sends one dimension at a time; an omitted deadline used
+    // to be written back as null, silently dropping a calendar budget someone
+    // set from a click that only meant to raise the dollars.
+    const service = new GoalService(serverDB, userId);
+    const deadline = new Date(Date.now() + 3_600_000).toISOString();
+    const graph = await service.create({
+      config: { schedule: { deadline } },
+      tasks: ['Bounded'],
+      title: 'Deadline keeper',
+    });
+
+    const updated = await service.setBudget(graph.goal.id, { maxTotalCost: 25 });
+
+    expect(updated?.config?.schedule?.deadline).toBe(deadline);
+    expect(Number(updated?.maxTotalCost)).toBe(25);
+  });
+
+  it('leaves the round cap alone when only the cost cap is edited', async () => {
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({
+      maxRounds: 7,
+      tasks: ['Bounded'],
+      title: 'Round keeper',
+    });
+
+    const updated = await service.setBudget(graph.goal.id, { maxTotalCost: 25 });
+
+    expect(updated?.maxRounds).toBe(7);
   });
 
   it('edits the standing requirement in place', async () => {
@@ -696,9 +840,7 @@ describe('GoalService', () => {
       'Current Task contract (authoritative execution scope): Generate training data',
     );
     expect(task?.instruction).toContain('Do not implement, validate, or pre-empt any sibling');
-    expect(task?.instruction).toContain(
-      'Do not invoke Acceptance skills or Acceptance CLI commands',
-    );
+    expect(task?.instruction).toContain('run it inside this Task');
     expect(task?.instruction).toContain(
       'Include the relevant artifact contents or exact excerpts and the raw outputs of decisive verification commands',
     );
@@ -859,6 +1001,273 @@ describe('GoalService', () => {
         (edge) => edge.kind === 'decomposes' && edge.targetNodeId === acceptanceWorks[0].id,
       ),
     ).toHaveLength(1);
+  });
+
+  it('parks a goal short of acceptance and reopens it when the measurement clears', async () => {
+    // The measured half of acceptance: "followers >= 1000" is not a document a
+    // verifier reads, it is a number. Until it holds, the acceptance Task must
+    // not be created — and the goal must not sit `running` reporting
+    // `no_progress`, or every sweep would re-tick it for the whole wait.
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const goalModel = new GoalModel(serverDB, userId);
+    const graph = await service.create({
+      config: { acceptance: { metrics: [{ key: 'followers', target: 1000 }] } },
+      requirement: 'Grow the account',
+      tasks: ['Publish the first posts'],
+      title: 'Measured goal',
+    });
+    const created = await service.tick(graph.goal.id);
+    await taskModel.updateStatus(created.taskId!, 'completed');
+    await service.tick(graph.goal.id);
+
+    // Nothing measured yet — "never observed" is not "satisfied".
+    const unmeasured = await service.tick(graph.goal.id);
+    expect(unmeasured).toMatchObject({ outcome: 'no_progress' });
+    expect(unmeasured.message).toContain('no observation');
+    expect((await goalModel.findById(graph.goal.id))?.status).toBe('paused');
+    expect(
+      (await service.graph(graph.goal.id)).nodes.some(
+        (n) => n.title === 'Complete full Goal acceptance',
+      ),
+    ).toBe(false);
+
+    // A sample that is still short leaves it parked and is not worth an advance.
+    const short = await service.recordObservation(graph.goal.id, {
+      key: 'followers',
+      value: 400,
+    });
+    expect(short.shouldAdvance).toBe(false);
+    expect((await goalModel.findById(graph.goal.id))?.status).toBe('paused');
+
+    // The number lands: the goal reopens and falls through to its delivery
+    // contract.
+    const cleared = await service.recordObservation(graph.goal.id, {
+      key: 'followers',
+      value: 1200,
+    });
+    expect(cleared.shouldAdvance).toBe(true);
+    expect((await goalModel.findById(graph.goal.id))?.status).toBe('running');
+
+    const advanced = await service.tick(graph.goal.id);
+    expect(advanced).toMatchObject({ outcome: 'advanced' });
+    expect(
+      (await service.graph(graph.goal.id)).nodes.some(
+        (n) => n.title === 'Complete full Goal acceptance',
+      ),
+    ).toBe(true);
+  });
+
+  /** A goal parked by the gate, one clause short of acceptance. */
+  const parkedOnGate = async (service: GoalService) => {
+    const taskModel = new TaskModel(serverDB, userId);
+    const graph = await service.create({
+      config: { acceptance: { metrics: [{ key: 'followers', target: 1000 }] } },
+      requirement: 'Grow the account',
+      tasks: ['Publish the first posts'],
+      title: 'Parked on a measurement',
+    });
+    const created = await service.tick(graph.goal.id);
+    await taskModel.updateStatus(created.taskId!, 'completed');
+    await service.tick(graph.goal.id);
+    await service.tick(graph.goal.id);
+    return graph.goal.id;
+  };
+
+  it('reopens a goal parked before the pause marker existed', async () => {
+    // Rows parked by the parent implementation — and any parked by an old
+    // worker mid-deploy — carry no marker. Requiring one strictly would strand
+    // them until somebody pressed Resume by hand, so the transition's recorded
+    // actor stands in for it.
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const goalModel = new GoalModel(serverDB, userId);
+    const goalId = await parkedOnGate(service);
+
+    // Exactly what a pre-marker row looks like.
+    const parked = (await goalModel.findById(goalId))!;
+    await goalModel.update(goalId, { config: { ...parked.config, pausedBy: undefined } });
+
+    const cleared = await service.recordObservation(goalId, { key: 'followers', value: 5000 });
+
+    expect(cleared.shouldAdvance).toBe(true);
+    expect((await goalModel.findById(goalId))?.status).toBe('running');
+  });
+
+  it('does not let an observation restart a goal the coordinator parked for another reason', async () => {
+    // The coordinator also parks goals that are deadlocked or out of budget.
+    // Those carry no marker either once they predate it, so the fallback has to
+    // read *why* it parked — not just that it was the coordinator.
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const goalModel = new GoalModel(serverDB, userId);
+    const graph = await service.create({
+      config: { acceptance: { metrics: [{ key: 'followers', target: 1000 }] } },
+      requirement: 'Deadlocked before the gate',
+      tasks: ['A', 'B'],
+      title: 'Parked with work outstanding',
+    });
+    const [a, b] = graph.nodes.filter((n) => n.kind === 'task');
+    const graphModel = new GoalGraphModel(serverDB, userId);
+    await graphModel.createEdge(graph.goal.id, a.id, b.id, 'depends_on');
+    await graphModel.createEdge(graph.goal.id, b.id, a.id, 'depends_on');
+
+    await service.tick(graph.goal.id); // deadlock → no_frontier → paused
+    expect((await goalModel.findById(graph.goal.id))?.status).toBe('paused');
+
+    const satisfying = await service.recordObservation(graph.goal.id, {
+      key: 'followers',
+      value: 5000,
+    });
+
+    expect(satisfying.shouldAdvance).toBe(false);
+    expect((await goalModel.findById(graph.goal.id))?.status).toBe('paused');
+  });
+
+  it('leaves a deliberately paused goal alone even when the measurement lands', async () => {
+    // The hard case: same status, same terminal phase, same clauses as a goal
+    // the coordinator parked. Only the recorded pause reason tells them apart,
+    // and without it a satisfying sample would restart a goal somebody stopped
+    // on purpose — and run its acceptance work.
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const goalModel = new GoalModel(serverDB, userId);
+    const goalId = await parkedOnGate(service);
+    await service.pause(goalId);
+
+    const satisfying = await service.recordObservation(goalId, { key: 'followers', value: 5000 });
+
+    expect(satisfying.shouldAdvance).toBe(false);
+    expect((await goalModel.findById(goalId))?.status).toBe('paused');
+    expect(
+      (await service.graph(goalId)).nodes.some((n) => n.title === 'Complete full Goal acceptance'),
+    ).toBe(false);
+  });
+
+  it('resumes a user-paused goal only through resume, and then it advances again', async () => {
+    // The other half: once the person lifts their own pause, the goal is the
+    // coordinator's again.
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const goalId = await parkedOnGate(service);
+    await service.pause(goalId);
+    await service.recordObservation(goalId, { key: 'followers', value: 5000 });
+
+    await service.resume(goalId);
+
+    expect(await service.tick(goalId)).toMatchObject({ outcome: 'advanced' });
+  });
+
+  it('unblocks a parked goal when its last clause is dropped', async () => {
+    // `setMetricCriteria(id, [])` is the advertised way to clear the gate. It
+    // used to leave the goal parked on a gate that no longer existed, so the
+    // scheduled advance ticked straight back out as `goal_paused` and only a
+    // manual resume could move it.
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const goalModel = new GoalModel(serverDB, userId);
+    const goalId = await parkedOnGate(service);
+    expect((await goalModel.findById(goalId))?.status).toBe('paused');
+
+    await service.setMetricCriteria(goalId, []);
+
+    expect((await goalModel.findById(goalId))?.status).toBe('running');
+    expect(await service.tick(goalId)).toMatchObject({ outcome: 'advanced' });
+  });
+
+  it('unblocks a parked goal when a clause is relaxed below the measurement', async () => {
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const goalModel = new GoalModel(serverDB, userId);
+    const goalId = await parkedOnGate(service);
+    await service.recordObservation(goalId, { key: 'followers', value: 400 });
+    expect((await goalModel.findById(goalId))?.status).toBe('paused');
+
+    await service.setMetricCriteria(goalId, [{ key: 'followers', target: 100 }]);
+
+    expect((await goalModel.findById(goalId))?.status).toBe('running');
+  });
+
+  it('keeps the numeric gate when the delivery criteria are bound or rebound', async () => {
+    // Both writers used to rebuild `config.acceptance` from `criteriaIds`
+    // alone, so declaring criteria — at creation or later from the goal page —
+    // silently dropped a live measured gate and let the goal be accepted
+    // without it.
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({
+      config: { acceptance: { metrics: [{ key: 'followers', target: 1000 }] } },
+      criteria: [{ title: 'Ship the launch post' }],
+      requirement: 'Grow the account',
+      tasks: ['Publish the first posts'],
+      title: 'Both halves of acceptance',
+    });
+
+    const created = await new GoalModel(serverDB, userId).findById(graph.goal.id);
+    expect(created?.config?.acceptance?.metrics).toEqual([{ key: 'followers', target: 1000 }]);
+    expect(created?.config?.acceptance?.criteriaIds).toHaveLength(1);
+
+    await service.setAcceptanceCriteria(graph.goal.id, []);
+
+    const rebound = await new GoalModel(serverDB, userId).findById(graph.goal.id);
+    expect(rebound?.config?.acceptance?.metrics).toEqual([{ key: 'followers', target: 1000 }]);
+  });
+
+  it('declares numeric clauses after creation without touching the criteria binding', async () => {
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({
+      criteria: [{ title: 'Ship the launch post' }],
+      requirement: 'Grow the account',
+      tasks: ['Publish the first posts'],
+      title: 'Late-declared gate',
+    });
+
+    await service.setMetricCriteria(graph.goal.id, [{ key: 'churn', op: 'lte', target: 5 }]);
+
+    const updated = await new GoalModel(serverDB, userId).findById(graph.goal.id);
+    expect(updated?.config?.acceptance).toMatchObject({
+      criteriaIds: expect.any(Array),
+      metrics: [{ key: 'churn', op: 'lte', target: 5 }],
+    });
+    expect(updated?.config?.acceptance?.criteriaIds).toHaveLength(1);
+  });
+
+  it('records what the measured decision read, not just its verdict', async () => {
+    // A replay has to see the number the live run saw — the same reason the
+    // deadline verdict travels with the budget.
+    vi.spyOn(TaskRunnerService.prototype, 'runTask').mockResolvedValue({} as never);
+    const service = new GoalService(serverDB, userId);
+    const taskModel = new TaskModel(serverDB, userId);
+    const metricModel = new MetricModel(serverDB, userId);
+    const graph = await service.create({
+      config: { acceptance: { metrics: [{ key: 'churn', op: 'lte', target: 5 }] } },
+      requirement: 'Keep churn down',
+      tasks: ['Ship retention fixes'],
+      title: 'Traced measurement',
+    });
+    const created = await service.tick(graph.goal.id);
+    await taskModel.updateStatus(created.taskId!, 'completed');
+    await service.tick(graph.goal.id);
+
+    const series = (await metricModel.ensure({
+      key: 'churn',
+      subjectId: graph.goal.id,
+      subjectType: 'goal',
+    }))!;
+    await metricModel.addPoint(series.id, {
+      actorType: 'system',
+      observedAt: new Date('2026-09-01T00:00:00Z'),
+      sourceType: 'probe',
+      value: 9,
+    });
+
+    const observed: GoalTickObservation[] = [];
+    await service.tick(graph.goal.id, { onDecision: (o) => observed.push(o) });
+
+    expect(observed.at(-1)!.metricCriteria).toMatchObject({
+      allMet: false,
+      criteria: [{ key: 'churn', met: false, op: 'lte', target: 5, value: 9 }],
+    });
   });
 
   it('evolves a failed task into a durable decision gate', async () => {

@@ -1,4 +1,4 @@
-import type { GoalAdvanceEffect } from '@lobechat/agent-tracing';
+import type { GoalAdvanceEffect, GoalMetricCriteriaState } from '@lobechat/agent-tracing';
 import { buildGoalRequirement } from '@lobechat/builtin-tool-goal';
 import { GOAL_COORDINATOR_ACTOR_ID } from '@lobechat/const/goal';
 import type {
@@ -7,12 +7,17 @@ import type {
   GoalGraphNode,
   GoalGraphSnapshot,
   GoalItem,
+  GoalMetricCriterion,
+  GoalNodeAcceptance,
   GoalNodeKind,
   GoalNodeStatus,
+  GoalPauseReason,
   GoalStatus,
   GoalTickResult,
+  MetricKind,
   TaskItem,
   TaskTopicHandoff,
+  WorkVersionEventItem,
 } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import { sql } from 'drizzle-orm';
@@ -20,6 +25,7 @@ import { sql } from 'drizzle-orm';
 import { AgentOperationModel } from '@/database/models/agentOperation';
 import { GoalModel } from '@/database/models/goal';
 import { GoalGraphModel } from '@/database/models/goalGraph';
+import { MetricModel } from '@/database/models/metric';
 import { ProjectModel } from '@/database/models/project';
 import { TaskModel } from '@/database/models/task';
 import { TaskTopicModel } from '@/database/models/taskTopic';
@@ -34,11 +40,14 @@ import { AcceptanceService } from '../verify/acceptanceService';
 import { VerifyPlanGeneratorService } from '../verify/planGenerator';
 import { GoalCriteriaGeneratorService, type GoalDecompositionDraft } from './criteriaGenerator';
 import {
+  compareMetric,
   decideNextMove,
   frontierNeedsBudget,
   GOAL_ACCEPTANCE_TASK_TITLE,
   type GoalMove,
   LEASE_EXPIRED_ERROR,
+  MEASURED_ACCEPTANCE_PAUSE_REASON,
+  needsMetricCriteria,
   selectFrontier,
   TERMINAL_NODE_STATUSES,
 } from './decideNextMove';
@@ -110,6 +119,14 @@ export interface CreateGoalNodeInput {
 }
 
 /** Application service shared by CLI today and Graph UI/schedulers later. */
+/**
+ * Version events read per task run when harvesting deliverables. Generous
+ * because the cap applies to events rather than to Works: the newest N events
+ * of a run must still contain every Work it produced, even one revised many
+ * times over.
+ */
+const DELIVERABLE_EVENTS_PER_RUN = 200;
+
 export class GoalService {
   private readonly acceptanceService: AcceptanceService;
   private readonly goalModel: GoalModel;
@@ -204,7 +221,10 @@ export class GoalService {
           verifierType: 'agent',
         })),
       );
-      config = { ...config, acceptance: { criteriaIds } };
+      // Merge, never replace: `acceptance` also carries the numeric clauses,
+      // and rebuilding the object from `criteriaIds` alone would drop a
+      // measured gate the caller asked for in the same call.
+      config = { ...config, acceptance: { ...config?.acceptance, criteriaIds } };
     }
 
     const goal = await this.goalModel.create({
@@ -255,11 +275,173 @@ export class GoalService {
    * editing). The criteria rows themselves are edited through the verify
    * criteria endpoints; this only rebinds which of them gate the goal.
    */
+  /**
+   * Declare (or clear) the numeric clauses that gate this goal's acceptance.
+   *
+   * Merged into `config.acceptance` so it cannot clobber the delivery criteria
+   * binding, and settable after creation because a long-horizon goal learns its
+   * real thresholds while it runs. Relaxing a clause can unblock a goal that is
+   * already parked short of acceptance — the same reason extending a deadline
+   * resumes a budget-stopped one — so the caller schedules an advance.
+   */
+  /**
+   * Write a measurement against this goal, and reopen it when that measurement
+   * is what it was waiting for.
+   *
+   * The gate parks the goal (see the `measured_acceptance` branch), and `tick`
+   * refuses to move a paused goal — so without the reopen here the observation
+   * would land and nothing would happen. Only a goal the gate actually stopped
+   * is reopened, and only once every clause holds: the same discipline
+   * `setBudget` uses, so a deliberate pause is never undone by a stray sample
+   * and a still-short measurement does not queue a no-op advance.
+   */
+  recordObservation = async (
+    goalId: string,
+    input: {
+      key: string;
+      kind?: MetricKind;
+      observedAt?: Date;
+      title?: string;
+      unit?: string;
+      value: number;
+    },
+  ) => {
+    const goal = await this.goalModel.findById(goalId);
+    if (!goal) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
+
+    const metricModel = new MetricModel(this.db, this.userId, this.workspaceId);
+    const series = await metricModel.ensure({
+      key: input.key,
+      kind: input.kind,
+      subjectId: goal.id,
+      subjectType: 'goal',
+      title: input.title,
+      unit: input.unit,
+    });
+    if (!series)
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'Metric series slot is owned by another scope',
+      });
+
+    const point = await metricModel.addPoint(series.id, {
+      actorId: this.userId,
+      actorType: 'user',
+      observedAt: input.observedAt ?? new Date(),
+      sourceType: 'manual',
+      value: input.value,
+    });
+
+    return { point, series, shouldAdvance: await this.reopenIfMeasurementCleared(goalId) };
+  };
+
+  /**
+   * Whether the coordinator is worth waking: either the goal is already
+   * running, or the coordinator itself parked it on a measured gate that no
+   * longer holds it.
+   *
+   * The `pausedBy` marker is what makes this safe. A goal paused by a person
+   * looks exactly like one parked by the gate — same status, same terminal
+   * phase, same clauses — so without it an arriving measurement would restart
+   * a goal somebody deliberately stopped.
+   *
+   * "No longer holds it" covers both ways out: every clause now satisfied, and
+   * the clauses being dropped altogether (`setMetricCriteria(id, [])`), which
+   * otherwise left the goal parked on a gate that no longer existed.
+   */
+  private reopenIfMeasurementCleared = async (
+    goalId: string,
+    /**
+     * Whether the gate held the goal *before* the caller's edit, for callers
+     * that change the clauses themselves: dropping the last one erases the
+     * evidence, so the verdict is taken from the state that preceded it — the
+     * same way `setBudget` reads what was binding before it wrote.
+     */
+    parkedBeforeEdit?: boolean,
+  ): Promise<boolean> => {
+    const graph = await this.coordinatorGraph.getGraph(goalId);
+    if (!graph) return false;
+    if (graph.goal.status !== 'paused') return true;
+    if (!(parkedBeforeEdit ?? this.isParkedOnMeasuredGate(graph))) return false;
+
+    if (needsMetricCriteria(graph)) {
+      const { allMet } = await this.evaluateMetricCriteria(graph);
+      if (!allMet) return false;
+    }
+
+    await this.setPauseReason(goalId, undefined);
+    await this.transitionStatus(graph.goal, 'running', 'a measurement cleared the acceptance gate');
+    return true;
+  };
+
+  /**
+   * Record (or clear) why the coordinator is holding this goal paused.
+   *
+   * Kept on the goal's JSONB config rather than derived from the event log:
+   * control flow should not depend on a capped audit trail, and the marker has
+   * to survive for as long as the pause does — which for a long-horizon goal
+   * is the whole wait.
+   */
+  private setPauseReason = async (goalId: string, reason: GoalPauseReason | undefined) => {
+    await this.goalModel.updatePauseReason(goalId, reason);
+  };
+
+  /**
+   * Whether the coordinator is the one holding this paused goal.
+   *
+   * The marker answers it outright. Goals parked before the marker existed —
+   * and any parked by an old worker mid-deploy — carry none, so fall back to
+   * who performed the transition: every status change records a goal-entity
+   * event, and the newest one is by definition the transition that produced
+   * the current status. A coordinator park is attributed to `system`, a user
+   * pause to `user`, so the two stay distinguishable without the marker.
+   *
+   * Absent both, the pause is left alone: a goal wrongly resumed spends money
+   * against an explicit human decision, while one left parked says so on its
+   * row and is one Resume away.
+   */
+  private isParkedOnMeasuredGate = (graph: GoalGraphSnapshot): boolean => {
+    if (graph.goal.status !== 'paused') return false;
+    if (graph.goal.config?.pausedBy) return graph.goal.config.pausedBy === 'measured_acceptance';
+
+    // Match the park this gate actually recorded, not merely "the coordinator
+    // paused it": it also parks goals that are blocked or out of budget, and an
+    // unrelated sample must not restart either. The newest goal-entity event is
+    // by definition the transition that produced the current status; if two
+    // share a millisecond and the read picks the other one, the result is a
+    // missed reopen rather than a wrongful one.
+    const lastTransition = graph.events.find((event) => event.entityType === 'goal');
+    return (
+      lastTransition?.actorType !== 'user' &&
+      !!lastTransition?.reason?.startsWith(MEASURED_ACCEPTANCE_PAUSE_REASON) &&
+      needsMetricCriteria(graph)
+    );
+  };
+
+  setMetricCriteria = async (goalId: string, metrics: GoalMetricCriterion[]) => {
+    const before = await this.coordinatorGraph.getGraph(goalId);
+    if (!before) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
+    const parkedOnGate = this.isParkedOnMeasuredGate(before);
+    const goal = before.goal;
+    await this.goalModel.update(goalId, {
+      config: {
+        ...goal.config,
+        acceptance: {
+          ...goal.config?.acceptance,
+          metrics: metrics.length > 0 ? metrics : undefined,
+        },
+      },
+    });
+    // Relaxing or dropping a clause can clear a gate the goal is parked on.
+    await this.reopenIfMeasurementCleared(goalId, parkedOnGate);
+    return this.graph(goalId);
+  };
+
   setAcceptanceCriteria = async (goalId: string, criteriaIds: string[]) => {
     const goal = await this.goalModel.findById(goalId);
     if (!goal) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
     await this.goalModel.update(goalId, {
-      config: { ...goal.config, acceptance: { criteriaIds } },
+      config: { ...goal.config, acceptance: { ...goal.config?.acceptance, criteriaIds } },
     });
 
     // A terminal Goal-acceptance Task may already be dispatched — its
@@ -291,7 +473,93 @@ export class GoalService {
 
   graph = async (goalId: string) => {
     const graph = await this.requireGraph(goalId);
-    return { ...graph, runHeartbeats: await this.collectRunHeartbeats(graph) };
+    const [runHeartbeats, deliveredAt, acceptances, spend] = await Promise.all([
+      this.collectRunHeartbeats(graph),
+      this.collectDeliveredAt(graph),
+      this.collectAcceptances(graph),
+      this.resolveSpend(graph),
+    ]);
+    return { ...graph, acceptances, deliveredAt, runHeartbeats, spend };
+  };
+
+  /**
+   * Verification state per task node.
+   *
+   * Every dispatched task already owns an Acceptance (`createResponsibleTask`
+   * creates one), but the goal surfaced only the criteria it would be judged
+   * against — never the judgment. A reader could see that a task finished and
+   * still have no idea whether it held up, which is the gap that made the page
+   * feel unverifiable.
+   */
+  private collectAcceptances = async (
+    graph: GoalGraphSnapshot,
+  ): Promise<Record<string, GoalNodeAcceptance> | undefined> => {
+    const taskNodes = graph.nodes.filter(
+      (node): node is GoalGraphNode & { taskId: string } => node.kind === 'task' && !!node.taskId,
+    );
+    if (taskNodes.length === 0) return undefined;
+
+    const nodeByTaskId = new Map(taskNodes.map((node) => [node.taskId, node.id]));
+    const rows = await this.acceptanceService.acceptanceModel.findBySubjects(
+      'task',
+      taskNodes.map((node) => node.taskId),
+    );
+
+    const result: Record<string, GoalNodeAcceptance> = {};
+    for (const row of rows) {
+      const nodeId = nodeByTaskId.get(row.subjectId);
+      if (!nodeId) continue;
+      result[nodeId] = { id: row.id, status: row.status };
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+  };
+
+  /**
+   * When an active task node's newest run delivered, for the nodes waiting on
+   * verification to settle.
+   *
+   * A verify-bound task keeps its node `active` while its topic is already
+   * `completed`, and the judgment is a full agent run that routinely outlives
+   * the operation lease — `decideNextMove` holds off re-dispatching such a node
+   * for a whole `VERIFY_SETTLE_GRACE_MS`. But a completed topic is not a
+   * *running* one, so it contributes no heartbeat, and a client judging
+   * liveness from heartbeats alone declared the goal's most informative moment
+   * — delivered, being verified — lost. Reporting the delivery instant lets the
+   * client name that state and apply the coordinator's own grace window instead
+   * of the lease.
+   */
+  private collectDeliveredAt = async (
+    graph: GoalGraphSnapshot,
+  ): Promise<Record<string, Date> | undefined> => {
+    const activeTasks = graph.nodes.filter(
+      (node): node is GoalGraphNode & { taskId: string } =>
+        node.kind === 'task' && node.status === 'active' && !!node.taskId,
+    );
+    if (activeTasks.length === 0) return undefined;
+
+    const nodeByTaskId = new Map(activeTasks.map((node) => [node.taskId, node.id]));
+    // Newest run per task: `findWithHandoffByTaskIds` orders by seq desc, so the
+    // first row seen for a task is its latest.
+    const topics = await this.taskTopicModel.findWithHandoffByTaskIds(
+      activeTasks.map((n) => n.taskId),
+      activeTasks.length,
+    );
+
+    const delivered: Record<string, Date> = {};
+    const seen = new Set<string>();
+    for (const topic of topics) {
+      const taskId = topic.sourceTaskId;
+      if (!taskId || seen.has(taskId)) continue;
+      seen.add(taskId);
+      const nodeId = nodeByTaskId.get(taskId);
+      // Only the newest run counts, and only while it is a delivery: an older
+      // completed run under a newer running one is history, not a pending
+      // verification.
+      if (!nodeId || topic.status !== 'completed') continue;
+      delivered[nodeId] = topic.completedAt ?? topic.createdAt;
+    }
+
+    return Object.keys(delivered).length > 0 ? delivered : undefined;
   };
 
   /**
@@ -432,6 +700,10 @@ export class GoalService {
 
   pause = async (goalId: string) => {
     const graph = await this.requireGraph(goalId);
+    // From here the pause is the person's, so no later measurement lifts it.
+    // Written even when the goal is already paused — that transition is a
+    // no-op, so this marker is the only record that the person took it over.
+    await this.setPauseReason(goalId, 'user');
     const goal = await this.transitionStatus(graph.goal, 'paused', 'paused by user', 'user');
     if (!goal) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
     return goal;
@@ -449,20 +721,81 @@ export class GoalService {
    * cannot express, and a goal whose deadline passed must stop the same way a
    * goal out of money does.
    */
+  /**
+   * Read every declared numeric clause against its series' latest observation.
+   *
+   * A missing series or a series with no points reads as `null` and fails its
+   * clause: "never measured" is not "satisfied". The measured value is carried
+   * out with the verdict so the trajectory records what the decision saw.
+   */
+  private evaluateMetricCriteria = async (
+    graph: GoalGraphSnapshot,
+  ): Promise<GoalMetricCriteriaState> => {
+    const declared = graph.goal.config?.acceptance?.metrics ?? [];
+    const metricModel = new MetricModel(this.db, this.userId, this.workspaceId);
+
+    // Two queries for the whole contract, not two per clause: this runs on
+    // every terminal tick, and a goal carrying a large acceptance payload would
+    // otherwise pace the connection pool for unrelated requests. Only the
+    // declared keys are fetched — the same goal can accumulate any number of
+    // other sampled series, and none of them can gate acceptance.
+    const series = await metricModel.findByKeys(
+      'goal',
+      graph.goal.id,
+      declared.map((criterion) => criterion.key),
+    );
+    const seriesByKey = new Map(series.map((item) => [item.key, item]));
+    const latestByMetricId = await metricModel.latestPointsByMetricIds(
+      declared.flatMap((criterion) => {
+        const id = seriesByKey.get(criterion.key)?.id;
+        return id ? [id] : [];
+      }),
+    );
+
+    const criteria = declared.map((criterion) => {
+      const op = criterion.op ?? 'gte';
+      const seriesId = seriesByKey.get(criterion.key)?.id;
+      const point = seriesId ? latestByMetricId.get(seriesId) : undefined;
+      const value = point?.value ?? null;
+      return {
+        key: criterion.key,
+        met: value !== null && compareMetric(value, op, criterion.target),
+        observedAt: point ? new Date(point.observedAt).getTime() : undefined,
+        op,
+        target: criterion.target,
+        value,
+      };
+    });
+
+    return { allMet: criteria.every((criterion) => criterion.met), criteria };
+  };
+
   private evaluateBudget = async (goal: GoalItem, graph: GoalGraphSnapshot) => {
-    const taskIds = graph.nodes.flatMap((node) => (node.taskId ? [node.taskId] : []));
-    const runs = await this.taskTopicModel.findWithHandoffByTaskIds(taskIds, 10_000);
-    const totalCost = runs.reduce((sum, run) => sum + Number(run.totalCost ?? 0), 0);
+    const { runs, totalCost } = await this.resolveSpend(graph);
     const deadline = goal.config?.schedule?.deadline ?? null;
     return {
       costLimitReached: goal.maxTotalCost !== null && totalCost >= Number(goal.maxTotalCost),
       deadline,
       deadlinePassed: deadline !== null && Date.now() >= new Date(deadline).getTime(),
-      roundLimitReached: goal.maxRounds !== null && runs.length >= goal.maxRounds,
+      roundLimitReached: goal.maxRounds !== null && runs >= goal.maxRounds,
       runs,
       totalCost,
     };
   };
+
+  /**
+   * Rounds run and dollars spent, by the definition the budget is enforced
+   * against: the runs of the graph's own Task nodes.
+   *
+   * `graph()` ships this to the client so the page's spend reads the same
+   * number the coordinator will stop on. Note it is deliberately NOT the goal
+   * list's `totalRunCost`, which walks the whole `parent_task_id` subtree —
+   * that number is larger for a goal whose Tasks spawned Tasks.
+   */
+  private resolveSpend = async (graph: GoalGraphSnapshot) =>
+    this.taskTopicModel.sumRunCostByTaskIds(
+      graph.nodes.flatMap((node) => (node.taskId ? [node.taskId] : [])),
+    );
 
   /**
    * Edit the goal's standing acceptance requirement in place. The next
@@ -487,10 +820,12 @@ export class GoalService {
     const wasBinding = await this.evaluateBudget(before.goal, before);
 
     // Deadline joins the two execution budgets on the goal row's config; null
-    // clears it. The merge keeps an untouched recovery/schedule block intact.
+    // clears it, and omitting it leaves it alone — the cost/round editor sends
+    // only what it owns, and must not silently drop a deadline someone set.
+    // The merge keeps an untouched recovery/schedule block intact.
     const config = { ...before.goal.config };
-    if (budget.deadline !== undefined || config.schedule) {
-      config.schedule = { ...config.schedule, deadline: budget.deadline ?? null };
+    if (budget.deadline !== undefined) {
+      config.schedule = { ...config.schedule, deadline: budget.deadline };
     }
 
     const goal = await this.goalModel.update(goalId, {
@@ -523,6 +858,7 @@ export class GoalService {
     const status = graph.decisions.some((decision) => decision.status === 'pending')
       ? 'review'
       : 'running';
+    await this.setPauseReason(goalId, undefined);
     const goal = await this.transitionStatus(graph.goal, status, 'resumed by user', 'user');
     return goal ?? graph.goal;
   };
@@ -607,12 +943,19 @@ export class GoalService {
       ? toBudgetState(graph.goal, await this.evaluateBudget(graph.goal, graph))
       : undefined;
 
+    // Same shape as the budget: a database read the pure decision cannot do,
+    // taken only in the terminal phase of a goal that declares numeric clauses.
+    const metricCriteria = needsMetricCriteria(graph)
+      ? await this.evaluateMetricCriteria(graph)
+      : undefined;
+
     const concurrency = resolveMaxConcurrentTasks(graph.goal);
     const move = decideNextMove({
       budget,
       concurrency,
       frontier,
       graph,
+      metricCriteria,
       tasksById,
     });
     // The scheduler may pick past the head of the frontier, so every arm below
@@ -631,6 +974,7 @@ export class GoalService {
         branch: move.branch,
         budget,
         candidates: move.candidates,
+        metricCriteria,
         chosenNodeId: move.chosenNodeId,
         effects,
         candidateTasks: frontier.eligible.flatMap(({ node }) => {
@@ -661,6 +1005,23 @@ export class GoalService {
           nodeId: move.focusNodeId,
           outcome: move.outcome,
         });
+      }
+
+      // The measured half of acceptance stopped the goal short of its delivery
+      // contract. Nothing to create and nothing to settle — the next
+      // observation is what moves it, which can be days away.
+      //
+      // Park it for the same reason `no_frontier` does: a `running` goal that
+      // always reports `no_progress` is picked by every sweep forever, and a
+      // long-horizon goal waiting on a measurement would sit in that state for
+      // its whole life — enough of them crowd genuinely stranded goals out of
+      // the newest-first scan limit. `recordObservation` resumes it when a
+      // measurement actually clears the gate.
+      case 'measured_acceptance': {
+        await this.setPauseReason(goalId, 'measured_acceptance');
+        await this.transitionStatus(graph.goal, 'paused', move.message);
+        effects.push({ type: 'goal_status', detail: 'paused' });
+        return observe({ goalId, message: move.message, outcome: move.outcome });
       }
 
       case 'terminal_acceptance': {
@@ -1254,9 +1615,14 @@ export class GoalService {
       `Current Task contract (authoritative execution scope): ${title}`,
       description,
       'Execute only the Current Task contract. Do not implement, validate, or pre-empt any sibling or downstream Task node, even when the overall goal context describes it.',
-      'The complete requirements for this Task are included here. Do not inspect unrelated agent documents to recover requirements. Do not invoke Acceptance skills or Acceptance CLI commands during the main Task; a dedicated post-run phase will ask you to submit your evidence before an independent verifier judges it.',
+      'The complete requirements for this Task are included here. Do not inspect unrelated agent documents to recover requirements. This Task carries its own Acceptance: run it inside this Task — drive the real product surface, capture the evidence, and submit it against your own criteria while you work. Submit evidence only; an independent verifier judges whether this Task is complete.',
       'Create implementation-level subtasks when useful. Finish the operation once the Current Task deliverable and its concrete evidence are ready; Acceptance verification will decide whether this Task is complete.',
       'Make the final delivery self-contained for an independent verifier that may not have workspace access. Include the relevant artifact contents or exact excerpts and the raw outputs of decisive verification commands; file paths and claims that checks passed are not sufficient evidence by themselves.',
+      // A path on the machine that happened to run the task is not a
+      // deliverable: the goal page cannot open it, the reviewer cannot read it,
+      // and /tmp does not survive the week. Only artifacts that reach the
+      // product are harvested onto the Goal Graph (see attachTaskDeliverables).
+      'Persist every deliverable inside the product, not only on the local disk. Write reports and analyses as agent documents, and produce generated files (pptx / xlsx / docx / pdf, …) in the operation workspace so they are uploaded and registered. A local path such as /tmp or a repository directory is a working location, not a delivery — anything left only there is unreviewable and is not attached to the Goal.',
       'Return the produced artifacts, evidence, key findings, and the recommended next action. Do not mark the overall Goal complete.',
     ]
       .filter(Boolean)
@@ -1387,6 +1753,69 @@ export class GoalService {
       .join('\n\n');
   };
 
+  /**
+   * Link what a task actually delivered to the node that ordered it.
+   *
+   * The task Work attached alongside is the execution container; these are its
+   * outputs — the documents and external resources the run registered. Without
+   * them the graph records that a task finished but not what it produced, and
+   * the deliverable survives only as a URL buried in the finding's prose.
+   *
+   * Harvested across every run of the task, not just the delivering one: a task
+   * that wrote its document in an earlier round and only revised it in the last
+   * still delivered that document. Works are deduplicated by identity and
+   * linked at their newest version, so a document refined across rounds is one
+   * deliverable with a history rather than several deliverables.
+   *
+   * `task` Works are deliberately excluded: the responsible task's own Work is
+   * the execution container and the caller already links it. `file` Works are
+   * opt-in at the registry (conversation lists do not want every exported
+   * file), but a goal's deliverables are exactly where a produced deck or PDF
+   * belongs, so they are requested explicitly here.
+   */
+  private attachTaskDeliverables = async (
+    goalId: string,
+    nodeId: string,
+    operationIds: string[],
+    effects: GoalAdvanceEffect[],
+  ) => {
+    if (operationIds.length === 0) return;
+
+    // The per-operation cap is applied to version EVENTS before this dedupes by
+    // Work identity, so the default of 20 lets a document revised twenty times
+    // push every other deliverable out of its own task's list.
+    const byOperation = await this.workModel.listByRootOperations({
+      includeFileWorks: true,
+      limit: DELIVERABLE_EVENTS_PER_RUN,
+      rootOperationIds: operationIds,
+    });
+
+    const newestByWork = new Map<string, WorkVersionEventItem>();
+    for (const item of Object.values(byOperation).flat()) {
+      if (item.type === 'task') continue;
+      const seen = newestByWork.get(item.id);
+      if (!seen || seen.version.createdAt < item.version.createdAt) newestByWork.set(item.id, item);
+    }
+
+    for (const item of newestByWork.values()) {
+      const link = await this.coordinatorGraph.attachWorkVersion(
+        goalId,
+        nodeId,
+        item.version.id,
+        'produced',
+      );
+      // `attachWorkVersion` is idempotent, so a re-settled task re-links the
+      // same versions silently; only a genuinely new link is worth an effect.
+      if (link)
+        effects.push({
+          detail: item.type,
+          nodeId,
+          targetId: item.id,
+          type: 'attached_work_version',
+        });
+    }
+  };
+
   private consumeCompletedTask = async (
     graph: GoalGraphSnapshot,
     nodeId: string,
@@ -1429,6 +1858,16 @@ export class GoalService {
         'produced',
       );
     }
+    // Every run of the task, not the ten `findWithHandoff` reads for the
+    // finding: an attempt budget above ten would otherwise strand a deliverable
+    // produced early and merely referenced later.
+    const allRuns = await this.taskTopicModel.findByTaskId(taskId);
+    await this.attachTaskDeliverables(
+      graph.goal.id,
+      nodeId,
+      allRuns.flatMap((topic) => (topic.operationId ? [topic.operationId] : [])),
+      effects,
+    );
     if (!existingFinding) {
       const handoff = latest?.handoff as TaskTopicHandoff | null;
       const finding = await this.coordinatorGraph.createNode(graph.goal.id, {

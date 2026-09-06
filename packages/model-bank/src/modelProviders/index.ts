@@ -40,6 +40,7 @@ import KimiCodingPlanProvider from './kimiCodingPlan';
 import LMStudioProvider from './lmstudio';
 import LobeHubProvider from './lobehub';
 import LongCatProvider from './longcat';
+import MetaProvider from './meta';
 import MinimaxProvider from './minimax';
 import MinimaxCodingPlanProvider from './minimaxCodingPlan';
 import MistralProvider from './mistral';
@@ -159,6 +160,13 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   VertexAIProvider,
   { ...AzureProvider, chatModels: [] },
   AzureAIProvider,
+  MetaProvider,
+  XAIProvider,
+  QwenProvider,
+  ZhiPuProvider,
+  MinimaxProvider,
+  MistralProvider,
+  XiaomiMiMoProvider,
   AiHubMixProvider,
   OpenRouterProvider,
   FalProvider,
@@ -180,21 +188,17 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   FireworksAIProvider,
   GroqProvider,
   PerplexityProvider,
-  MistralProvider,
   ModelScopeProvider,
   Ai21Provider,
   UpstageProvider,
-  XAIProvider,
   SuperGrokProvider,
   JinaProvider,
   SambaNovaProvider,
   CohereProvider,
   V0Provider,
-  QwenProvider,
   WenxinProvider,
   TencentcloudProvider,
   HunyuanProvider,
-  ZhiPuProvider,
   SiliconCloudProvider,
   ZeroOneProvider,
   SparkProvider,
@@ -204,7 +208,6 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   BytePlusProvider,
   VolcengineProvider,
   VolcengineCodingPlanProvider,
-  MinimaxProvider,
   MinimaxCodingPlanProvider,
   LMStudioProvider,
   InternLMProvider,
@@ -225,7 +228,6 @@ export const DEFAULT_MODEL_PROVIDER_LIST = [
   OpenCodeZenProvider,
   OpenCodeCodingPlanProvider,
   StraicoProvider,
-  XiaomiMiMoProvider,
   LongCatProvider,
   StreamLakeProvider,
   AntGroupProvider,
@@ -241,6 +243,14 @@ export const isProviderDisableBrowserRequest = (id: string) => {
   );
   return !!provider;
 };
+
+/**
+ * Human-readable provider name for a provider id (`meta` → `Meta`). Unknown ids
+ * (custom providers, typos) fall back to the id itself so callers always get a
+ * non-empty label.
+ */
+export const getProviderDisplayName = (id: string) =>
+  DEFAULT_MODEL_PROVIDER_LIST.find((provider) => provider.id === id)?.name || id;
 
 export const isProviderOAuthDeviceFlow = (id?: string) =>
   DEFAULT_MODEL_PROVIDER_LIST.some(
@@ -286,6 +296,7 @@ export { default as KimiCodingPlanProviderCard } from './kimiCodingPlan';
 export { default as LMStudioProviderCard } from './lmstudio';
 export { default as LobeHubProviderCard } from './lobehub';
 export { default as LongCatProviderCard } from './longcat';
+export { default as MetaProviderCard } from './meta';
 export { default as MinimaxProviderCard } from './minimax';
 export { default as MinimaxCodingPlanProviderCard } from './minimaxCodingPlan';
 export { default as MistralProviderCard } from './mistral';
