@@ -8,7 +8,9 @@ import {
 } from '@/business/client/BusinessMobileRoutes';
 import AgentShareVisitorSkeleton from '@/components/Skeleton/AgentShareVisitor';
 import AppsSkeleton from '@/components/Skeleton/Apps';
+import CommunityListSkeleton from '@/components/Skeleton/CommunityList';
 import { delayed } from '@/components/Skeleton/Delayed';
+import { createSurfaceSkeleton } from '@/components/Skeleton/Surface';
 import { acceptanceRouteMeta } from '@/features/Acceptance/routeMeta';
 import { agentShareVisitorRouteMeta } from '@/features/AgentShareVisitor/routeMeta';
 import { AGENT_SHARE_VISITOR_PATH } from '@/features/AgentShareVisitor/visitorPath';
@@ -16,6 +18,7 @@ import { mobileAgentSettingsRouteMeta } from '@/features/RouteMeta/mobileRouteMe
 import WorkspaceProviderRedirect from '@/features/WorkspaceSetting/ProviderRedirect';
 import { agentRouteMeta } from '@/routes/(main)/agent/features/routeMeta';
 import { loadRouteWithBuiltinToolSurfaces } from '@/spa/initialize/toolSurfaces';
+import { routeMeta } from '@/spa/router/routeMeta';
 import { dynamicElement, dynamicLayout, ErrorBoundary, redirectElement } from '@/utils/router';
 
 const mobileChatElement = dynamicElement(
@@ -139,6 +142,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
                 ),
               'Mobile > Discover > List > Workspace',
             ),
+            handle: { meta: routeMeta({ Skeleton: createSurfaceSkeleton('detail') }) },
             path: 'workspace',
           },
         ],
@@ -147,6 +151,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
           'Mobile > Discover > List > Layout',
           { preloadId: 'mobile-community' },
         ),
+        handle: { meta: routeMeta({ Skeleton: CommunityListSkeleton }) },
       },
       // Detail routes (with DetailLayout)
       {
@@ -211,6 +216,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
           () => import('@/routes/(mobile)/community/(detail)/_layout'),
           'Mobile > Discover > Detail > Layout',
         ),
+        handle: { meta: routeMeta({ Skeleton: createSurfaceSkeleton('detail') }) },
       },
     ],
     element: dynamicElement(
@@ -460,6 +466,64 @@ export const mobileRoutes: RouteObject[] = [
                 ),
                 path: 'general',
               },
+              // Account-level tabs mirrored inside the workspace (see the
+              // desktop router); the pages are the personal settings pages.
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/profile'),
+                  'Mobile > Workspace > Settings > Profile',
+                ),
+                path: 'profile',
+              },
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/appearance'),
+                  'Mobile > Workspace > Settings > Appearance',
+                ),
+                path: 'appearance',
+              },
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/hotkey'),
+                  'Mobile > Workspace > Settings > Hotkey',
+                ),
+                path: 'hotkey',
+              },
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/messenger'),
+                  'Mobile > Workspace > Settings > Messenger',
+                ),
+                path: 'messenger',
+              },
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/messenger'),
+                  'Mobile > Workspace > Settings > Messenger > Platform',
+                ),
+                path: 'messenger/:sub',
+              },
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/advanced'),
+                  'Mobile > Workspace > Settings > Advanced',
+                ),
+                path: 'advanced',
+              },
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/labs'),
+                  'Mobile > Workspace > Settings > Labs',
+                ),
+                path: 'labs',
+              },
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/about'),
+                  'Mobile > Workspace > Settings > About',
+                ),
+                path: 'about',
+              },
               {
                 element: dynamicElement(
                   () => import('@/routes/(main)/[workspaceSlug]/settings/members'),
@@ -621,7 +685,7 @@ export const mobileRoutes: RouteObject[] = [
     ),
     errorElement: <ErrorBoundary />,
     handle: { meta: agentShareVisitorRouteMeta },
-    path: `${AGENT_SHARE_VISITOR_PATH}/:slugOrId`,
+    path: `${AGENT_SHARE_VISITOR_PATH}/:slugOrId/:topicId?`,
   },
 
   // Messenger verify route (outside main layout)

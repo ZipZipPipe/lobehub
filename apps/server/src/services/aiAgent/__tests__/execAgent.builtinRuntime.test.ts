@@ -21,10 +21,10 @@ vi.mock('node:zlib', async () => {
 
 const {
   mockCreateOperation,
-  mockFindAiModelByIdAndProvider,
   mockGetAgentConfig,
   mockGetBuiltinAgent,
   mockGetInfoForAIGeneration,
+  mockGetModelMetadata,
   mockIsAgentSignalEnabledForUser,
   mockMessageCreate,
   mockMessageQuery,
@@ -32,10 +32,10 @@ const {
   mockToolsEnv,
 } = vi.hoisted(() => ({
   mockCreateOperation: vi.fn(),
-  mockFindAiModelByIdAndProvider: vi.fn(),
   mockGetAgentConfig: vi.fn(),
   mockGetBuiltinAgent: vi.fn(),
   mockGetInfoForAIGeneration: vi.fn(),
+  mockGetModelMetadata: vi.fn(),
   mockIsAgentSignalEnabledForUser: vi.fn(),
   mockMessageCreate: vi.fn(),
   mockMessageQuery: vi.fn(),
@@ -68,7 +68,7 @@ vi.mock('@/database/models/message', () => ({
 
 vi.mock('@/database/models/aiModel', () => ({
   AiModelModel: vi.fn().mockImplementation(() => ({
-    findByIdAndProvider: mockFindAiModelByIdAndProvider,
+    findByIdAndProvider: mockGetModelMetadata,
   })),
 }));
 
@@ -240,13 +240,13 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
     vi.clearAllMocks();
     mockMessageCreate.mockResolvedValue({ id: 'msg-1' });
     mockMessageQuery.mockResolvedValue([]);
-    mockFindAiModelByIdAndProvider.mockResolvedValue(undefined);
     mockIsAgentSignalEnabledForUser.mockResolvedValue(true);
     mockResolveTask.mockResolvedValue(null);
     mockGetInfoForAIGeneration.mockResolvedValue({
       responseLanguage: 'en-US',
       userName: 'Test User',
     });
+    mockGetModelMetadata.mockResolvedValue(undefined);
     mockToolsEnv.MULTIMODAL_UNDERSTANDING_MODEL = 'vision-model';
     mockToolsEnv.MULTIMODAL_UNDERSTANDING_PROVIDER = 'test-provider';
     mockCreateOperation.mockResolvedValue({
@@ -732,7 +732,7 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
       provider: 'kimicodingplan',
       systemRole: '',
     });
-    mockFindAiModelByIdAndProvider.mockResolvedValue({
+    mockGetModelMetadata.mockResolvedValue({
       abilities: { functionCall: true, video: false, vision: true },
       id: 'kimi-k3-256k',
       providerId: 'kimicodingplan',
@@ -751,7 +751,7 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
       prompt: 'Describe the previous image without using a visual tool.',
     });
 
-    expect(mockFindAiModelByIdAndProvider).toHaveBeenCalledWith('kimi-k3-256k', 'kimicodingplan');
+    expect(mockGetModelMetadata).toHaveBeenCalledWith('kimi-k3-256k', 'kimicodingplan');
     const callArgs = vi.mocked(createServerAgentToolsEngine).mock.calls[0][1];
     expect(callArgs.modelAbilities).toMatchObject({ video: false, vision: true });
     expect(callArgs.manifestContext?.disableMultimodalAnalysis).toBe(true);
@@ -767,7 +767,7 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
       provider: 'kimicodingplan',
       systemRole: '',
     });
-    mockFindAiModelByIdAndProvider.mockResolvedValue({
+    mockGetModelMetadata.mockResolvedValue({
       abilities: { functionCall: true, video: false, vision: true },
       id: 'kimi-k3-256k',
       providerId: 'kimicodingplan',
@@ -790,5 +790,107 @@ describe('AiAgentService.execAgent - builtin agent runtime config', () => {
     expect(callArgs.modelAbilities).toMatchObject({ video: false, vision: true });
     expect(callArgs.manifestContext?.disableMultimodalAnalysis).toBeUndefined();
     expect(callArgs.agentConfig.plugins).toContain('lobe-agent');
+  });
+
+  it('should not inject lobe-agent when user model abilities support images natively', async () => {
+    mockGetAgentConfig.mockResolvedValue({
+      chatConfig: {},
+      id: 'agent-custom',
+      model: 'custom-vision-model',
+      plugins: [],
+      provider: 'custom-provider',
+      systemRole: '',
+    });
+    mockGetModelMetadata.mockResolvedValue({ abilities: { vision: true } });
+    mockMessageQuery.mockResolvedValue([
+      {
+        id: 'history-image',
+        imageList: [{ alt: 'image.png', id: 'file-image', url: 'https://example.com/image.png' }],
+        role: 'user',
+      },
+    ]);
+
+    await service.execAgent({
+      agentId: 'agent-custom',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'What is shown in the previous image?',
+    });
+
+    const callArgs = vi.mocked(createServerAgentToolsEngine).mock.calls[0][1];
+    expect(callArgs.agentConfig.plugins).not.toContain('lobe-agent');
+  });
+
+  it('should inject lobe-agent when user model abilities disable builtin image support', async () => {
+    mockGetAgentConfig.mockResolvedValue({
+      chatConfig: {},
+      id: 'agent-custom',
+      model: 'gpt-4',
+      plugins: [],
+      provider: 'openai',
+      systemRole: '',
+    });
+    mockGetModelMetadata.mockResolvedValue({ abilities: { vision: false } });
+    mockMessageQuery.mockResolvedValue([
+      {
+        id: 'history-image',
+        imageList: [{ alt: 'image.png', id: 'file-image', url: 'https://example.com/image.png' }],
+        role: 'user',
+      },
+    ]);
+
+    await service.execAgent({
+      agentId: 'agent-custom',
+      appContext: { topicId: 'topic-1' },
+      prompt: 'What is shown in the previous image?',
+    });
+
+    expect(createServerAgentToolsEngine).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        agentConfig: expect.objectContaining({
+          plugins: expect.arrayContaining(['lobe-agent']),
+        }),
+      }),
+    );
+  });
+
+  it.each([true, false])('should preserve user image output override %s', async (imageOutput) => {
+    mockGetAgentConfig.mockResolvedValue({
+      chatConfig: {},
+      id: 'agent-custom',
+      model: imageOutput ? 'custom-image-model' : 'gemini-3.1-flash-image',
+      plugins: [],
+      provider: imageOutput ? 'custom-provider' : 'google',
+      systemRole: '',
+    });
+    mockGetModelMetadata.mockResolvedValue({ abilities: { imageOutput, vision: false } });
+
+    await service.execAgent({
+      agentId: 'agent-custom',
+      prompt: 'Generate an image',
+    });
+
+    const callArgs = vi.mocked(createServerAgentToolsEngine).mock.calls[0][1];
+    expect(callArgs.modelAbilities).toMatchObject({ imageOutput, vision: false });
+  });
+
+  it('should preserve builtin image output support when user abilities override vision', async () => {
+    mockGetAgentConfig.mockResolvedValue({
+      chatConfig: {},
+      id: 'agent-custom',
+      model: 'gemini-3.1-flash-image',
+      plugins: [],
+      provider: 'google',
+      systemRole: '',
+    });
+    mockGetModelMetadata.mockResolvedValue({ abilities: { vision: false } });
+
+    await service.execAgent({
+      agentId: 'agent-custom',
+      prompt: 'Generate an image',
+    });
+
+    const callArgs = vi.mocked(createServerAgentToolsEngine).mock.calls[0][1];
+    expect(callArgs.modelAbilities).toMatchObject({ imageOutput: true });
   });
 });

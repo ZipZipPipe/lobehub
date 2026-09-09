@@ -56,6 +56,12 @@ const resolveGoalLoopContext = async (
       if (comment) context.rejectComment = comment;
     }
 
+    const automaticReview = [...runs].reverse().find((run) => run.metadata?.goalReview)
+      ?.metadata?.goalReview;
+    if (automaticReview && automaticReview.status !== 'passed') {
+      context.automaticReviewFeedback = automaticReview.feedback;
+    }
+
     const plan = (last.plan ?? []) as Array<{ id: string; title: string }>;
     const results = await new VerifyCheckResultModel(db, userId, workspaceId).listByRun(last.id);
     const byItem = new Map(results.map((r) => [r.checkItemId, r]));
@@ -231,9 +237,12 @@ export async function buildTaskPrompt(
   // what to self-evidence while it works. Run-time handles (verifyRunId /
   // checkItemId) don't exist yet at prompt-build time — the verify skill
   // resolves those at runtime from the builder's operationId.
-  const resolvedAcceptance = await resolveTaskAcceptance(db, userId, task.id, workspaceId).catch(
-    () => undefined,
-  );
+  // Recurring tasks (schedule / heartbeat) never get a verify plan (see
+  // instantiateVerifyPlanOnStart) — don't tell the builder to self-evidence
+  // acceptance criteria whose run-time plan will never exist.
+  const resolvedAcceptance = task.automationMode
+    ? undefined
+    : await resolveTaskAcceptance(db, userId, task.id, workspaceId).catch(() => undefined);
   const verifyConfig = resolvedAcceptance?.config;
   const verifyEnabled = !!resolvedAcceptance && verifyConfig?.enabled !== false;
   let verifyCriteria: Array<{
