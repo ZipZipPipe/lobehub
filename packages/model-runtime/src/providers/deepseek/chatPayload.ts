@@ -12,11 +12,11 @@ import { deepseekRuntimeModels } from './runtimeModels';
 import { sanitizeDeepSeekJsonPayload } from './sanitizePayload';
 
 export const isDeepSeekV4Model = (model: string | undefined) => isDeepSeekV4FamilyModel(model);
-const DEEPSEEK_V4_FLASH_VISION_EXP = 'deepseek-v4-flash-vision-exp';
+const DEEPSEEK_VISION_MODELS = new Set(['deepseek-flash', 'deepseek-v4-flash-vision-exp']);
 const VISION_DOWNGRADE_PLACEHOLDER = '[image omitted: delegated to visual understanding tool]';
 
 const isDeepSeekVisionModel = (model: string | undefined) =>
-  model?.toLowerCase().split('/').at(-1) === DEEPSEEK_V4_FLASH_VISION_EXP;
+  DEEPSEEK_VISION_MODELS.has(model?.toLowerCase().split('/').at(-1) ?? '');
 
 const downgradeUnsupportedImageParts = (content: unknown) => {
   if (!Array.isArray(content)) return content;
