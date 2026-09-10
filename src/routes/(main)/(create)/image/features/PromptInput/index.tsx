@@ -30,6 +30,9 @@ import {
   CfgSliderInput,
   DimensionControlGroup,
   ImageNum,
+  ModerationSelect,
+  OutputCompressionSlider,
+  OutputFormatSelect,
   QualitySelect,
   ResolutionSelect,
   SeedNumberInput,
@@ -168,6 +171,9 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
   const isInit = useImageStore((s) => s.isInit);
   const isSupportBackground = useImageStore(isSupportedParamSelector('background'));
   const isSupportQuality = useImageStore(isSupportedParamSelector('quality'));
+  const isSupportModeration = useImageStore(isSupportedParamSelector('moderation'));
+  const isSupportOutputCompression = useImageStore(isSupportedParamSelector('outputCompression'));
+  const isSupportOutputFormat = useImageStore(isSupportedParamSelector('outputFormat'));
   const isSupportResolution = useImageStore(isSupportedParamSelector('resolution'));
   const isSupportSize = useImageStore(isSupportedParamSelector('size'));
   const isSupportSeed = useImageStore(isSupportedParamSelector('seed'));
@@ -176,6 +182,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
   const isSupportPromptExtend = useImageStore(isSupportedParamSelector('promptExtend'));
   const isSupportWatermark = useImageStore(isSupportedParamSelector('watermark'));
   const isSupportWebSearch = useImageStore(isSupportedParamSelector('webSearch'));
+  const outputFormat = useImageStore((s) => s.parameters?.outputFormat);
   const isLogin = useUserStore(authSelectors.isLogin);
   const enabledImageModelList = useAiInfraStore(aiProviderSelectors.enabledImageModelList);
   const isModelConfigReady = useAiInfraStore((s) =>
@@ -348,6 +355,25 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                     <Flexbox gap={6}>
                       <Text fontSize={12}>{t('config.quality.label')}</Text>
                       <QualitySelect />
+                    </Flexbox>
+                  )}
+                  {isSupportOutputFormat && (
+                    <Flexbox gap={6}>
+                      <Text fontSize={12}>{t('config.outputFormat.label')}</Text>
+                      <OutputFormatSelect />
+                    </Flexbox>
+                  )}
+                  {isSupportOutputCompression &&
+                    (outputFormat === 'jpeg' || outputFormat === 'webp') && (
+                      <Flexbox gap={6}>
+                        <Text fontSize={12}>{t('config.outputCompression.label')}</Text>
+                        <OutputCompressionSlider />
+                      </Flexbox>
+                    )}
+                  {isSupportModeration && !hasRefImages && (
+                    <Flexbox gap={6}>
+                      <Text fontSize={12}>{t('config.moderation.label')}</Text>
+                      <ModerationSelect />
                     </Flexbox>
                   )}
                   {isSupportResolution && (

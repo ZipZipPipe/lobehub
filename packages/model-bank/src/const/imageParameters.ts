@@ -56,6 +56,45 @@ export const gptImage2Schema: ModelParamsSchema = {
   },
 };
 
+export const gptImage25Schema: ModelParamsSchema = {
+  background: {
+    default: 'auto',
+    enum: ['auto', 'opaque', 'transparent'],
+  },
+  imageUrls: { default: [], maxCount: 16, maxFileSize: 50 * 1024 * 1024 },
+  moderation: {
+    default: 'auto',
+    enum: ['auto', 'low'],
+  },
+  outputCompression: {
+    default: 100,
+    max: 100,
+    min: 0,
+    step: 1,
+  },
+  outputFormat: {
+    default: 'png',
+    enum: ['png', 'jpeg', 'webp'],
+  },
+  prompt: { default: '' },
+  quality: {
+    default: 'auto',
+    enum: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+  },
+  size: {
+    custom: {
+      aspectRatioMax: 3,
+      aspectRatioMin: 1 / 3,
+      maxEdge: 3840,
+      maxPixels: 8_294_400,
+      minPixels: 655_360,
+      step: 16,
+    },
+    default: 'auto',
+    enum: ['auto', '1024x1024', '1536x1024', '1024x1536'],
+  },
+};
+
 export const nanoBananaParameters: ModelParamsSchema = {
   aspectRatio: {
     default: 'auto',

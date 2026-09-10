@@ -42,6 +42,8 @@ async function generateByImageMode(
   const paramsMap = new Map<RuntimeImageGenParamsValue, string>([
     ['imageUrls', 'image'],
     ['imageUrl', 'image'],
+    ['outputCompression', 'output_compression'],
+    ['outputFormat', 'output_format'],
   ]);
   const userInput: Record<string, any> = Object.fromEntries(
     Object.entries(params).map(([key, value]) => [
@@ -72,6 +74,16 @@ async function generateByImageMode(
     }
   } else {
     delete userInput.image;
+  }
+
+  // The moderation parameter is supported by image generation, but not image editing.
+  if (isImageEdit) {
+    delete userInput.moderation;
+  }
+
+  // Compression is only accepted for JPEG and WebP output.
+  if (!['jpeg', 'webp'].includes(userInput.output_format)) {
+    delete userInput.output_compression;
   }
 
   if (userInput.size === 'auto') {
@@ -128,8 +140,12 @@ async function generateByImageMode(
 
   // Handle base64 format response
   if (imageData.b64_json) {
-    // Determine the image's MIME type, default to PNG
-    const mimeType = 'image/png'; // OpenAI image generation defaults to PNG format
+    const mimeType =
+      userInput.output_format === 'jpeg'
+        ? 'image/jpeg'
+        : userInput.output_format === 'webp'
+          ? 'image/webp'
+          : 'image/png';
 
     // Convert base64 string to complete data URL
     imageUrl = `data:${mimeType};base64,${imageData.b64_json}`;

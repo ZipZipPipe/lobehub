@@ -5,6 +5,9 @@ export { default as DimensionControlGroup } from '@/routes/(main)/(create)/image
 export { default as ImageNum } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ImageNum';
 export { default as ImageUpload } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ImageUpload';
 export { default as ImageModelItem } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ModelSelect/ImageModelItem';
+export { default as ModerationSelect } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ModerationSelect';
+export { default as OutputCompressionSlider } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/OutputCompressionSlider';
+export { default as OutputFormatSelect } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/OutputFormatSelect';
 export { default as QualitySelect } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/QualitySelect';
 export { default as ResolutionSelect } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ResolutionSelect';
 export { default as SeedNumberInput } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/SeedNumberInput';

@@ -253,6 +253,28 @@ describe('OpenAI audio models', () => {
   });
 });
 
+describe('OpenAI image models', () => {
+  it('includes both GPT Image 2.5 tiers with official image controls', () => {
+    const models = LOBE_DEFAULT_MODEL_LIST.filter(
+      (model) => model.providerId === ModelProvider.OpenAI && model.id.startsWith('gpt-image-2.5-'),
+    );
+
+    expect(models.map(({ id }) => id)).toEqual(['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']);
+    expect(
+      models.every(
+        (model) =>
+          model.enabled &&
+          model.type === 'image' &&
+          model.parameters?.quality?.enum?.includes('xhigh') &&
+          model.parameters?.quality?.enum?.includes('max') &&
+          model.parameters?.outputFormat?.enum?.includes('webp') &&
+          model.parameters?.imageUrls?.maxCount === 16 &&
+          model.parameters?.size?.custom?.maxEdge === 3840,
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('OpenCode Go models', () => {
   it('registers the Muse Spark Contributor series', () => {
     const models = LOBE_DEFAULT_MODEL_LIST.filter(

@@ -6,6 +6,8 @@ import { useGenerationConfigParam } from '@/store/image/slices/generationConfig/
 const BackgroundSelect = () => {
   const { t } = useTranslation('image');
   const { value, setValue, enumValues } = useGenerationConfigParam('background');
+  const { value: outputFormat, setValue: setOutputFormat } =
+    useGenerationConfigParam('outputFormat');
 
   const options =
     enumValues?.map((background) => ({
@@ -13,7 +15,20 @@ const BackgroundSelect = () => {
       value: background,
     })) ?? [];
 
-  return <Select options={options} style={{ width: '100%' }} value={value} onChange={setValue} />;
+  return (
+    <Select
+      options={options}
+      style={{ width: '100%' }}
+      value={value}
+      onChange={(background) => {
+        setValue(background);
+
+        if (background === 'transparent' && outputFormat === 'jpeg') {
+          setOutputFormat('png');
+        }
+      }}
+    />
+  );
 };
 
 export default BackgroundSelect;

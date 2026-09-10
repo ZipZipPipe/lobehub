@@ -161,6 +161,16 @@ export const ModelParamsMetaSchema = z.object({
 
   size: z
     .object({
+      custom: z
+        .object({
+          aspectRatioMax: z.number(),
+          aspectRatioMin: z.number(),
+          maxEdge: z.number(),
+          maxPixels: z.number(),
+          minPixels: z.number(),
+          step: z.number(),
+        })
+        .optional(),
       default: z.string(),
       description: z.string().optional(),
       enum: z.array(z.string()),
@@ -223,6 +233,35 @@ export const ModelParamsMetaSchema = z.object({
     .optional(),
 
   quality: z
+    .object({
+      default: z.string(),
+      description: z.string().optional(),
+      enum: z.array(z.string()),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+
+  outputFormat: z
+    .object({
+      default: z.string(),
+      description: z.string().optional(),
+      enum: z.array(z.string()),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+
+  outputCompression: z
+    .object({
+      default: z.number(),
+      description: z.string().optional(),
+      max: z.number().optional().default(100),
+      min: z.number().optional().default(0),
+      step: z.number().optional().default(1),
+      type: z.literal('number').optional(),
+    })
+    .optional(),
+
+  moderation: z
     .object({
       default: z.string(),
       description: z.string().optional(),

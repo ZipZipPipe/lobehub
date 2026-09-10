@@ -688,6 +688,78 @@ describe('createOpenAICompatibleImage', () => {
   });
 
   describe('image mode - response format handling', () => {
+    it('maps GPT Image 2.5 output controls and returns the requested MIME type', async () => {
+      vi.mocked(mockClient.images.generate).mockResolvedValue({
+        data: [{ b64_json: 'webp-image' }],
+      } as any);
+
+      const result = await createOpenAICompatibleImage(
+        mockClient,
+        {
+          model: 'gpt-image-2.5-flare',
+          params: {
+            background: 'opaque',
+            moderation: 'low',
+            outputCompression: 75,
+            outputFormat: 'webp',
+            prompt: 'Generate an image',
+            quality: 'max',
+            size: '1536x864',
+          },
+        },
+        'openai',
+      );
+
+      expect(mockClient.images.generate).toHaveBeenCalledWith({
+        background: 'opaque',
+        model: 'gpt-image-2.5-flare',
+        moderation: 'low',
+        n: 1,
+        output_compression: 75,
+        output_format: 'webp',
+        prompt: 'Generate an image',
+        quality: 'max',
+        size: '1536x864',
+      });
+      expect(result.imageUrl).toBe('data:image/webp;base64,webp-image');
+    });
+
+    it('omits unsupported compression for PNG and moderation for image edits', async () => {
+      vi.mocked(mockClient.images.edit).mockResolvedValue({
+        data: [{ b64_json: 'png-image' }],
+      } as any);
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47]).buffer,
+        headers: { get: () => 'image/png' },
+      } as any);
+
+      const result = await createOpenAICompatibleImage(
+        mockClient,
+        {
+          model: 'gpt-image-2.5-sunburst',
+          params: {
+            imageUrls: ['https://example.com/reference.png'],
+            moderation: 'auto',
+            outputCompression: 100,
+            outputFormat: 'png',
+            prompt: 'Edit the reference image',
+          },
+        },
+        'openai',
+      );
+
+      const editParams = vi.mocked(mockClient.images.edit).mock.calls[0][0];
+      expect(editParams).not.toHaveProperty('moderation');
+      expect(editParams).not.toHaveProperty('output_compression');
+      expect(editParams).not.toHaveProperty('input_fidelity');
+      expect(editParams).toMatchObject({
+        model: 'gpt-image-2.5-sunburst',
+        output_format: 'png',
+      });
+      expect(result.imageUrl).toBe('data:image/png;base64,png-image');
+    });
+
     it('should handle URL format response instead of base64', async () => {
       const mockImageUrl = 'https://oaidalleapiprodscus.blob.core.windows.net/generated/image.png';
       const mockImageResponse = {

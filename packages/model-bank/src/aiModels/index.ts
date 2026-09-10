@@ -232,7 +232,7 @@ export const loadModels = async (
   return buildDefaultModelList(modelMap);
 };
 
-export { gptImage1Schema, gptImage2Schema } from '../const/imageParameters';
+export { gptImage1Schema, gptImage2Schema, gptImage25Schema } from '../const/imageParameters';
 export { default as ai21 } from './ai21';
 export { default as ai302 } from './ai302';
 export { default as ai360 } from './ai360';

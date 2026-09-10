@@ -8,6 +8,9 @@ describe('meta-schema', () => {
     it('should validate a complete parameter schema', () => {
       const validSchema: ModelParamsSchema = {
         background: { default: 'auto', enum: ['auto', 'opaque', 'transparent'] },
+        moderation: { default: 'auto', enum: ['auto', 'low'] },
+        outputCompression: { default: 100, min: 0, max: 100, step: 1 },
+        outputFormat: { default: 'png', enum: ['png', 'jpeg', 'webp'] },
         prompt: { default: 'test prompt' },
         width: { default: 1024, min: 512, max: 2048, step: 64 },
         height: { default: 1024, min: 512, max: 2048, step: 64 },
@@ -18,7 +21,18 @@ describe('meta-schema', () => {
         webSearch: { default: true },
         cfg: { default: 7.5, min: 1, max: 20, step: 0.5 },
         aspectRatio: { default: '1:1', enum: ['1:1', '16:9', '4:3'] },
-        size: { default: '1024x1024', enum: ['512x512', '1024x1024', '1536x1536'] },
+        size: {
+          custom: {
+            aspectRatioMax: 3,
+            aspectRatioMin: 1 / 3,
+            maxEdge: 3840,
+            maxPixels: 8_294_400,
+            minPixels: 655_360,
+            step: 16,
+          },
+          default: '1024x1024',
+          enum: ['512x512', '1024x1024', '1536x1536'],
+        },
         imageUrl: { default: null },
         imageUrls: { default: [] },
       };
@@ -110,6 +124,9 @@ describe('meta-schema', () => {
     it('should extract default values from parameter schema', () => {
       const schema: ModelParamsSchema = {
         background: { default: 'transparent', enum: ['auto', 'opaque', 'transparent'] },
+        moderation: { default: 'low', enum: ['auto', 'low'] },
+        outputCompression: { default: 80, min: 0, max: 100, step: 1 },
+        outputFormat: { default: 'webp', enum: ['png', 'jpeg', 'webp'] },
         prompt: { default: 'test prompt' },
         width: { default: 1024, min: 512, max: 2048 },
         height: { default: 768, min: 512, max: 2048 },
@@ -121,6 +138,9 @@ describe('meta-schema', () => {
 
       expect(result).toEqual({
         background: 'transparent',
+        moderation: 'low',
+        outputCompression: 80,
+        outputFormat: 'webp',
         prompt: 'test prompt',
         width: 1024,
         height: 768,
@@ -202,6 +222,9 @@ describe('meta-schema', () => {
       // This is a compile-time test to ensure types are correctly inferred
       const params: RuntimeImageGenParams = {
         background: 'transparent',
+        moderation: 'low',
+        outputCompression: 80,
+        outputFormat: 'webp',
         prompt: 'test',
         width: 1024,
         height: 768,
@@ -212,6 +235,9 @@ describe('meta-schema', () => {
 
       expect(params.prompt).toBe('test');
       expect(params.background).toBe('transparent');
+      expect(params.moderation).toBe('low');
+      expect(params.outputCompression).toBe(80);
+      expect(params.outputFormat).toBe('webp');
       expect(params.width).toBe(1024);
       expect(params.seed).toBeNull();
     });

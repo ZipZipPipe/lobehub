@@ -1,4 +1,4 @@
-import { gptImage1Schema, gptImage2Schema } from '../const/imageParameters';
+import { gptImage1Schema, gptImage2Schema, gptImage25Schema } from '../const/imageParameters';
 import type {
   AIASRModelCard,
   AIChatModelCard,
@@ -1512,6 +1512,44 @@ export const openaiASRModels: AIASRModelCard[] = [
 
 // Image generation models
 export const openaiImageModels: AIImageModelCard[] = [
+  {
+    description:
+      'Fast, high-quality everyday image generation and editing with improved detail, consistency, and instruction following.',
+    displayName: 'GPT Image 2.5 Flare',
+    enabled: true,
+    id: 'gpt-image-2.5-flare',
+    parameters: gptImage25Schema,
+    pricing: {
+      units: [
+        { name: 'textInput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput_cacheRead', rate: 1.25, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput', rate: 8, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput_cacheRead', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageOutput', rate: 30, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+    releasedAt: '2026-09-08',
+    type: 'image',
+  },
+  {
+    description:
+      'OpenAI’s most capable image generation and editing model, optimized for precise, production-ready creative work.',
+    displayName: 'GPT Image 2.5 Sunburst',
+    enabled: true,
+    id: 'gpt-image-2.5-sunburst',
+    parameters: gptImage25Schema,
+    pricing: {
+      units: [
+        { name: 'textInput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput_cacheRead', rate: 1.25, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput', rate: 8, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput_cacheRead', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageOutput', rate: 30, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+    releasedAt: '2026-09-08',
+    type: 'image',
+  },
   {
     description:
       "OpenAI's next-generation multimodal image model with native reasoning, up to 4K resolution, near-perfect text rendering, and high-fidelity multilingual support.",

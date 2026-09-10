@@ -51,8 +51,13 @@ export function useGenerationConfigParam<
       paramConfig && typeof paramConfig === 'object' && 'maxCount' in paramConfig
         ? paramConfig.maxCount
         : undefined;
+    const custom =
+      paramConfig && typeof paramConfig === 'object' && 'custom' in paramConfig
+        ? paramConfig.custom
+        : undefined;
 
     return {
+      custom,
       description,
       max,
       min,
