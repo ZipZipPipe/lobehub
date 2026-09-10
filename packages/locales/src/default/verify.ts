@@ -16,6 +16,8 @@ export default {
   'acceptance.review.writeFeedback': 'Write feedback',
   'acceptance.review.mobileDrawHint': 'Drag to mark an issue',
   'acceptance.review.mobileBrowseHint': 'Swipe to switch · scroll to read',
+  'acceptance.review.mobileDrawnHint':
+    '{{count}} region(s) marked · drag to move, corner dot to resize',
   'acceptance.review.draftSaved': 'Your draft is saved on this device.',
   'acceptance.review.removeAttachment': 'Remove attachment',
   'acceptance.review.regionImage': 'Image {{image}} · Region {{region}}',
@@ -86,7 +88,7 @@ export default {
   'flow.running': 'Verification in progress',
   'flow.planned': 'Plan published \u00B7 verification has not started',
 
-  'flow.pendingPlan': 'Pending verification plan',
+  'flow.pendingPlan': 'Draft',
   'flow.title': 'User flow',
   'flow.empty': 'The agent will publish the verification flow here before running checks.',
   'flow.run': 'Run {{number}}',
@@ -232,14 +234,14 @@ export default {
   'acceptance.focus.state.needsFix': 'Needs fix',
   'acceptance.focus.state.pending': 'To review',
   'acceptance.focus.verifierDescription.failed':
-    'The verifier found that this check did not meet its acceptance criterion. Review the result and evidence before deciding.',
+    'The agent judged that this check did not meet its acceptance criterion. Review the result and evidence before deciding.',
   'acceptance.focus.verifierDescription.notExecuted':
-    'This check was not executed, so there is no verifier result or evidence to accept.',
+    'This check was not executed, so there is no agent judgement or evidence to accept.',
   'acceptance.focus.verifierDescription.passed':
-    'The verifier found that this check met its acceptance criterion. Review the evidence before accepting it.',
+    'The agent judged that this check met its acceptance criterion. Review the evidence before accepting it.',
   'acceptance.focus.verifierDescription.uncertain':
-    'The verifier could not reach a confident result. Review the available evidence before deciding.',
-  'acceptance.focus.verifierLabel': 'Verifier',
+    'The agent could not reach a confident judgement. Review the available evidence before deciding.',
+  'acceptance.focus.judgeLabel': 'Agent judged',
   'acceptance.goalCollapse': 'Collapse the acceptance goal',
   'acceptance.goalEdit': 'Edit the acceptance goal',
   'acceptance.goalExpand': 'Expand the acceptance goal',
