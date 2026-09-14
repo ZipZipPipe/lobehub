@@ -13,6 +13,9 @@ vi.mock('@/server/services/deviceGateway', () => ({
     queryDeviceList: vi.fn().mockResolvedValue([]),
   },
 }));
+vi.mock('@/server/services/deviceGateway/dispatchAuthorization', () => ({
+  resolveDeviceDispatchAuthorizationFailure: vi.fn().mockResolvedValue(undefined),
+}));
 // The tunnel fallback must use the visibility-aware scoped helper, never the
 // raw (visibility-blind) gateway pool — see resolveMcpTunnelTarget.
 vi.mock('@/server/services/deviceGateway/scopedDevices', () => ({
@@ -78,6 +81,85 @@ describe('ToolExecutionService', () => {
 
     expect(result.content).toContain('01234');
     expect(result.content).toContain('Content truncated');
+  });
+
+  /**
+   * @example A sandbox `rm -rf` against a read-only FS fails with one line per
+   * file — ~29 MB of stderr. The error envelope must not carry it: it rides the
+   * step's nextContext into the QStash publish body, whose 10 MB message quota
+   * would fail the publish and kill the whole operation.
+   */
+  it('clamps the error message of a tool that failed with a huge output', async () => {
+    const runawayOutput = `Command failed with exit code 1\n\nStderr:\n${'rm: cannot remove\n'.repeat(200_000)}`;
+    const builtinToolsExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        content: runawayOutput,
+        success: false,
+      }),
+    };
+    const service = new ToolExecutionService({
+      builtinToolsExecutor: builtinToolsExecutor as any,
+      mcpService: {} as any,
+    });
+
+    const result = await service.executeTool(
+      {
+        apiName: 'runCommand',
+        arguments: '{}',
+        id: 'tool-call-1',
+        identifier: 'lobe-skills',
+        type: 'builtin',
+      },
+      { skipResultTruncation: true, toolManifestMap: {} },
+    );
+
+    const message = (result.error as { message: string }).message;
+    expect(message.length).toBeLessThan(5000);
+    expect(message).toContain('Command failed with exit code 1');
+    expect(message).toContain('Content truncated');
+    // The archival opt-out covers the LLM-facing content, never the error.
+    expect(result.content).toBe(runawayOutput);
+  });
+
+  /** @example A missing remote device remains machine-readable to the calling agent runtime. */
+  it('preserves structured unavailable-device data in the normalized error envelope', async () => {
+    const builtinToolsExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        content: 'The requested device is not connected.',
+        error: 'DEVICE_NOT_FOUND',
+        errorData: {
+          code: 'DEVICE_NOT_FOUND',
+          deviceId: 'device-1',
+          retryable: true,
+          scope: 'workspace',
+          workspaceId: 'workspace-1',
+        },
+        success: false,
+      }),
+    };
+    const service = new ToolExecutionService({
+      builtinToolsExecutor: builtinToolsExecutor as any,
+      mcpService: {} as any,
+    });
+
+    const result = await service.executeTool(
+      {
+        apiName: 'readFile',
+        arguments: '{}',
+        id: 'tool-call-1',
+        identifier: 'lobe-local-system',
+        type: 'builtin',
+      },
+      { toolManifestMap: {} },
+    );
+
+    expect(result.error).toMatchObject({
+      code: 'DEVICE_NOT_FOUND',
+      deviceId: 'device-1',
+      retryable: true,
+      scope: 'workspace',
+      workspaceId: 'workspace-1',
+    });
   });
 
   // Device-only MCP servers (stdio / localhost / LAN) can't be called from the

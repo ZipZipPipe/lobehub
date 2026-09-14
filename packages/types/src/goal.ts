@@ -104,10 +104,20 @@ export interface GoalAcceptancePolicy {
  * stored explicitly rather than as the absence of a marker, because pausing an
  * already-paused goal is a no-op that leaves no other trace of who asked.
  */
-export type GoalPauseReason = 'measured_acceptance' | 'exploration_limit' | 'user';
+export type GoalPauseReason =
+  | 'measured_acceptance'
+  | 'exploration_limit'
+  /** The planner asked for a correction after its allowance was already spent. */
+  | 'exploration_revision_limit'
+  | 'user';
 
 export interface GoalExplorationDecision {
-  action: 'expand' | 'verify';
+  /**
+   * `expand` opens a sibling experiment for a new question; `revise` corrects the
+   * protocol of an experiment that already ran, so a flawed instrument is fixed in
+   * place instead of being inherited by another sibling.
+   */
+  action: 'expand' | 'revise' | 'verify';
   instruction: string;
   parentNodeId: string;
   reason: string;
@@ -155,6 +165,12 @@ export interface GoalSupervisionIncident {
   status: 'diagnosing' | 'retrying' | 'recovered' | 'escalated' | 'unsuccessful' | 'human_resumed';
   supervisorOperationId?: string;
   taskId: string;
+  /**
+   * Status the Task held when this incident opened. A diagnosis runs for minutes, so
+   * the recovery claims against this rather than a later read: anything a person did
+   * in between must win, not be swapped back into work.
+   */
+  taskStatus?: string;
 }
 
 /** Server-owned state; never accepted as client configuration. */
@@ -206,6 +222,17 @@ export interface GoalManagerPolicy {
 export interface GoalManagerState {
   consumed?: boolean;
   operationId?: string;
+  /**
+   * The problem this turn was invited to take over, when the coordinator handed
+   * one over instead of opening a human gate. Its presence is what separates a
+   * takeover turn from ordinary planning: an `escalate` from a takeover turn puts
+   * the gate back rather than pausing the Goal, and the same problem is not handed
+   * over twice.
+   */
+  problem?: string;
+  /** The blocked task that problem belongs to, so accepting a plan that replaces
+   *  it can retire exactly that node without parsing the key. */
+  problemTaskId?: string;
   readyForAcceptance?: boolean;
   reviewSnapshot?: string;
   snapshot: string;
@@ -297,6 +324,13 @@ export type GoalEdgeKind =
   | 'decomposes'
   | 'depends_on'
   | 'derived_from'
+  /**
+   * A corrected protocol replacing an earlier one inside the same experiment.
+   * Distinct from `derived_from`, which records generic provenance and is writable
+   * through the public graph mutation: reusing it would silently reinterpret any
+   * hand-authored task provenance as a correction.
+   */
+  | 'revises'
   | 'investigates'
   | 'produces'
   | 'supports'

@@ -38,7 +38,7 @@ vi.mock('@/envs/file', () => ({
 
 // Mock utilities
 vi.mock('@/utils/url', () => ({
-  inferContentTypeFromImageUrl: vi.fn((key: string) => {
+  inferContentTypeFromImageUrl: vi.fn(function (key: string) {
     if (key.endsWith('.jpg') || key.endsWith('.jpeg')) return 'image/jpeg';
     if (key.endsWith('.png')) return 'image/png';
     if (key.endsWith('.gif')) return 'image/gif';
@@ -55,9 +55,11 @@ describe('S3', () => {
 
     // Setup S3Client mock
     mockS3ClientSend = vi.fn();
-    (S3Client as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      send: mockS3ClientSend,
-    }));
+    (S3Client as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+      return {
+        send: mockS3ClientSend,
+      };
+    });
 
     // Setup getSignedUrl mock
     mockGetSignedUrl = vi.fn().mockResolvedValue('https://presigned-url.example.com');
@@ -144,9 +146,11 @@ describe('FileS3', () => {
 
     // Setup S3Client mock
     mockS3ClientSend = vi.fn();
-    (S3Client as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      send: mockS3ClientSend,
-    }));
+    (S3Client as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+      return {
+        send: mockS3ClientSend,
+      };
+    });
 
     // Setup getSignedUrl mock
     mockGetSignedUrl = vi.fn().mockResolvedValue('https://presigned-url.example.com');
@@ -232,6 +236,20 @@ describe('FileS3', () => {
         },
       });
       expect(mockS3ClientSend).toHaveBeenCalled();
+    });
+
+    it('should split more than 1000 keys into multiple requests', async () => {
+      const s3 = new FileS3();
+      mockS3ClientSend.mockResolvedValue({});
+
+      const keys = Array.from({ length: 2001 }, (_, i) => `file${i}.txt`);
+      await s3.deleteFiles(keys);
+
+      expect(mockS3ClientSend).toHaveBeenCalledTimes(3);
+      const sizes = vi
+        .mocked(DeleteObjectsCommand)
+        .mock.calls.map(([input]) => input.Delete!.Objects!.length);
+      expect(sizes).toEqual([1000, 1000, 1]);
     });
 
     it('should handle empty array', async () => {

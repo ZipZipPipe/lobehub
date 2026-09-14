@@ -68,6 +68,7 @@ import {
   resolveServerDefaultHeterogeneousModel,
   SERVER_DEFAULT_HETEROGENEOUS_AGENT_TYPES,
 } from '@/server/modules/ModelRuntime';
+import { mapAgentInterventionTRPCError } from '@/server/routers/lambda/_helpers/agentInterventionError';
 import {
   assertCanUseMessageTargets,
   assertCanUseTopicTargets,
@@ -361,8 +362,7 @@ const probeRuntimeActionDispatch = async (
       : { state: 'conflict' };
   }
 
-  const stateProvenance = state.metadata?.agentInterventionContinuation as
-    typeof provenance | undefined;
+  const stateProvenance = state.origin?.continuation as typeof provenance | undefined;
   const statePreparation = state.metadata?.agentInterventionPreparation as
     | {
         deduplicationId?: unknown;
@@ -373,20 +373,20 @@ const probeRuntimeActionDispatch = async (
     | undefined;
   const stateContextMatches =
     state.operationId === continuationOperationId &&
-    state.metadata?.userId === resolution.ownerUserId &&
+    state.origin?.userId === resolution.ownerUserId &&
     sameNullable(
-      state.metadata?.workspaceId,
+      state.origin?.workspaceId,
       resolution.workspaceId ?? ctx.workspaceId ?? undefined,
     ) &&
-    state.metadata?.agentId === continuation.agentId &&
-    state.metadata?.topicId === continuation.appContext.topicId &&
-    sameNullable(state.metadata?.threadId, continuation.appContext.threadId) &&
-    sameNullable(state.metadata?.taskId, continuation.appContext.taskId) &&
-    sameNullable(state.metadata?.groupId, continuation.appContext.groupId) &&
-    sameNullable(state.metadata?.documentId, continuation.appContext.documentId) &&
-    sameNullable(state.metadata?.scope, continuation.appContext.scope) &&
-    sameNullable(state.metadata?.sessionId, continuation.appContext.sessionId) &&
-    state.metadata?.sourceMessageId === continuation.parentMessageId &&
+    state.origin?.agentId === continuation.agentId &&
+    state.origin?.topicId === continuation.appContext.topicId &&
+    sameNullable(state.origin?.threadId, continuation.appContext.threadId) &&
+    sameNullable(state.origin?.taskId, continuation.appContext.taskId) &&
+    sameNullable(state.origin?.groupId, continuation.appContext.groupId) &&
+    sameNullable(state.origin?.documentId, continuation.appContext.documentId) &&
+    sameNullable(state.origin?.scope, continuation.appContext.scope) &&
+    sameNullable(state.origin?.sessionId, continuation.appContext.sessionId) &&
+    state.origin?.sourceMessageId === continuation.parentMessageId &&
     stateProvenance?.resolutionRequestId === resolution.resolutionRequestId &&
     stateProvenance.sourceOperationId === continuation.operationId &&
     Array.isArray(stateProvenance.sourceToolMessageIds) &&
@@ -1097,7 +1097,12 @@ const ExecAgentSchema = z
      * messages are the dominant caller. Pass a more specific value (`'cli'`,
      * `'openapi'`, `'eval'`, …) to override.
      */
-    trigger: z.string().optional(),
+    trigger: z
+      .string()
+      .refine((value) => value !== RequestTrigger.Bot, {
+        message: 'The bot trigger is reserved for authenticated server-side bot ingress',
+      })
+      .optional(),
     /**
      * User intervention configuration for tool approvals.
      * Pass `{ approvalMode: 'headless' }` from headless clients (CLI, cron, bots)
@@ -3280,6 +3285,8 @@ export const aiAgentRouter = router({
         workspaceId: ctx.workspaceId,
       });
 
+      // A rejected resolution describes the submitted response, not a server
+      // fault, so map the contract failure instead of letting it become a 500.
       const resolution = await resolveAgentInterventionBySource({
         action: input.action,
         actorUserId: ctx.userId,
@@ -3288,6 +3295,8 @@ export const aiAgentRouter = router({
         resolutionRequestId: input.resolutionRequestId,
         targets: input.targets,
         workspaceId: ctx.workspaceId ?? undefined,
+      }).catch((error: unknown) => {
+        throw mapAgentInterventionTRPCError(error);
       });
 
       if (!resolution.handled) {
@@ -3335,6 +3344,8 @@ export const aiAgentRouter = router({
         reviewToken: input.reviewToken,
         userId: ctx.userId,
         workspaceId: ctx.workspaceId ?? undefined,
+      }).catch((error: unknown) => {
+        throw mapAgentInterventionTRPCError(error);
       });
 
       if (!resolution.handled) {
@@ -3393,6 +3404,8 @@ export const aiAgentRouter = router({
         target: { reviewToken: input.reviewToken },
         userId: ctx.userId,
         workspaceId: ctx.workspaceId ?? undefined,
+      }).catch((error: unknown) => {
+        throw mapAgentInterventionTRPCError(error);
       });
 
       if (!resolution.handled) return { status: 'unavailable' as const, success: false as const };

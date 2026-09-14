@@ -14,6 +14,7 @@ import {
   getConnectorToolPermission,
 } from '@/libs/mcp/connectorPermissionCheck';
 import { deviceGateway } from '@/server/services/deviceGateway';
+import { resolveDeviceDispatchAuthorizationFailure } from '@/server/services/deviceGateway/dispatchAuthorization';
 import { getScopedOnlineDevices } from '@/server/services/deviceGateway/scopedDevices';
 import { contentBlocksToString } from '@/server/services/mcp/contentProcessor';
 import {
@@ -39,16 +40,33 @@ interface ToolExecutionServiceDeps {
   mcpService: MCPService;
 }
 
+/**
+ * Hard bound on the `error.message` of a failed tool call. The (already
+ * truncated) `content` is what the LLM reads; the error is metadata, so it
+ * never needs the full payload — and an unbounded one is dangerous: a tool
+ * that fails with megabytes of output (e.g. `rm -rf` on a read-only sandbox
+ * FS, one `cannot remove` line per file) rides the step's `nextContext` into
+ * the QStash publish body and blows the provider's 10 MB message quota, which
+ * fails the whole operation at the step boundary instead of just that one tool
+ * call. Deliberately NOT subject to `skipResultTruncation` — that opt-out is
+ * about the LLM context budget, this is a transport safety bound.
+ */
+const TOOL_ERROR_MESSAGE_MAX_LENGTH = 4000;
+
+const clampErrorMessage = (message: string | undefined): string | undefined =>
+  message === undefined ? undefined : truncateToolResult(message, TOOL_ERROR_MESSAGE_MAX_LENGTH);
+
 const normalizeExecutionError = (error: unknown, fallbackMessage: string) => {
   const normalized = classifyToolError(error || fallbackMessage);
-  const message = fallbackMessage || normalized.message;
+  // Classification reads the raw error above; only the carried copy is clamped.
+  const message = clampErrorMessage(fallbackMessage || normalized.message);
 
   if (error && typeof error === 'object') {
     if (error instanceof Error) {
       return {
         code: normalized.code,
         kind: normalized.kind,
-        message: error.message || message,
+        message: clampErrorMessage(error.message) || message,
         name: error.name,
       };
     }
@@ -59,12 +77,12 @@ const normalizeExecutionError = (error: unknown, fallbackMessage: string) => {
       ...plainError,
       code: (plainError.code as string | undefined) || normalized.code,
       kind: normalized.kind,
-      message: (plainError.message as string | undefined) || message,
+      message: clampErrorMessage(plainError.message as string | undefined) || message,
     };
   }
 
   if (typeof error === 'string') {
-    return { code: normalized.code, kind: normalized.kind, message: error };
+    return { code: normalized.code, kind: normalized.kind, message: clampErrorMessage(error) };
   }
 
   return { code: normalized.code, kind: normalized.kind, message };
@@ -152,7 +170,7 @@ export class ToolExecutionService {
         return {
           ...data,
           content: truncatedContent,
-          error: normalizeExecutionError(data.error, data.content),
+          error: normalizeExecutionError(data.errorData ?? data.error, data.content),
           executionTime,
         };
       }
@@ -355,6 +373,21 @@ export class ToolExecutionService {
   ): Promise<ToolExecutionResult> {
     const { identifier, apiName, arguments: args } = payload;
 
+    const authorizationError = await resolveDeviceDispatchAuthorizationFailure(
+      context.serverDB,
+      context.userId!,
+      target.deviceId,
+      target.workspaceId,
+    );
+    if (authorizationError) {
+      return {
+        content: 'The workspace device is no longer registered or visible for this run.',
+        error: 'DEVICE_NOT_FOUND',
+        errorData: authorizationError,
+        success: false,
+      };
+    }
+
     log(
       'Executing %s MCP tool via device: %s:%s (device=%s, workspace=%s)',
       mcpParams.type,
@@ -406,10 +439,11 @@ export class ToolExecutionService {
     if (!result.success) {
       return {
         content: result.content,
-        error: {
+        error: result.errorData ?? {
           code: 'MCP_DEVICE_EXECUTION_ERROR',
           message: result.error || result.content,
         },
+        errorData: result.errorData,
         success: false,
       };
     }
