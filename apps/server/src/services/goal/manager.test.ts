@@ -189,15 +189,16 @@ describe('CLI main Agent planning', () => {
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   });
 
-  it('explicitly dispatches the creator instead of the default Task assignee', async () => {
+  it('dispatches planning turns to the goal agent, not the task agent', async () => {
     await db.insert(agents).values({ id: 'task-worker', userId });
     const graph = await service().create({
-      agentId: 'task-worker',
-      createdByAgentId: agentId,
-      title: 'Creator-managed goal',
-      config: { manager: {} },
+      agentId,
+      title: 'Supervised goal',
+      config: { manager: {}, taskAgentId: 'task-worker' },
     });
-    expect(graph.goal.config?.manager?.agentId).toBe(agentId);
+    expect(graph.goal.agentId).toBe(agentId);
+    expect(graph.goal.config?.taskAgentId).toBe('task-worker');
+    expect(graph.goal.config?.manager).not.toHaveProperty('agentId');
     expect((await service().tick(graph.goal.id)).outcome).toBe('waiting_external');
     const state = (await model().findById(graph.goal.id))!.config!.managerState!;
     const op = await ops().findByTopicSourceMessage(
@@ -216,7 +217,7 @@ describe('CLI main Agent planning', () => {
       title: 'Selected agent',
       config: { manager: {} },
     });
-    expect(graph.goal.config?.manager?.agentId).toBe(agentId);
+    expect(graph.goal.agentId).toBe(agentId);
     expect(graph.events.every((event) => event.actorType === 'user')).toBe(true);
   });
 
@@ -229,23 +230,26 @@ describe('CLI main Agent planning', () => {
     },
   );
 
-  it('cannot select a different manager through a legacy config object', async () => {
+  it('ignores a legacy manager identity: the goal agent plans', async () => {
     const config = { manager: { agentId: 'unrelated-agent', maxTurns: 5 } };
     const graph = await service().create({
       createdByAgentId: agentId,
       config,
       title: 'Bound creator',
     });
-    expect(graph.goal.config?.manager).toEqual({ agentId, maxTurns: 5 });
-    await db.insert(agents).values({ id: 'new-task-worker', userId });
-    await service().setAgent(graph.goal.id, 'new-task-worker');
-    expect((await model().findById(graph.goal.id))?.config?.manager?.agentId).toBe(agentId);
+    expect(graph.goal.agentId).toBe(agentId);
+    expect(graph.goal.config?.manager).toEqual({ maxTurns: 5 });
+    await db.insert(agents).values({ id: 'next-supervisor', userId });
+    await service().setAgent(graph.goal.id, 'next-supervisor');
+    const moved = await model().findById(graph.goal.id);
+    expect(moved?.agentId).toBe('next-supervisor');
+    expect(moved?.config?.manager).toEqual({ maxTurns: 5 });
   });
 
   it('requires an accessible creator when planning options are supplied', async () => {
     await expect(
       service().create({ title: 'Missing creator', config: { manager: {} } }),
-    ).rejects.toThrow('creating or selected Agent');
+    ).rejects.toThrow('requires the goal agent');
     await expect(
       service().create({ title: 'Unknown creator', createdByAgentId: 'unrelated-agent' }),
     ).rejects.toThrow();
@@ -270,6 +274,225 @@ describe('CLI main Agent planning', () => {
     const created = await service().tick(id);
     expect(created.taskId).toBeTruthy();
     expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  describe('/goal from a conversation run', () => {
+    const conversationTopicId = 'tpc_goal_conversation';
+    const conversationOpId = 'op_goal_conversation';
+
+    const startConversationRun = async () => {
+      await db.insert(topics).values({ agentId, id: conversationTopicId, userId });
+      await ops().recordStart({
+        agentId,
+        appContext: { sourceMessageId: 'msg_user_goal_request' },
+        operationId: conversationOpId,
+        topicId: conversationTopicId,
+      });
+    };
+
+    it('supervises from the conversation and plans in the same run', async () => {
+      await startConversationRun();
+
+      const { graph, turnToken } = await service().createFromConversation(conversationOpId, {
+        criteria: [{ title: 'Report delivered' }],
+        title: 'Ship the report',
+      });
+
+      expect(graph.goal).toMatchObject({
+        agentId,
+        subjectId: conversationTopicId,
+        subjectType: 'topic',
+      });
+      const state = (await model().findById(graph.goal.id))!.config!.managerState!;
+      expect(state).toMatchObject({
+        adopted: true,
+        operationId: conversationOpId,
+        token: turnToken,
+        topicId: conversationTopicId,
+        turns: 1,
+      });
+
+      // The creating run plans with the returned token, no dispatched turn needed.
+      expect(await manager().submit(graph.goal.id, turnToken, conversationOpId, taskPlan)).toEqual({
+        action: 'tasks',
+        recorded: true,
+      });
+      expect((await service().tick(graph.goal.id)).outcome).toBe('waiting_external');
+      await ops().recordCompletion(conversationOpId, { status: 'done' });
+      expect((await service().tick(graph.goal.id)).outcome).toBe('advanced');
+      expect((await service().tick(graph.goal.id)).taskId).toBeTruthy();
+      expect(vi.mocked(AiAgentService.prototype.execAgent)).not.toHaveBeenCalled();
+      expect(
+        (await model().list({ topicId: conversationTopicId })).goals.map((item) => item.goal.id),
+      ).toEqual([graph.goal.id]);
+    });
+
+    it('counts only planning turns, not the rest of the conversation, as management spend', async () => {
+      await startConversationRun();
+      await ops().recordStart({
+        agentId,
+        appContext: { sourceMessageId: 'msg_user_unrelated_chat' },
+        operationId: 'op_goal_conversation_chat',
+        topicId: conversationTopicId,
+      });
+      await db
+        .update(agentOperations)
+        .set({ totalCost: 2 })
+        .where(eq(agentOperations.id, conversationOpId));
+      await db
+        .update(agentOperations)
+        .set({ totalCost: 5 })
+        .where(eq(agentOperations.id, 'op_goal_conversation_chat'));
+
+      const { graph } = await service().createFromConversation(conversationOpId, {
+        title: 'Budgeted goal',
+      });
+      const state = (await model().findById(graph.goal.id))!.config!.managerState!;
+
+      expect((await manager().usage(state)).totalCost).toBe(2);
+    });
+
+    it('keeps the adopted run in management spend after a later turn replaces the receipt', async () => {
+      await startConversationRun();
+      await db
+        .update(agentOperations)
+        .set({ totalCost: 2 })
+        .where(eq(agentOperations.id, conversationOpId));
+      const { graph } = await service().createFromConversation(conversationOpId, {
+        title: 'Two-turn goal',
+      });
+      const adopted = (await model().findById(graph.goal.id))!.config!.managerState!;
+      expect(adopted.adoptedOperationId).toBe(conversationOpId);
+
+      // What `startTurn` writes for turn two: a fresh receipt with no `adopted`
+      // flag and no operation yet. The first run's spend used to vanish here,
+      // so both the displayed usage and the budget check under-counted.
+      const laterTurn = {
+        adoptedOperationId: adopted.adoptedOperationId,
+        snapshot: adopted.snapshot,
+        startedAt: new Date().toISOString(),
+        token: 'turn-two',
+        topicId: conversationTopicId,
+        turns: 2,
+      };
+
+      expect((await manager().usage(laterTurn)).totalCost).toBe(2);
+      // After a handoff the later turn lives on another topic; the run still counts.
+      expect(
+        (await manager().usage({ ...laterTurn, topicId: 'tpc_other_supervisor' })).totalCost,
+      ).toBe(2);
+    });
+
+    it('plans a local desktop run that has no server operation row', async () => {
+      await db.insert(topics).values({ agentId, id: conversationTopicId, userId });
+      const localRun = { agentId, topicId: conversationTopicId };
+
+      const { graph, turnToken } = await service().createFromConversation(
+        'op_client_only_local_run',
+        { title: 'Local goal' },
+        localRun,
+      );
+      expect(graph.goal).toMatchObject({ agentId, subjectId: conversationTopicId });
+
+      expect(
+        await manager().submit(graph.goal.id, turnToken, 'op_client_only_local_run', taskPlan),
+      ).toEqual({ action: 'tasks', recorded: true });
+      // No run to watch exit: the submitted plan settles the turn.
+      expect((await service().tick(graph.goal.id)).outcome).toBe('advanced');
+      expect((await service().tick(graph.goal.id)).taskId).toBeTruthy();
+      expect(vi.mocked(AiAgentService.prototype.execAgent)).not.toHaveBeenCalled();
+
+      await expect(
+        manager().submit(graph.goal.id, turnToken, 'op_some_other_run', taskPlan),
+      ).rejects.toThrow();
+    });
+
+    it("refuses a local run whose conversation is not the agent's", async () => {
+      await db.insert(agents).values({ id: 'other-local-agent', userId });
+      await db.insert(topics).values({
+        agentId: 'other-local-agent',
+        id: conversationTopicId,
+        userId,
+      });
+
+      await expect(
+        service().createFromConversation(
+          'op_client_only_local_run',
+          { title: 'Borrowed conversation' },
+          { agentId, topicId: conversationTopicId },
+        ),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('refuses a conversation run that has already ended', async () => {
+      await startConversationRun();
+      await ops().recordCompletion(conversationOpId, { status: 'done' });
+
+      await expect(
+        service().createFromConversation(conversationOpId, { title: 'Too late' }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+    });
+
+    it('lets an operation token create the goal only with the goal capability', async () => {
+      await startConversationRun();
+
+      await expect(
+        operationCaller(conversationOpId).createConversationGoal({
+          operationId: conversationOpId,
+          title: 'No capability',
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+      const result = await operationCaller(conversationOpId, {
+        capabilities: ['hetero:ingest', 'goal:manage'],
+      }).createConversationGoal({ operationId: conversationOpId, title: 'From device' });
+
+      expect(result.turnToken).toBeTruthy();
+      expect(result.data?.goal).toMatchObject({ agentId, subjectType: 'topic' });
+    });
+  });
+
+  it('does not dispatch the previous supervisor when a handoff lands before the claim', async () => {
+    const { id, op } = await start();
+    await ops().recordCompletion(op.id, { status: 'done' });
+    expect((await service().tick(id)).outcome).toBe('advanced');
+    // The coordinator read the graph, then the goal was handed over before it
+    // locked the row to claim the next turn.
+    const staleGraph = await service().graph(id);
+    await db.insert(agents).values({ id: 'handoff-supervisor', userId });
+    await service().setAgent(id, 'handoff-supervisor');
+    const turnsBefore = (await model().findById(id))!.config!.managerState!.turns;
+
+    await manager().advance(staleGraph, { mayStartTurn: true });
+
+    expect(vi.mocked(AiAgentService.prototype.execAgent)).toHaveBeenCalledTimes(1);
+    expect((await model().findById(id))!.config!.managerState!.turns).toBe(turnsBefore);
+  });
+
+  it('opens the next planning turn in the new supervisor history after a handoff', async () => {
+    const { id, state, op } = await start();
+    await ops().recordCompletion(op.id, { status: 'done' });
+    expect((await service().tick(id)).outcome).toBe('advanced');
+
+    await db.insert(agents).values({ id: 'next-supervisor', userId });
+    await service().setAgent(id, 'next-supervisor');
+    expect((await service().tick(id)).outcome).toBe('waiting_external');
+
+    const next = (await model().findById(id))!.config!.managerState!;
+    expect(next.topicId).not.toBe(state.topicId);
+    const [topic] = await db.select().from(topics).where(eq(topics.id, next.topicId));
+    expect(topic?.agentId).toBe('next-supervisor');
+    // Both management topics stay out of the agent's chat sidebar.
+    const [first] = await db.select().from(topics).where(eq(topics.id, state.topicId));
+    expect(first?.trigger).toBe('goal_supervision');
+    expect(topic?.trigger).toBe('goal_supervision');
+    const nextOp = await ops().findByTopicSourceMessage(
+      next.topicId,
+      `msg_goal_manager_${next.token}`,
+    );
+    expect(nextOp?.agentId).toBe('next-supervisor');
+    // The earlier supervisor's operation no longer speaks for the goal.
+    await expect(manager().submit(id, next.token, op.id, taskPlan)).rejects.toThrow('Unrelated');
   });
 
   it('rejects wrong owner, operation, pause and changed graph without adding tasks', async () => {
@@ -374,7 +597,7 @@ describe('CLI main Agent planning', () => {
 
   it('keeps server-owned manager receipts across policy updates', async () => {
     const { id, state } = await start();
-    await model().update(id, { config: { manager: { agentId, maxTurns: 5 } } });
+    await model().update(id, { config: { manager: { maxTurns: 5 } } });
     expect((await model().findById(id))!.config!.managerState).toEqual(state);
   });
 
@@ -566,9 +789,10 @@ describe('CLI main Agent planning', () => {
       createdByAgentId: agentId,
       title: 'Mixed',
     });
+    expect(graph.goal.agentId).toBe(agentId);
     expect(graph.goal.config).toMatchObject({
       exploration: { maxExperiments: 2 },
-      manager: { agentId },
+      manager: {},
     });
   });
 });

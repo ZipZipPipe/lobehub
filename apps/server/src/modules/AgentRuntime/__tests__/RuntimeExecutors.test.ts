@@ -75,12 +75,14 @@ vi.mock('@/server/services/message', () => ({
 // @lobechat/model-runtime resolves to @cloud/business-model-runtime which has
 // cloud-specific dependencies that are unavailable in the test environment
 vi.mock('@lobechat/model-runtime', async () => {
-  // ModelEmptyError + isEmptyModelCompletion are pure (they only depend on
+  // Completion errors + isEmptyModelCompletion are pure (they only depend on
   // @lobechat/types), so import the real implementations directly from source —
   // bypassing this cloud-package mock — so the executor's empty-completion
   // retry path and these tests share a single class identity for instanceof.
   const { isEmptyModelCompletion, ModelEmptyError } =
     await import('../../../../../../packages/model-runtime/src/errors/modelEmptyCompletion');
+  const { ModelRefusalError } =
+    await import('../../../../../../packages/model-runtime/src/errors/modelRefusal');
   // Same treatment: the reasoning-config merge is pure, and the replay gate
   // reads its output (e.g. the DeepSeek V4 thinking opt-out), so use the real
   // implementation instead of a drifting stub.
@@ -109,6 +111,7 @@ vi.mock('@lobechat/model-runtime', async () => {
     isKimiAlwaysPreserveThinkingModel: (model: string) =>
       /^kimi-k2\.(?:[7-9]|\d{2,})-code(?:$|-)/.test(model),
     ModelEmptyError,
+    ModelRefusalError,
     refineErrorCode: () => undefined,
   };
 });
@@ -154,13 +157,15 @@ vi.mock('@/server/services/file', () => ({
   }),
 }));
 
-const { mockFindAiModelByIdAndProvider } = vi.hoisted(() => ({
+const { mockFindAiModelByIdAndProvider, mockGetModelReasoningConfig } = vi.hoisted(() => ({
   mockFindAiModelByIdAndProvider: vi.fn(),
+  mockGetModelReasoningConfig: vi.fn(),
 }));
 vi.mock('@/database/models/aiModel', () => ({
-  AiModelModel: vi.fn().mockImplementation(() => ({
-    findByIdAndProvider: mockFindAiModelByIdAndProvider,
-  })),
+  AiModelModel: class {
+    findByIdAndProvider = mockFindAiModelByIdAndProvider;
+    getModelReasoningConfig = mockGetModelReasoningConfig;
+  },
 }));
 
 const {
@@ -217,6 +222,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
     mockRegisterTask.mockResolvedValue({ id: 'work-1' });
     mockFindAiModelByIdAndProvider.mockReset();
     mockFindAiModelByIdAndProvider.mockResolvedValue(undefined);
+    mockGetModelReasoningConfig.mockReset();
+    mockGetModelReasoningConfig.mockResolvedValue(undefined);
     mockFindPlanDocuments.mockReset();
     mockFindPlanDocuments.mockResolvedValue([]);
     vi.mocked(initModelRuntimeFromDB).mockReset();
@@ -2238,7 +2245,9 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           state,
         );
 
-        return mockChat.mock.calls[0][0].messages.find(
+        // The shared context rules may prepend an agent-management block as its
+        // own user turn; the TODO state rides on the actual user message.
+        return mockChat.mock.calls[0][0].messages.findLast(
           (message: { role?: string }) => message.role === 'user',
         )?.content as string;
       };
@@ -2273,8 +2282,9 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
 
         expect(content).toContain('New task');
         expect(content).not.toContain('Old task');
+        // The plan document is still read for the plan block, but history wins
+        // for the TODO state.
         expect(content).not.toContain('Stale metadata task');
-        expect(mockFindPlanDocuments).not.toHaveBeenCalled();
       });
 
       it.each([{ items: [], updatedAt: 'canonical-clear' }, []])(
@@ -2299,7 +2309,6 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
 
           expect(content).not.toContain('<todo_context>');
           expect(content).not.toContain('Stale metadata task');
-          expect(mockFindPlanDocuments).not.toHaveBeenCalled();
         },
       );
 
@@ -2976,16 +2985,13 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           providerId: 'kimicodingplan',
         });
 
-        const ctxWithConfig: RuntimeExecutorContext = {
-          ...ctx,
-          agentConfig: { plugins: [], systemRole: 'test' },
-        };
-        const executors = createRuntimeExecutors(ctxWithConfig);
+        const executors = createRuntimeExecutors(ctx);
         const state = createMockState({
           modelRuntimeConfig: {
             model: 'kimi-k3-256k',
             provider: 'kimicodingplan',
           },
+          world: { agent: { plugins: [], systemRole: 'test' } },
         });
 
         const instruction = {

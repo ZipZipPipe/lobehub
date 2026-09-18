@@ -6,15 +6,16 @@ import type {
   ChatFileItem,
   ChatTopicMetadata,
   ChatVideoItem,
+  FileAccessScope,
   HeterogeneousProviderConfig,
   HeterogeneousTopicPin,
 } from '@lobechat/types';
 import {
-  applyTopicExecutionConfig,
+  agentShareFileAccessScope,
   ChatErrorType,
+  ordinaryFileAccessScope,
   RequestTrigger,
   resolveHeterogeneousProviderTopicModel,
-  snapshotTopicExecutionConfig,
 } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import debug from 'debug';
@@ -146,10 +147,12 @@ const resolveRunAttachments = async (
   deps: TurnSetupDeps,
   {
     attachedFileIds,
+    fileAccessScope,
     files,
     throwIfAborted,
   }: {
     attachedFileIds?: string[];
+    fileAccessScope: FileAccessScope;
     files?: InternalExecAgentParams['files'];
     throwIfAborted: (stage: string) => Promise<void>;
   },
@@ -272,6 +275,7 @@ const resolveRunAttachments = async (
     try {
       const resolved = await resolveAttachmentsByFileIds({
         db: deps.db,
+        fileAccessScope,
         fileIds: attachedFileIds,
         userId: deps.userId,
         workspaceId: deps.workspaceId,
@@ -340,6 +344,8 @@ export interface TurnSetupInput {
   runFromHistory: boolean;
   /** Shared-agent visitor gate — set only by the shareChat router. */
   shareGate?: AgentShareGate;
+  /** The prompt was queued behind a running turn; see `ExecAgentParams.steer`. */
+  steer?: boolean;
   throwIfExecutionAborted: (stage: string) => Promise<void>;
   title?: string;
   trigger?: string;
@@ -361,6 +367,7 @@ export interface TurnSetupResult {
   provider: string;
   requestTriggerMetadata: {
     agentDispatch?: { kind: 'callAgent'; visibility: 'internal' };
+    steer?: true;
     trigger?: RequestTrigger;
   };
   runAttachments: RunAttachments;
@@ -411,6 +418,7 @@ export const setupTurn = async (
     resume,
     runFromHistory,
     shareGate,
+    steer,
     throwIfExecutionAborted,
     title,
     trigger,
@@ -422,8 +430,10 @@ export const setupTurn = async (
     !!deps.workspaceId && agentConfig.agencyConfig?.executionTargetSelectionPolicy === 'fixed';
   const isFixedDeviceTarget =
     isFixedExecutionTargetSelection && agentConfig.agencyConfig?.executionTarget === 'device';
-  let effectiveRequestedDeviceId = isFixedExecutionTargetSelection ? undefined : requestedDeviceId;
-  let topicBoundDeviceId = isFixedDeviceTarget
+  const effectiveRequestedDeviceId = isFixedExecutionTargetSelection
+    ? undefined
+    : requestedDeviceId;
+  const topicBoundDeviceId = isFixedDeviceTarget
     ? agentConfig.agencyConfig?.boundDeviceId
     : isFixedExecutionTargetSelection
       ? undefined
@@ -468,25 +478,30 @@ export const setupTurn = async (
     // never be attributed afterwards, which is why it is stamped even though
     // nothing filters on it yet.
     const { editingAgentId, editingGroupId } = appContext ?? {};
-    const metadata = {
-      bot: botContext,
-      executionConfig: snapshotTopicExecutionConfig({
-        ...agentConfig.agencyConfig,
-        ...(effectiveRequestedDeviceId && { boundDeviceId: effectiveRequestedDeviceId }),
-      }),
-      boundDeviceId: topicBoundDeviceId,
-      cronJobId: cronJobId || undefined,
-      ...(editingAgentId && { editingAgentId }),
-      ...(editingGroupId && { editingGroupId }),
-      taskId: operationTaskId,
-      ...(initialTopicMeta?.repos && { repos: initialTopicMeta.repos }),
-      ...(initialTopicMeta?.workingDirectory && {
-        workingDirectory: initialTopicMeta.workingDirectory,
-      }),
-      ...(initialTopicMeta?.workingDirectoryConfig && {
-        workingDirectoryConfig: initialTopicMeta.workingDirectoryConfig,
-      }),
-    };
+    const metadata =
+      cronJobId ||
+      operationTaskId ||
+      botContext ||
+      topicBoundDeviceId ||
+      initialTopicMeta ||
+      editingGroupId ||
+      editingAgentId
+        ? {
+            bot: botContext,
+            boundDeviceId: topicBoundDeviceId,
+            cronJobId: cronJobId || undefined,
+            ...(editingAgentId && { editingAgentId }),
+            ...(editingGroupId && { editingGroupId }),
+            taskId: operationTaskId,
+            ...(initialTopicMeta?.repos && { repos: initialTopicMeta.repos }),
+            ...(initialTopicMeta?.workingDirectory && {
+              workingDirectory: initialTopicMeta.workingDirectory,
+            }),
+            ...(initialTopicMeta?.workingDirectoryConfig && {
+              workingDirectoryConfig: initialTopicMeta.workingDirectoryConfig,
+            }),
+          }
+        : undefined;
 
     const fallbackTitleSource = markdownToTxt(prompt);
     const snapshot = await resolveNewTopicSnapshot(deps, agentConfig);
@@ -572,33 +587,6 @@ export const setupTurn = async (
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Topic not found' });
     }
 
-    if (existingTopic && !shareGate) {
-      let executionConfig = existingTopic.metadata?.executionConfig;
-      if (!executionConfig) {
-        const fallback = snapshotTopicExecutionConfig({
-          ...agentConfig.agencyConfig,
-          ...(effectiveRequestedDeviceId && { boundDeviceId: effectiveRequestedDeviceId }),
-        });
-        const rows = await deps.topicModel.updateMetadata(
-          topicId,
-          { executionConfig: fallback },
-          {
-            executionConfigIfAbsent: true,
-          },
-        );
-        executionConfig = rows?.[0]?.metadata?.executionConfig ?? fallback;
-      }
-      agentConfig.agencyConfig = applyTopicExecutionConfig(
-        agentConfig.agencyConfig,
-        executionConfig,
-      );
-      // A client hint cannot redirect a conversation pinned by another surface.
-      effectiveRequestedDeviceId = isFixedExecutionTargetSelection
-        ? undefined
-        : agentConfig.agencyConfig?.boundDeviceId;
-      topicBoundDeviceId = agentConfig.agencyConfig?.boundDeviceId;
-    }
-
     /** A group topic pins its owning agent; member runs keep their own model and effort. */
     const canUseTopicPin = !existingTopic?.groupId || existingTopic.agentId === resolvedAgentId;
     const pinnedModel = canUseTopicPin ? existingTopic?.model : undefined;
@@ -671,12 +659,16 @@ export const setupTurn = async (
     // Bot-channel turns are inserted under the OWNER's userId; keep the real
     // platform author alongside so the UI can attribute the bubble correctly.
     ...(botSender ? { botSender } : undefined),
+    // A follow-up queued behind a running turn renders as that turn's
+    // continuation; the client's optimistic row is replaced by this one.
+    ...(steer ? { steer: true as const } : undefined),
   };
 
   // Attachment ingestion: raw bot/IM `files` → S3, pre-uploaded
   // `attachedFileIds` → signed URLs + classification.
   const runAttachments = await resolveRunAttachments(deps, {
     attachedFileIds,
+    fileAccessScope: shareGate ? agentShareFileAccessScope(shareGate) : ordinaryFileAccessScope,
     files,
     throwIfAborted: throwIfExecutionAborted,
   });

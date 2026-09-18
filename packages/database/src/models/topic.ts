@@ -55,6 +55,7 @@ import { markCopiedMessageMetadata } from '../utils/copyMessagesInDatabase';
 import { genEndDateWhere, genRangeWhere, genStartDateWhere, genWhere } from '../utils/genWhere';
 import { idGenerator } from '../utils/idGenerator';
 import { inJsonStringArray } from '../utils/inJsonStringArray';
+import { searchableMessage } from '../utils/searchableMessage';
 import { notShareVisitorTopic } from '../utils/shareVisitor';
 import { buildWorkspacePayload, buildWorkspaceWhere } from '../utils/workspace';
 import { recomputeTopicUsage } from './topicUsage';
@@ -1121,6 +1122,7 @@ export class TopicModel {
         .where(
           and(
             this.messageOwnership(),
+            searchableMessage(),
             messageCandidateIds
               ? inJsonStringArray(messages.id, messageCandidateIds)
               : sql`${messages.content} @@@ ${bm25Query}`,
@@ -1928,11 +1930,7 @@ export class TopicModel {
    * Update topic metadata with merge logic
    * This method merges new metadata with existing metadata instead of replacing it
    */
-  updateMetadata = async (
-    id: string,
-    metadata: TopicMetadataPatch,
-    options?: { executionConfigIfAbsent?: boolean },
-  ) => {
+  updateMetadata = async (id: string, metadata: TopicMetadataPatch) => {
     // Merge into the existing metadata under a row lock so concurrent writers
     // can't lose each other's keys. The old read-then-write was a non-atomic
     // read-modify-write: a hetero run seeds `metadata.runningOperation` while
@@ -1964,9 +1962,6 @@ export class TopicModel {
       const mergedMetadata = {
         ...existing.metadata,
         ...metadata,
-        ...(options?.executionConfigIfAbsent && existing.metadata?.executionConfig
-          ? { executionConfig: existing.metadata.executionConfig }
-          : {}),
         ...(mergedOnboardingSession && { onboardingSession: mergedOnboardingSession }),
       } as ChatTopicMetadata;
 
