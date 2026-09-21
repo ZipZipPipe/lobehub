@@ -1,4 +1,5 @@
 import { isParkedStatus } from '@lobechat/agent-runtime';
+import { readHeterogeneousErrorContext } from '@lobechat/heterogeneous-agents/errors';
 import { RequestTrigger } from '@lobechat/types';
 import { deserializeParts } from '@lobechat/utils';
 import { isRecord } from '@lobechat/utils/object';
@@ -30,6 +31,7 @@ import { registerWorksForOperation } from '@/server/services/workRegistration';
 import { after } from '@/server/utils/scheduleAfterResponse';
 
 import { buildRuntimeInterventionNotification } from './agentInterventionNotification';
+import { extractFinalReplyImageUrls } from './finalReplyImages';
 import { CriticalHookDeliveryError, hookDispatcher, type SerializedHook } from './hooks';
 
 const log = debug('lobe-server:completion-lifecycle');
@@ -43,7 +45,10 @@ const log = debug('lobe-server:completion-lifecycle');
  * `reason === 'done'` alone silently drops capped runs' artifacts.
  */
 export const isSuccessLikeCompletionReason = (reason: string): boolean =>
-  reason === 'done' || reason === 'max_steps' || reason === 'cost_limit';
+  reason === 'done' ||
+  reason === 'max_steps' ||
+  reason === 'cost_limit' ||
+  reason === 'tool_call_repeat_limit';
 
 /**
  * Triggers whose completion recalls the user with a push notification. Beyond
@@ -342,6 +347,7 @@ export class CompletionLifecycle {
     const completionReason: any =
       reason === 'max_steps' ||
       reason === 'cost_limit' ||
+      reason === 'tool_call_repeat_limit' ||
       reason === 'waiting_for_human' ||
       reason === 'waiting_for_async_tool'
         ? reason
@@ -931,7 +937,13 @@ export class CompletionLifecycle {
           runOrigin.userId || this.userId,
           typeof runOrigin.topicId === 'string' ? runOrigin.topicId : undefined,
         );
-        if (recovered) event.lastAssistantContent = recovered;
+        if (recovered) {
+          event.lastAssistantContent = recovered;
+          const attachments = extractOutboundAttachments([
+            { content: recovered, role: 'assistant' },
+          ]);
+          event.attachments = attachments.length > 0 ? attachments : undefined;
+        }
       }
 
       await hookDispatcher.dispatch(operationId, 'onComplete', event, state?.host?.hooks);
@@ -1208,6 +1220,7 @@ export class CompletionLifecycle {
         duration,
         errorAttribution: formattedError?.attribution,
         errorBudget: readErrorBudgetContext(formattedError),
+        errorHeterogeneous: readHeterogeneousErrorContext(formattedError),
         errorDetail: state?.error,
         errorMessage: this.extractErrorMessage(state?.error) || String(state?.error || ''),
         errorType: formattedError?.type === undefined ? undefined : String(formattedError.type),
@@ -1455,8 +1468,18 @@ const extractOutboundAttachments = (messages: any[]): OutboundAttachment[] => {
 
     if (role === 'assistant') {
       if (!crossedFinalAssistant) {
-        // The final assistant turn: harvest its multimodal parts.
-        collected.push(...extractAttachmentsFromContent(content));
+        // Only the final reply's Markdown expresses an intent to send images.
+        // Do not promote generation state or intermediate tool Markdown.
+        const attachments: OutboundAttachment[] = [];
+        const text = extractTextFromMessageContent(content);
+        if (text) {
+          for (const url of extractFinalReplyImageUrls(text)) {
+            const attachment = buildAttachmentFromUrl(url, 'image');
+            if (attachment) attachments.push(attachment);
+          }
+        }
+        attachments.push(...extractAttachmentsFromContent(content));
+        collected.unshift(...attachments);
         crossedFinalAssistant = true;
         continue;
       }
@@ -1467,12 +1490,11 @@ const extractOutboundAttachments = (messages: any[]): OutboundAttachment[] => {
 
     if (role === 'tool') {
       // Tool results between the previous assistant turn and the final one.
-      collected.push(...extractAttachmentsFromContent(content));
+      collected.unshift(...extractAttachmentsFromContent(content));
     }
   }
 
-  // Reverse so message-order (older first) is preserved, then dedupe.
-  collected.reverse();
+  // Prepending each message preserves both message and within-message order.
   const seen = new Set<string>();
   const result: OutboundAttachment[] = [];
   for (const att of collected) {

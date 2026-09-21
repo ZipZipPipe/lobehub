@@ -1,4 +1,4 @@
-import { getRuntimeErrorI18nKey } from '@lobechat/model-runtime/errors';
+import { getRuntimeErrorI18nKey, normalizeChatMessageError } from '@lobechat/model-runtime/errors';
 import type { ChatMessageError, ErrorResponse, ErrorType } from '@lobechat/types';
 import { isRecord, pickTrimmedString } from '@lobechat/utils';
 import i18next, { t } from 'i18next';
@@ -12,7 +12,7 @@ import { getProviderDisplayName } from 'model-bank/modelProviders';
  * which is how users ended up seeing raw `response.InvalidProviderAPIKey` text
  * in the "fetch model list" toast.
  */
-const translateErrorType = (errorType: ErrorResponse['errorType'], body: unknown) => {
+const translateErrorType = (errorType: ChatMessageError['type'], body: unknown) => {
   const { key, ns } = getRuntimeErrorI18nKey(errorType);
 
   // Both namespaces interpolate `{{provider}}`; the backend puts the provider
@@ -79,15 +79,18 @@ export const getMessageError = async (response: Response): Promise<ChatMessageEr
     const data = (await response.json()) as ErrorResponse;
     const body = data.body ?? data;
     const errorType = data.errorType ?? (response.status as ErrorType);
+    const normalized = normalizeChatMessageError({ body, errorType });
     const bodyMessage = extractErrorMessage(body);
     const hasNamedBusinessErrorType =
       typeof data.errorType === 'string' && Boolean(data.errorType.trim());
     const shouldPreferBodyMessage = Boolean(bodyMessage) && !hasNamedBusinessErrorType;
 
     chatMessageError = {
+      ...normalized,
       body,
-      message: shouldPreferBodyMessage ? bodyMessage : translateErrorType(errorType, body),
-      type: errorType,
+      message: shouldPreferBodyMessage
+        ? bodyMessage
+        : translateErrorType(normalized.type, body),
     };
   } catch {
     // if not return, then it's a common error
