@@ -72,10 +72,13 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 }));
 
 const KNOWN_ERRORS = new Set([
+  'connect_from_lobehub',
   'exchange_failed',
   'identity_taken',
   'installation_fetch_failed',
+  'installation_lookup_failed',
   'missing_installation',
+  'multiple_installations',
   'workspace_forbidden',
 ]);
 

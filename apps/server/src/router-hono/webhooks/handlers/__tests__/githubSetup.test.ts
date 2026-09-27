@@ -14,14 +14,17 @@ const userId = 'scm-setup-user';
 const mocks = vi.hoisted(() => ({
   consumeState: vi.fn(),
   issueClaim: vi.fn(),
+  issueState: vi.fn(),
   scmEnv: { ENABLED_GITHUB_APP: true, ENABLED_GITHUB_APP_OAUTH: true },
   canAccessInstallation: vi.fn(),
   exchangeCode: vi.fn(),
   fetchInstallation: vi.fn(),
   getSession: vi.fn(),
+  listInstallationIds: vi.fn(),
 }));
 
 vi.mock('@/database/core/db-adaptor', () => ({ getServerDB: vi.fn(async () => serverDB) }));
+vi.mock('@/envs/app', () => ({ appEnv: { APP_URL: 'https://lobe.example' } }));
 vi.mock('@/envs/scm', () => ({ scmEnv: mocks.scmEnv }));
 vi.mock('@/auth', () => ({ auth: { api: { getSession: mocks.getSession } } }));
 vi.mock('@/server/modules/KeyVaultsEncrypt', () => ({
@@ -30,10 +33,14 @@ vi.mock('@/server/modules/KeyVaultsEncrypt', () => ({
 vi.mock('@/server/services/scm/oauth/stateStore', () => ({
   consumeScmInstallState: mocks.consumeState,
   issueScmInstallClaim: mocks.issueClaim,
+  issueScmInstallState: mocks.issueState,
 }));
 vi.mock('@/server/services/scm/github/app', () => ({
+  buildGitHubInstallUrl: (state: string) =>
+    `https://github.com/apps/dev/installations/new?state=${state}`,
   exchangeGitHubUserCode: mocks.exchangeCode,
   fetchGitHubInstallation: mocks.fetchInstallation,
+  listGitHubUserInstallationIds: mocks.listInstallationIds,
   userCanAccessInstallation: mocks.canAccessInstallation,
 }));
 
@@ -55,9 +62,11 @@ beforeEach(async () => {
   await serverDB.insert(users).values([{ id: userId }, { id: 'scm-setup-other' }]);
   mocks.consumeState.mockResolvedValue(null);
   mocks.issueClaim.mockResolvedValue('claim-token');
+  mocks.issueState.mockResolvedValue('new-state');
   mocks.getSession.mockResolvedValue(null);
   mocks.scmEnv.ENABLED_GITHUB_APP_OAUTH = true;
   mocks.fetchInstallation.mockResolvedValue(snapshot);
+  mocks.listInstallationIds.mockResolvedValue(['777']);
   mocks.canAccessInstallation.mockResolvedValue(true);
   mocks.exchangeCode.mockResolvedValue({
     accessToken: 'ghu_token',
@@ -72,6 +81,60 @@ afterEach(async () => {
 });
 
 describe('githubSetup', () => {
+  it('sends a code-only callback without our state back to the public settings page', async () => {
+    const res = await setup({ code: 'c' });
+    expect(res.headers.get('location')).toBe(
+      'https://lobe.example/settings/integrations/github?error=connect_from_lobehub',
+    );
+    expect(mocks.exchangeCode).not.toHaveBeenCalled();
+  });
+
+  it('resolves the sole accessible installation when OAuth omits installation_id', async () => {
+    mocks.consumeState.mockResolvedValue({ lobeUserId: userId, ts: 1 });
+
+    const res = await setup({ code: 'c', state: 's' });
+    expect(res.headers.get('location')).toBe(
+      'https://lobe.example/settings/integrations/github?account=arvinxx&installed=ok',
+    );
+    expect(mocks.listInstallationIds).toHaveBeenCalledWith('ghu_token');
+    expect(
+      await ScmInstallationModel.findByProviderInstallationId(serverDB, 'github', '777'),
+    ).toMatchObject({
+      userId,
+      installedByExternalLogin: 'arvinxx',
+    });
+  });
+
+  it('does not guess when OAuth can access more than one installation', async () => {
+    mocks.consumeState.mockResolvedValue({ lobeUserId: userId, ts: 1 });
+    mocks.listInstallationIds.mockResolvedValue(['777', '778']);
+
+    const res = await setup({ code: 'c', state: 's' });
+    expect(new URL(res.headers.get('location')!).searchParams.get('error')).toBe(
+      'multiple_installations',
+    );
+    expect(mocks.canAccessInstallation).not.toHaveBeenCalled();
+    expect(
+      await ScmInstallationModel.findByProviderInstallationId(serverDB, 'github', '777'),
+    ).toBeNull();
+  });
+
+  it('continues to installation when OAuth succeeds before the App is installed', async () => {
+    mocks.consumeState.mockResolvedValue({ lobeUserId: userId, ts: 1 });
+    mocks.listInstallationIds.mockResolvedValue([]);
+
+    const res = await setup({ code: 'c', state: 's' });
+    expect(res.headers.get('location')).toBe(
+      'https://github.com/apps/dev/installations/new?state=new-state',
+    );
+    expect(mocks.issueState).toHaveBeenCalledWith({
+      lobeUserId: userId,
+      returnTo: undefined,
+      workspaceId: null,
+    });
+    expect(await ScmIdentityModel.findByExternalUser(serverDB, 'github', '42')).toBeNull();
+  });
+
   it('bounces to sign-in when neither state nor session identifies a user', async () => {
     const res = await setup({ code: 'c', installation_id: '777' });
     expect(res.status).toBe(302);
@@ -191,7 +254,7 @@ describe('githubSetup', () => {
 
     const res = await setup({ code: 'c', installation_id: '777', state: 's' });
     const location = new URL(res.headers.get('location')!);
-    expect(location.origin).toBe('http://localhost');
+    expect(location.origin).toBe('https://lobe.example');
     expect(location.pathname).toBe('/settings/integrations/github');
   });
 

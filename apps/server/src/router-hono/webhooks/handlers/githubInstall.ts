@@ -3,8 +3,9 @@ import type { Context } from 'hono';
 
 import { auth } from '@/auth';
 import { getServerDB } from '@/database/core/db-adaptor';
+import { appEnv } from '@/envs/app';
 import { scmEnv } from '@/envs/scm';
-import { buildGitHubInstallUrl } from '@/server/services/scm/github/app';
+import { buildGitHubAuthorizeUrl, buildGitHubInstallUrl } from '@/server/services/scm/github/app';
 import { issueScmInstallState } from '@/server/services/scm/oauth/stateStore';
 import { canWriteScmScope, sanitizeReturnTo } from '@/server/services/scm/scope';
 
@@ -39,7 +40,7 @@ export const githubInstall = async (c: Context): Promise<Response> => {
   }
   if (!session?.user?.id) {
     const callbackUrl = encodeURIComponent(`${GITHUB_INSTALL_PATH}${url.search}`);
-    return Response.redirect(new URL(`/signin?callbackUrl=${callbackUrl}`, url.origin), 302);
+    return Response.redirect(new URL(`/signin?callbackUrl=${callbackUrl}`, appEnv.APP_URL), 302);
   }
   const userId = session.user.id;
 
@@ -59,7 +60,11 @@ export const githubInstall = async (c: Context): Promise<Response> => {
       status: 503,
     });
   }
-  const installUrl = buildGitHubInstallUrl(state);
+  // Authorization also works when the App is already installed. If the user
+  // has no installation yet, the callback sends them to the install page.
+  const installUrl = scmEnv.ENABLED_GITHUB_APP_OAUTH
+    ? buildGitHubAuthorizeUrl(state)
+    : buildGitHubInstallUrl(state);
   if (!installUrl) return new Response('GitHub App slug is not configured.', { status: 503 });
 
   log('redirecting user=%s workspace=%s to install', userId, workspaceId ?? '-');

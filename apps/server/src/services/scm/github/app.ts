@@ -6,6 +6,7 @@ import type {
 import debug from 'debug';
 import { App, Octokit } from 'octokit';
 
+import { appEnv } from '@/envs/app';
 import { scmEnv } from '@/envs/scm';
 
 const log = debug('lobe-server:scm:github-app');
@@ -43,6 +44,19 @@ export const resetGitHubApp = () => {
 export const buildGitHubInstallUrl = (state: string): string | null => {
   if (!scmEnv.GITHUB_APP_SLUG) return null;
   const url = new URL(`https://github.com/apps/${scmEnv.GITHUB_APP_SLUG}/installations/new`);
+  url.searchParams.set('state', state);
+  return url.toString();
+};
+
+/** Authorize an existing installation before asking the user to install a new one. */
+export const buildGitHubAuthorizeUrl = (state: string): string | null => {
+  if (!scmEnv.GITHUB_APP_CLIENT_ID) return null;
+  const url = new URL('https://github.com/login/oauth/authorize');
+  url.searchParams.set('client_id', scmEnv.GITHUB_APP_CLIENT_ID);
+  url.searchParams.set(
+    'redirect_uri',
+    `${appEnv.APP_URL.replace(/\/$/, '')}/api/webhooks/github/oauth/callback`,
+  );
   url.searchParams.set('state', state);
   return url.toString();
 };
@@ -385,19 +399,26 @@ export const updateGitHubPullRequestComment = async (params: {
  * credential can fetch any installation of this App, so it cannot tell
  * whether the caller is the one who installed it.
  */
+export const listGitHubUserInstallationIds = async (accessToken: string): Promise<string[]> => {
+  const octokit = new Octokit({ auth: accessToken });
+  const ids: string[] = [];
+  for await (const response of octokit.paginate.iterator('GET /user/installations', {
+    per_page: 100,
+  })) {
+    const installations = (response.data ?? []) as { app_id: number; id: number }[];
+    for (const installation of installations) {
+      if (String(installation.app_id) === scmEnv.GITHUB_APP_ID) ids.push(String(installation.id));
+    }
+  }
+  return ids;
+};
+
 export const userCanAccessInstallation = async (
   accessToken: string,
   installationId: string,
 ): Promise<boolean> => {
   try {
-    const octokit = new Octokit({ auth: accessToken });
-    for await (const response of octokit.paginate.iterator('GET /user/installations', {
-      per_page: 100,
-    })) {
-      const installations = (response.data ?? []) as { id: number }[];
-      if (installations.some((item) => String(item.id) === installationId)) return true;
-    }
-    return false;
+    return (await listGitHubUserInstallationIds(accessToken)).includes(installationId);
   } catch (error) {
     log('cannot list installations for the authorizing user: %O', error);
     return false;

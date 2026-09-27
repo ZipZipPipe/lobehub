@@ -17,12 +17,20 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/database/core/db-adaptor', () => ({ getServerDB: vi.fn(async () => serverDB) }));
-vi.mock('@/envs/scm', () => ({ scmEnv: { ENABLED_GITHUB_APP: true, GITHUB_APP_SLUG: 'dev' } }));
+vi.mock('@/envs/app', () => ({ appEnv: { APP_URL: 'https://lobe.example' } }));
+const scmEnv = vi.hoisted(() => ({
+  ENABLED_GITHUB_APP: true,
+  ENABLED_GITHUB_APP_OAUTH: true,
+  GITHUB_APP_SLUG: 'dev',
+}));
+vi.mock('@/envs/scm', () => ({ scmEnv }));
 vi.mock('@/auth', () => ({ auth: { api: { getSession: mocks.getSession } } }));
 vi.mock('@/server/services/scm/oauth/stateStore', () => ({
   issueScmInstallState: mocks.issueState,
 }));
 vi.mock('@/server/services/scm/github/app', () => ({
+  buildGitHubAuthorizeUrl: (state: string) =>
+    `https://github.com/login/oauth/authorize?client_id=client&state=${state}`,
   buildGitHubInstallUrl: (state: string) =>
     `https://github.com/apps/dev/installations/new?state=${state}`,
 }));
@@ -35,6 +43,7 @@ beforeEach(async () => {
   await serverDB.insert(users).values({ id: userId });
   mocks.getSession.mockResolvedValue({ user: { id: userId } });
   mocks.issueState.mockResolvedValue('state-1');
+  scmEnv.ENABLED_GITHUB_APP_OAUTH = true;
 });
 
 afterEach(async () => {
@@ -48,13 +57,29 @@ describe('githubInstall', () => {
     const res = await install({ returnTo: '/settings/integrations/github' });
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe(
-      'https://github.com/apps/dev/installations/new?state=state-1',
+      'https://github.com/login/oauth/authorize?client_id=client&state=state-1',
     );
     expect(mocks.issueState).toHaveBeenCalledWith({
       lobeUserId: userId,
       returnTo: '/settings/integrations/github',
       workspaceId: null,
     });
+  });
+
+  it('uses the installation page when OAuth is not configured', async () => {
+    scmEnv.ENABLED_GITHUB_APP_OAUTH = false;
+    const res = await install({});
+    expect(res.headers.get('location')).toBe(
+      'https://github.com/apps/dev/installations/new?state=state-1',
+    );
+  });
+
+  it('uses the public app URL when the user needs to sign in', async () => {
+    mocks.getSession.mockResolvedValue(null);
+    const res = await install({});
+    expect(res.headers.get('location')).toBe(
+      'https://lobe.example/signin?callbackUrl=%2Fapi%2Fwebhooks%2Fgithub%2Finstall',
+    );
   });
 
   it('drops a cross-origin returnTo before it reaches the state', async () => {

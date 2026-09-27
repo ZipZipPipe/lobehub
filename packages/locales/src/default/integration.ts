@@ -41,11 +41,17 @@ export default {
   'github.info.status': 'Status',
   'github.installResult.error.exchange_failed':
     'GitHub did not accept the authorization code. Please try connecting again.',
+  'github.installResult.error.connect_from_lobehub':
+    'To finish connecting, use Connect GitHub on this page.',
   'github.installResult.error.identity_taken':
     'This GitHub account is already linked to another LobeHub user.',
   'github.installResult.error.installation_fetch_failed':
     'Could not read the installation from GitHub. Please try again.',
+  'github.installResult.error.installation_lookup_failed':
+    'Could not list your GitHub installations. Please try connecting again.',
   'github.installResult.error.missing_installation': 'GitHub did not report an installation.',
+  'github.installResult.error.multiple_installations':
+    'More than one installation is available. Please select an account on GitHub and try again.',
   'github.installResult.error.unknown': 'Connecting GitHub failed ({{code}}).',
   'github.installResult.error.workspace_forbidden':
     'Only workspace members can connect GitHub here.',
