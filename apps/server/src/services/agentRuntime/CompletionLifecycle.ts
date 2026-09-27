@@ -27,7 +27,10 @@ import { toAgentSignalTraceEvents } from '@/server/services/agentSignal/observab
 import { parseAgentSignalMarker } from '@/server/services/agentSignal/operationMarker';
 import { extractSelfIterationCompletionPayload } from '@/server/services/agentSignal/services/selfIteration/completion';
 import { instantiateVerifyPlanOnStart, runVerifyOnCompletion } from '@/server/services/verify';
-import { registerWorksForOperation } from '@/server/services/workRegistration';
+import {
+  registerWorksForOperation,
+  resolveRunWorkAccessScope,
+} from '@/server/services/workRegistration';
 import { after } from '@/server/utils/scheduleAfterResponse';
 
 import { buildRuntimeInterventionNotification } from './agentInterventionNotification';
@@ -138,6 +141,8 @@ export interface OperationCompletionInput {
   provider?: string | null;
   /** Serialized webhook hooks (queue mode); ignored in local in-memory mode. */
   serializedHooks?: SerializedHook[];
+  /** When the run started, so the terminal row keeps its processing time. */
+  startedAt?: Date | string;
   stepCount?: number | null;
   topicId?: string;
   /** Trace / usage aggregates (llm calls, tokens, tool calls). */
@@ -681,6 +686,7 @@ export class CompletionLifecycle {
   private buildStateFromInput(input: OperationCompletionInput) {
     return {
       cost: input.cost ?? { total: null },
+      createdAt: input.startedAt,
       error: input.error ?? undefined,
       messages: [
         { content: input.goal ?? '', role: 'user' },
@@ -797,7 +803,20 @@ export class CompletionLifecycle {
   async registerFileWorks(operationId: string, state: any): Promise<void> {
     if (state?.metadata?._fileWorksRegistered) return;
     try {
+      // Share visitor runs register under the share scope of their visitor
+      // topic (both the file scan below and the anchor lookup that follows).
+      const shareVisitor = state?.principal?.actor?.shareVisitor ?? null;
+      const accessScope = resolveRunWorkAccessScope({
+        shareVisitor,
+        topicId: state?.origin?.topicId,
+      });
+      if (accessScope === null) {
+        log('[%s] Skipping Work registration: share visitor run has no topic', operationId);
+        return;
+      }
+
       const outcome = await registerWorksForOperation({
+        agentShareVisitor: shareVisitor,
         // The round's final assistant message — the shell github scan stamps the
         // Work display anchor onto it for hetero runs (see registerWorksForOperation).
         assistantMessageId:
@@ -818,6 +837,7 @@ export class CompletionLifecycle {
         this.serverDB,
         state?.origin?.userId || this.userId,
         this.workspaceId,
+        accessScope,
       ).listByRootOperation({ includeFileWorks: true, limit: 1, rootOperationId: operationId });
       if (works.length > 0) {
         const assistantMessageId =

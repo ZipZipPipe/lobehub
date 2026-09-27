@@ -5,7 +5,20 @@ import {
   ordinaryFileAccessScope,
   stripAgentShareDocumentProvenance,
 } from '@lobechat/types';
-import { and, asc, count, desc, eq, inArray, isNull, ne, notInArray, or, sum } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sum,
+} from 'drizzle-orm';
 
 import type { DocumentItem, NewDocument } from '../schemas';
 import {
@@ -16,6 +29,9 @@ import {
   documents,
   files,
   knowledgeBaseFiles,
+  messages,
+  messagesFiles,
+  nextDocumentUpdatedAt,
   works,
 } from '../schemas';
 import type { LobeChatDatabase } from '../type';
@@ -24,6 +40,7 @@ import {
   fileReferenceMatchesAccessScope,
   notAgentShareFileReference,
 } from '../utils/fileVisibility';
+import { documentOriginalCharCount } from '../utils/originalCharCount';
 import { buildWorkspacePayload, buildWorkspaceWhere } from '../utils/workspace';
 
 export interface QueryDocumentParams {
@@ -288,6 +305,55 @@ export class DocumentModel {
       .where(and(this.readScope(), inArray(documents.id, ids)));
   };
 
+  /**
+   * Whether a parsed document that prompts preview instead of inline exists for the given files or
+   * for any file attached to a message in `topicId`: longer than `minChars`, or cut at parse time
+   * (`metadata.originalCharCount` above the stored length). Mirrors `isOversizedFileContent` in
+   * `@lobechat/prompts`, so the run gets a tool that can read those previews in windows.
+   */
+  hasFileDocumentsOverChars = async ({
+    fileIds = [],
+    minChars,
+    topicId,
+  }: {
+    fileIds?: string[];
+    minChars: number;
+    topicId?: string | null;
+  }): Promise<boolean> => {
+    const fileConditions = [];
+    if (fileIds.length > 0) fileConditions.push(inArray(documents.fileId, fileIds));
+    if (topicId) {
+      fileConditions.push(
+        inArray(
+          documents.fileId,
+          this.db
+            .select({ fileId: messagesFiles.fileId })
+            .from(messagesFiles)
+            .innerJoin(messages, eq(messages.id, messagesFiles.messageId))
+            .where(eq(messages.topicId, topicId)),
+        ),
+      );
+    }
+    if (fileConditions.length === 0) return false;
+
+    const [row] = await this.db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(
+        and(
+          this.ownership(),
+          or(
+            gt(documents.totalCharCount, minChars),
+            gt(documentOriginalCharCount(), documents.totalCharCount),
+          ),
+          or(...fileConditions),
+        ),
+      )
+      .limit(1);
+
+    return !!row;
+  };
+
   findByFileId = async (fileId: string, accessScope: FileAccessScope = ordinaryFileAccessScope) => {
     const [document] = await this.db
       .select()
@@ -343,16 +409,19 @@ export class DocumentModel {
     // visibility is intentionally not updatable via this path. The only legal
     // transition is `private → public` via `publishToWorkspace`; strip any
     // incoming value so callers can't sneak around the one-way rule.
-    const { metadata, visibility: _ignored, ...patch } = value;
+    const { metadata, updatedAt: _updatedAt, visibility: _ignored, ...patch } = value;
 
-    return this.db
+    const [row] = await this.db
       .update(documents)
       .set({
         ...patch,
         ...(metadata !== undefined && { metadata: this.scopeMetadata(metadata) }),
-        updatedAt: new Date(),
+        updatedAt: nextDocumentUpdatedAt(),
       })
-      .where(and(this.readScope(), eq(documents.id, id)));
+      .where(and(this.readScope(), eq(documents.id, id)))
+      .returning({ updatedAt: documents.updatedAt });
+
+    return row?.updatedAt;
   };
 
   /**
@@ -377,7 +446,7 @@ export class DocumentModel {
     return this.db.transaction(async (trx) => {
       const result = await (trx as LobeChatDatabase)
         .update(documents)
-        .set({ updatedAt: new Date(), visibility })
+        .set({ visibility })
         .where(and(eq(documents.id, rootId), this.ownership(), eq(documents.userId, this.userId)))
         .returning({ fileId: documents.fileId, id: documents.id });
 
@@ -609,7 +678,7 @@ export class DocumentModel {
 
       await (trx as LobeChatDatabase)
         .update(documents)
-        .set({ ...ownershipUpdate, ...visibilityUpdate, updatedAt: new Date() })
+        .set({ ...ownershipUpdate, ...visibilityUpdate })
         .where(inArray(documents.id, ids));
 
       if (targetWorkspaceId) {

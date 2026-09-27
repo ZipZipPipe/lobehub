@@ -1,3 +1,4 @@
+import { RequestTrigger } from '@lobechat/types';
 import { act, renderHook } from '@testing-library/react';
 import { type Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -89,6 +90,9 @@ describe('ChatEnhanceAction', () => {
 
       expect(messageService.updateMessageTranslate).toHaveBeenCalled();
       expect(chatService.fetchPresetTaskResult).toHaveBeenCalledTimes(2);
+      for (const [params] of (chatService.fetchPresetTaskResult as Mock).mock.calls) {
+        expect(params.trigger).toBe(RequestTrigger.Translate);
+      }
     });
   });
 

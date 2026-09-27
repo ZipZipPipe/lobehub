@@ -163,6 +163,7 @@ export class MessageService {
       if (!params.topicId) return [];
 
       const shared = await lambdaClient.shareChat.getMessages.query({
+        includeFileWorks: true,
         shareId: params.agentShareId,
         topicId: params.topicId,
       });

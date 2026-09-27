@@ -5,9 +5,8 @@ import type { DeviceListItem, DeviceWorkspaceShare } from '@lobechat/types';
 import { Flexbox, Icon, Input, SortableList } from '@lobehub/ui';
 import { ActionIcon, Avatar, Button, confirmModal, Tag, Text, toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
-import dayjs from 'dayjs';
 import { FolderOpenIcon, FolderPlusIcon, LockIcon, XIcon } from 'lucide-react';
-import { memo, type ReactNode, useState } from 'react';
+import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import DirIcon from '@/features/ChatInput/ControlBar/DirIcon';
@@ -17,8 +16,11 @@ import { deviceService } from '@/services/device';
 import { electronSystemService } from '@/services/electron/system';
 import { nextWorkingDirs } from '@/store/device';
 
+import Connections from './Connections';
 import { refreshDeviceList } from './const';
+import FieldLabel from './FieldLabel';
 import { getDeviceIcon } from './getDeviceIcon';
+import PresenceDot from './PresenceDot';
 import { useCanEditDevice } from './useCanEditDevice';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -37,12 +39,6 @@ const styles = createStaticStyles(({ css }) => ({
     overflow: hidden;
     height: 100%;
     min-height: 0;
-  `,
-  dot: css`
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
   `,
   header: css`
     flex: none;
@@ -82,16 +78,6 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
-// Section label — one consistent treatment for every field heading in the panel.
-const FieldLabel = memo<{ children: ReactNode; extra?: ReactNode }>(({ children, extra }) => (
-  <Flexbox horizontal align={'center'} distribution={'space-between'}>
-    <Text fontSize={12} type={'secondary'} weight={500}>
-      {children}
-    </Text>
-    {extra}
-  </Flexbox>
-));
-
 interface DeviceDetailPanelProps {
   device: DeviceListItem;
   isCurrent?: boolean;
@@ -120,8 +106,7 @@ const DeviceDetailPanel = memo<DeviceDetailPanelProps>(({ device, isCurrent, onC
   // Only the machine you're on can browse its own filesystem natively.
   const canBrowse = !!isCurrent && isDesktop;
 
-  // Render the device's live connections straight from `device.channels` — one
-  // row per connection; an empty array means offline.
+  // An empty `device.channels` means offline.
   const channels = device.channels ?? [];
   const online = channels.length > 0;
 
@@ -243,17 +228,27 @@ const DeviceDetailPanel = memo<DeviceDetailPanelProps>(({ device, isCurrent, onC
       <Flexbox horizontal align={'center'} className={styles.header} gap={12}>
         <span className={styles.iconTile}>{getDeviceIcon(device.platform, 18)}</span>
         <Flexbox flex={1} gap={2} style={{ minWidth: 0 }}>
-          <Text ellipsis weight={600}>
-            {device.friendlyName || device.hostname || device.deviceId}
-          </Text>
-          <Flexbox horizontal align={'center'} gap={8}>
-            <Tag color={online ? 'success' : 'default'} size={'small'}>
-              {online
-                ? t('devices.status.onlineConnections', { count: channels.length })
-                : t('devices.status.offline')}
-            </Tag>
-            {isCurrent && <Tag size={'small'}>{t('devices.currentBadge')}</Tag>}
+          {/* Presence is a dot after the name; the connections below say which. */}
+          <Flexbox horizontal align={'baseline'} gap={8} style={{ minWidth: 0 }}>
+            <Text ellipsis weight={600}>
+              {device.friendlyName || device.hostname || device.deviceId}
+            </Text>
+            <Text style={{ flex: 'none' }}>
+              <PresenceDot
+                live={online}
+                title={
+                  online
+                    ? t('devices.status.onlineConnections', { count: channels.length })
+                    : t('devices.status.offline')
+                }
+              />
+            </Text>
           </Flexbox>
+          {isCurrent && (
+            <Flexbox horizontal>
+              <Tag size={'small'}>{t('devices.currentBadge')}</Tag>
+            </Flexbox>
+          )}
         </Flexbox>
         <ActionIcon icon={XIcon} size={'small'} onClick={onClose} />
       </Flexbox>
@@ -312,29 +307,8 @@ const DeviceDetailPanel = memo<DeviceDetailPanelProps>(({ device, isCurrent, onC
           </Flexbox>
         )}
 
-        {/* ─── Connections ─── */}
-        <Flexbox gap={8}>
-          <FieldLabel>{t('devices.detail.connections')}</FieldLabel>
-          {channels.length > 0 ? (
-            channels.map((channel, index) => (
-              <Flexbox horizontal align={'center'} gap={8} key={`${channel.connectedAt}-${index}`}>
-                <span className={styles.dot} style={{ background: cssVar.colorSuccess }} />
-                {channel.channel && <Tag size={'small'}>{channel.channel}</Tag>}
-                <Text fontSize={12} type={'secondary'}>
-                  {t('devices.channel.connected', { time: dayjs(channel.connectedAt).fromNow() })}
-                </Text>
-              </Flexbox>
-            ))
-          ) : (
-            <Flexbox horizontal align={'center'} gap={8}>
-              <span className={styles.dot} style={{ background: cssVar.colorTextQuaternary }} />
-              <Text fontSize={12} type={'secondary'}>
-                {t('devices.status.offline')} ·{' '}
-                {t('devices.lastSeen', { time: dayjs(device.lastSeen).fromNow() })}
-              </Text>
-            </Flexbox>
-          )}
-        </Flexbox>
+        {/* ─── Connections, each with its client version; desktop carries the update ─── */}
+        <Connections canEdit={canEdit} device={device} />
 
         {/* ─── Name ─── */}
         <Flexbox gap={8}>

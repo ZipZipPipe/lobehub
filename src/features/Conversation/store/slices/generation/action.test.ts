@@ -261,6 +261,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
         completeOperation: mockCompleteOperation,
@@ -322,6 +323,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
         completeOperation: mockCompleteOperation,
@@ -360,6 +362,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
         completeOperation: mockCompleteOperation,
@@ -400,6 +403,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
         completeOperation: mockCompleteOperation,
@@ -448,6 +452,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
         completeOperation: mockCompleteOperation,
@@ -494,6 +499,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
         completeOperation: mockCompleteOperation,
@@ -545,6 +551,7 @@ describe('Generation Actions', () => {
         dbMessagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         deleteMessage: mockDeleteMessage,
         switchMessageBranch: mockSwitchMessageBranch,
         startOperation: mockStartOperation,
@@ -760,6 +767,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
@@ -826,6 +834,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
@@ -897,6 +906,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
@@ -942,6 +952,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
         switchMessageBranch: mockSwitchMessageBranch,
@@ -1031,6 +1042,7 @@ describe('Generation Actions', () => {
         messagesMap: { [oldContextKey]: [oldUserMessage, oldAssistantMessage] },
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
         completeOperation: mockCompleteOperation,
@@ -1092,6 +1104,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
         deleteMessage: vi.fn().mockResolvedValue(undefined),
@@ -1147,6 +1160,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
@@ -1201,6 +1215,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
@@ -1260,6 +1275,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
@@ -1312,6 +1328,7 @@ describe('Generation Actions', () => {
         // has already flipped the interim regenerate op to 'cancelled'.
         operations: { 'test-op-id': { id: 'test-op-id', status: 'cancelled' } },
         operationsByMessage: {},
+        topicDataMap: {},
 
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
@@ -1362,6 +1379,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: { 'test-op-id': { id: 'test-op-id', status: 'running' } },
         operationsByMessage: {},
+        topicDataMap: {},
         dbMessages: [],
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
@@ -1410,6 +1428,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         cancelOperations: mockCancelOperations,
         cancelOperation: mockCancelOperation,
@@ -1484,6 +1503,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
@@ -1555,6 +1575,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
@@ -1599,6 +1620,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
 
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
@@ -1837,8 +1859,12 @@ describe('Generation Actions', () => {
         }),
       );
 
-      // Store is refreshed so the loading bubble shows while the CLI streams.
-      expect(mockRefreshMessages).toHaveBeenCalled();
+      // Store is refreshed so the loading bubble shows while the CLI streams —
+      // scoped to the run's own context, not whatever topic happens to be
+      // active (restart recovery runs this for background topics).
+      expect(mockRefreshMessages).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: 'session-1', topicId: 'topic-1' }),
+      );
 
       // The executor receives the new assistant row id, the original user
       // message's images, the original prompt, and the child hetero op id.
@@ -2024,6 +2050,7 @@ describe('Generation Actions', () => {
         messagesMap: {},
         operations: {},
         operationsByMessage: {},
+        topicDataMap: {},
         startOperation: mockStartOperation,
         associateMessageWithOperation: mockAssociateMessageWithOperation,
         completeOperation: mockCompleteOperation,

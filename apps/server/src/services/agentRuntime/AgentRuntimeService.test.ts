@@ -558,6 +558,23 @@ describe('AgentRuntimeService', () => {
       });
     });
 
+    it('freezes the builder editing target on the run origin', async () => {
+      await service.createOperation({
+        ...mockParams,
+        appContext: {
+          editingAgentId: 'agt_target',
+          editingGroupId: 'grp_target',
+          scope: 'agent_builder',
+        },
+      });
+
+      const [, state] = mockCoordinator.saveAgentState.mock.calls[0];
+      expect(state.origin).toMatchObject({
+        editingAgentId: 'agt_target',
+        editingGroupId: 'grp_target',
+      });
+    });
+
     it('records the approval mode as a run policy', async () => {
       await service.createOperation({
         ...mockParams,
@@ -3325,6 +3342,47 @@ describe('AgentRuntimeService', () => {
       expect(resumeSpy).toHaveBeenCalledWith(
         { parentOperationId: 'parent-op-1' },
         { knownFulfilledMessageId: 'tool-msg-1', scheduleVerifyOnHold: true },
+      );
+    });
+
+    it('ends a callSubAgent result with the sub-agent id so the parent can continue it', async () => {
+      (service as any).messageModel.findMessagePlugin = vi
+        .fn()
+        .mockResolvedValue({ apiName: 'callSubAgent', identifier: 'lobe-agent' });
+
+      await service.completeSubAgentBridge({ ...bridgeParams, finalState: childState as any });
+      await service.completeSubAgentBridge({
+        ...bridgeParams,
+        finalState: { ...childState, error: { message: 'Budget exceeded' } } as any,
+        reason: 'error',
+      });
+
+      expect(updateToolMessage).toHaveBeenNthCalledWith(
+        1,
+        'tool-msg-1',
+        expect.objectContaining({ content: 'final answer\n\n<sub_agent id="thread-1" />' }),
+      );
+      expect(updateToolMessage).toHaveBeenNthCalledWith(
+        2,
+        'tool-msg-1',
+        expect.objectContaining({
+          content: expect.stringMatching(
+            /^Sub-agent did not complete \(error\): .*\n\n<sub_agent id="thread-1" \/>$/,
+          ),
+        }),
+      );
+    });
+
+    it('leaves callAgent results without a sub-agent id', async () => {
+      (service as any).messageModel.findMessagePlugin = vi
+        .fn()
+        .mockResolvedValue({ apiName: 'callAgent', identifier: 'lobe-agent-management' });
+
+      await service.completeSubAgentBridge({ ...bridgeParams, finalState: childState as any });
+
+      expect(updateToolMessage).toHaveBeenCalledWith(
+        'tool-msg-1',
+        expect.objectContaining({ content: 'final answer' }),
       );
     });
 
