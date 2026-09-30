@@ -59,6 +59,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   ne,
   not,
@@ -95,6 +96,7 @@ import {
 import type { LobeChatDatabase, Transaction } from '../type';
 import { sanitizeBm25Query } from '../utils/bm25';
 import { notCopiedTranscript } from '../utils/copiedTranscript';
+import { notFileBackedPlaceholder } from '../utils/fileBackedPlaceholder';
 import { genEndDateWhere, genRangeWhere, genStartDateWhere, genWhere } from '../utils/genWhere';
 import { idGenerator } from '../utils/idGenerator';
 import { inJsonStringArray } from '../utils/inJsonStringArray';
@@ -224,9 +226,24 @@ export interface QueryMessagesOptions {
    */
   allowShareVisitor?: boolean;
   /**
+   * Round-cursor for loading older history (see `QueryMessageParams.before`):
+   * only rows strictly older than this `(createdAt, id)` tuple are fetched.
+   */
+  before?: { createdAt: Date; id: string };
+  /**
    * Current page number (0-indexed)
    */
   current?: number;
+  /**
+   * Constrain MessageGroup assembly to an explicit `[from, before)` time window
+   * instead of loading every group in the topic (or deriving the window from the
+   * fetched rows). Set by cursor pagination so consecutive pages partition the
+   * topic's groups exactly once: a scroll-up page neither repeats group nodes nor
+   * drops the ones dated between (or older than) its mainline rows. Either bound
+   * may be omitted to leave that side open. Bounds are lossless microsecond
+   * timestamp strings compared with a `::timestamptz` cast.
+   */
+  groupNodeWindow?: MessageGroupNodeWindow;
   /**
    * Opt-in for `file` work summaries in the payload (see
    * `QueryMessageParams.includeFileWorks`).
@@ -266,10 +283,13 @@ export interface QueryMessagesOptions {
 }
 
 export interface TopicTranscriptMessage {
+  agentId: string | null;
   content: string | null;
   createdAt: Date;
+  error: ChatMessageError | null;
   id: string;
   messageGroupId: string | null;
+  metadata: MessageMetadata | null;
   parentId: string | null;
   role: string;
   threadId: string | null;
@@ -279,6 +299,64 @@ export interface TopicTranscriptMessage {
 export interface TopicTranscriptResult {
   items: TopicTranscriptMessage[];
   total: number;
+}
+
+/**
+ * Round-boundary cursor for {@link MessageModel.queryTopicMessagesByCursor}. Points
+ * at a mainline `user` message (a round start); paging older fetches the rounds
+ * strictly before it.
+ */
+export interface MessageRoundCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface QueryTopicByCursorParams {
+  /**
+   * Ignored: a concrete topic is the conversation boundary and may hold rows
+   * from several agents/sessions (e.g. `callAgent` replies), same as `query`.
+   * Accepted only so callers can forward their usual query params.
+   */
+  agentId?: string | null;
+  /** Hard cap on rows walked when resolving the round window (safety, ~rows). */
+  countBudget?: number;
+  /** Omit for the initial (newest) page; pass a prior `nextCursor` to load older. */
+  cursor?: MessageRoundCursor | null;
+  /** Group chat topic: rows carry the group id, same filter as `query`. */
+  groupId?: string | null;
+  /** See {@link QueryMessageParams.includeFileWorks}. */
+  includeFileWorks?: boolean;
+  /** How many rounds to load per page (the current round is always whole). */
+  roundLimit?: number;
+  /** Ignored for the same reason as `agentId`. */
+  sessionId?: string | null;
+  skipWorks?: boolean;
+  topicId: string;
+}
+
+export interface TopicMessagesByCursorResult {
+  hasMore: boolean;
+  messages: UIChatMessage[];
+  /** Cursor to load the previous (older) page, or null when at the topic start. */
+  nextCursor: MessageRoundCursor | null;
+}
+
+/** Default rounds per cursor page. */
+const DEFAULT_ROUND_LIMIT = 10;
+/** Default safety cap on rows scanned per cursor page. */
+const DEFAULT_ROUND_COUNT_BUDGET = 2000;
+/**
+ * Row ceiling for the cursor path's underlying `queryWithWhere` fetch. The `where`
+ * already bounds rows to the resolved round window; this only prevents an
+ * unbounded scan and keeps `queryWithWhere`'s newest-first trim disabled (the
+ * result stays below `pageSize`, so the trim guard never fires).
+ */
+const CURSOR_PAGE_CEILING = 100_000;
+
+/** Half-open `[from, before)` MessageGroup window; see `groupNodeWindow`. */
+export interface MessageGroupNodeWindow {
+  before?: string | null;
+  from?: string | null;
 }
 
 export interface ModelTimingContext extends TimingSink {}
@@ -1014,13 +1092,28 @@ export class MessageModel {
   }
 
   /**
-   * Raw workspace/user scope, WITHOUT the visitor exclusion. Backing store
-   * for {@link ownership} and the escape hatch for methods that resolve the
+   * Workspace/user scope plus the live parent-topic fence, WITHOUT the visitor
+   * exclusion. Topic-less rows remain valid. Backing store for
+   * {@link ownership} and the escape hatch for methods that resolve the
    * effective visitor gate per-call ({@link deleteMessage},
    * {@link deleteMessages}, {@link query} via `allowShareVisitor`, …).
    */
   private workspaceScope = () =>
-    buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, messages);
+    and(
+      buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, messages),
+      or(
+        isNull(messages.topicId),
+        inArray(
+          messages.topicId,
+          this.db
+            .select({ id: topics.id })
+            .from(topics)
+            .where(
+              buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, topics),
+            ),
+        ),
+      ),
+    );
 
   /**
    * Default visitor exclusion applied by {@link ownership} — see
@@ -1154,6 +1247,7 @@ export class MessageModel {
   query = async (
     {
       agentId,
+      before,
       current = 0,
       includeFileWorks,
       pageSize = 1000,
@@ -1254,6 +1348,7 @@ export class MessageModel {
       const threadScopeCondition = topicId ? this.matchTopic(topicId) : agentCondition;
       const messageItems = await this.queryWithWhere({
         allowShareVisitor: effectiveIncludeVisitor,
+        before,
         current,
         includeFileWorks,
         pageSize,
@@ -1283,6 +1378,7 @@ export class MessageModel {
 
       const messageItems = await this.queryWithWhere({
         allowShareVisitor: effectiveIncludeVisitor,
+        before,
         current,
         includeFileWorks,
         pageSize,
@@ -1316,6 +1412,7 @@ export class MessageModel {
 
     const messageItems = await this.queryWithWhere({
       allowShareVisitor: effectiveIncludeVisitor,
+      before,
       current,
       includeFileWorks,
       pageSize,
@@ -1419,6 +1516,9 @@ export class MessageModel {
     const [items, totalResult] = await Promise.all([
       this.db
         .select({
+          agentId: messages.agentId,
+          error: messages.error,
+          metadata: messages.metadata,
           content: messages.content,
           createdAt: messages.createdAt,
           id: messages.id,
@@ -1442,6 +1542,8 @@ export class MessageModel {
     return {
       items: items.map(({ tools, ...message }) => ({
         ...message,
+        error: message.error as ChatMessageError | null,
+        metadata: message.metadata as MessageMetadata | null,
         tools: Array.isArray(tools) ? (tools as ChatToolPayload[]) : null,
       })),
       total: totalResult[0]?.count ?? 0,
@@ -1494,6 +1596,7 @@ export class MessageModel {
   queryWithWhere = async (options: QueryMessagesOptions = {}): Promise<UIChatMessage[]> => {
     const {
       where,
+      before,
       current = 0,
       includeFileWorks,
       pageSize = 1000,
@@ -1503,6 +1606,7 @@ export class MessageModel {
       timing,
       allowShareVisitor,
       workAccessScope,
+      groupNodeWindow,
     } = options;
     const totalStartedAt = Date.now();
     const offset = current * pageSize;
@@ -1510,6 +1614,16 @@ export class MessageModel {
     // instance's `includeShareVisitor` so either widens the scope.
     const scope =
       allowShareVisitor || this.includeShareVisitor ? this.workspaceScope() : this.ownership();
+
+    // Round-cursor paging: only rows strictly older than the `(createdAt, id)`
+    // tuple. The id tie-break mirrors the sort order below, so rows sharing a
+    // createdAt with the cursor are neither skipped nor duplicated.
+    const beforeCondition = before
+      ? or(
+          lt(messages.createdAt, before.createdAt),
+          and(eq(messages.createdAt, before.createdAt), lt(messages.id, before.id)),
+        )
+      : undefined;
 
     // 1. get basic messages with joins, excluding messages that belong to MessageGroups
     const result = await runTimedStage(
@@ -1586,6 +1700,7 @@ export class MessageModel {
               // Filter out messages that belong to MessageGroups
               isNull(messages.messageGroupId),
               where,
+              beforeCondition,
             ),
           )
           .leftJoin(messagePlugins, eq(messagePlugins.id, messages.id))
@@ -1620,15 +1735,14 @@ export class MessageModel {
     // round with no user message in view is kept whole (the proper fix for those
     // is lazy step loading). Thread queries pass no `topicId` and are untouched.
     //
-    // Scope: this only serves the single "most recent page" load (`current === 0`),
-    // which is the only page the chat read path ever requests — `current`/`pageSize`
-    // offset paging is dead code here (the very premise of). The trim is
-    // deliberately NOT offset-exact: the rows it drops from page 0 also fall outside
-    // page 1's `offset = pageSize` window, so a hypothetical offset walk would skip
-    // them. That is acceptable because nothing offset-walks this path; loading older
-    // history is round-cursor based (see the follow-up), which supersedes offset
-    // paging entirely and closes that gap by construction.
-    if (topicId && current === 0 && result.length >= pageSize) {
+    // Scope: this serves the single "most recent page" load (`current === 0`)
+    // and the round-cursor `before` pages that walk older history — the only
+    // shapes the chat read path requests; `current`/`pageSize` offset paging is
+    // dead code here (the very premise of). The trim is deliberately NOT
+    // offset-exact: rows dropped from one page reappear at the TOP of the next
+    // `before` page (its cursor is the trimmed page's oldest kept row), so the
+    // round-cursor walk loses nothing by construction.
+    if (topicId && (current === 0 || before) && result.length >= pageSize) {
       const firstRoundStart = result.findIndex((message) => message.role === 'user');
       if (firstRoundStart > 0) result.splice(0, firstRoundStart);
     }
@@ -1638,10 +1752,12 @@ export class MessageModel {
     const messageGroupNodesPromise = this.queryMessageGroupNodesForPage({
       allowShareVisitor: allowShareVisitor || this.includeShareVisitor,
       current,
+      hasBeforeCursor: !!before,
       postProcessUrl,
       result,
       timing,
       topicId,
+      window: groupNodeWindow,
     });
 
     const taskMessageIds = result
@@ -1810,13 +1926,200 @@ export class MessageModel {
     return allItems;
   };
 
+  /**
+   * Cursor-paginated read of a topic's mainline conversation, aligned to round
+   * boundaries (a mainline `user` message starts a round). Built for callers that
+   * only DISPLAY history and never resend it to the model — server-runtime
+   * (gateway) and local hetero agents — where eagerly loading the whole transcript
+   * is wasteful on long topics. Legacy client mode keeps using `query` (full
+   * fetch) because it resends the entire session each turn.
+   *
+   * Initial load (`cursor` omitted) returns the newest `roundLimit` rounds, or
+   * fewer if `countBudget` is reached first, but the current round is always
+   * whole. Pass the returned `nextCursor` to load the previous rounds (scroll up).
+   * Unlike offset paging, cursors land on round boundaries, so consecutive pages
+   * are gap-free and never split a round.
+   */
+  queryTopicMessagesByCursor = async (
+    {
+      countBudget = DEFAULT_ROUND_COUNT_BUDGET,
+      cursor,
+      groupId,
+      includeFileWorks,
+      roundLimit = DEFAULT_ROUND_LIMIT,
+      skipWorks,
+      topicId,
+    }: QueryTopicByCursorParams,
+    options: {
+      postProcessUrl?: (
+        path: string | null,
+        file: { fileType: string; id?: string | null },
+      ) => Promise<string>;
+      timing?: ModelTimingContext;
+    } = {},
+  ): Promise<TopicMessagesByCursorResult> => {
+    // Same visitor gate as `query`: a creator's read of an agent-share visitor
+    // topic fails closed, and a verified creator topic skips the per-row check.
+    if ((await this.resolveTopicVisitorScope(topicId)) === 'visitor') {
+      return { hasMore: false, messages: [], nextCursor: null };
+    }
+
+    // Mainline = this topic (and its chat group, if any), not in a thread. Like
+    // the standard `query`, a concrete topic is the conversation boundary: it is
+    // NOT narrowed by agent/session, because a topic may legitimately hold rows
+    // from several agents (e.g. `callAgent` / delegated replies).
+    const mainlineWhere = and(
+      this.matchTopic(topicId),
+      this.matchGroup(groupId),
+      this.matchThread(undefined),
+    );
+
+    const { lowerBound, hasMore } = await this.resolveRoundWindow({
+      countBudget,
+      cursor,
+      mainlineWhere,
+      roundLimit,
+    });
+
+    // MessageGroup nodes (compression / comparison) are partitioned across pages
+    // by the same `[lowerBound, cursor)` window as mainline rows, so each group is
+    // emitted exactly once over a full backward walk. The oldest page (`!hasMore`)
+    // leaves the lower side open so groups dated before the first remaining
+    // mainline row — including a topic whose whole history was compressed — stay
+    // reachable instead of vanishing.
+    const groupNodeWindow: MessageGroupNodeWindow = {
+      before: cursor?.createdAt ?? null,
+      from: hasMore && lowerBound ? lowerBound.createdAt : null,
+    };
+
+    // No lower bound means no mainline rows remain — either the topic has none
+    // (e.g. compression moved every message into a group) or nothing older than
+    // the cursor is left. The page is then group-only: fetch no mainline rows (an
+    // unbounded `where` would wrongly reload the entire topic) but still assemble
+    // the remaining group nodes.
+    //
+    // Otherwise bound the window on BOTH sides: at/after the resolved round start,
+    // and — when paging older — strictly before the cursor. Without the upper
+    // bound the window would also re-include every newer round already loaded.
+    const where = lowerBound
+      ? and(
+          mainlineWhere,
+          this.messageAtOrAfter(lowerBound),
+          cursor ? this.messageStrictlyBefore(cursor) : undefined,
+        )
+      : sql`false`;
+
+    const messages = await this.queryWithWhere({
+      allowShareVisitor: true,
+      current: 0,
+      includeFileWorks,
+      pageSize: CURSOR_PAGE_CEILING,
+      postProcessUrl: options.postProcessUrl,
+      skipWorks,
+      timing: options.timing,
+      topicId,
+      where,
+      // Only assemble group nodes within this page's window (not the whole topic),
+      // so scroll-up pages don't repeat groups or eagerly load compressed history.
+      groupNodeWindow,
+    });
+
+    // `lowerBound.createdAt` is already the lossless microsecond cursor string.
+    return { hasMore, messages, nextCursor: hasMore && lowerBound ? lowerBound : null };
+  };
+
+  /**
+   * Resolve the round window for a cursor page: walk mainline rows newest-first
+   * and stop at the `roundLimit`-th round boundary (a `user` message) or the
+   * `countBudget` safety cap, whichever comes first. Returns the lower bound (the
+   * oldest included round's start) and whether older rounds remain.
+   */
+  private resolveRoundWindow = async ({
+    countBudget,
+    cursor,
+    mainlineWhere,
+    roundLimit,
+  }: {
+    countBudget: number;
+    cursor?: MessageRoundCursor | null;
+    mainlineWhere: SQL | undefined;
+    roundLimit: number;
+  }): Promise<{ hasMore: boolean; lowerBound: { createdAt: string; id: string } | null }> => {
+    const olderThanCursor = cursor ? this.messageStrictlyBefore(cursor) : undefined;
+
+    const rows = (await this.db
+      .select({
+        // Microsecond-precision UTC string. `createdAt` is a timestamptz whose
+        // now() default can carry microseconds, but a JS Date keeps only
+        // milliseconds — a Date-derived cursor would round sub-millisecond
+        // boundaries and let rows leak between adjacent pages. Carry the lossless
+        // value in the cursor and compare it back with a ::timestamptz cast.
+        createdAtIso: sql<string>`to_char(${messages.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+        id: messages.id,
+        role: messages.role,
+      })
+      .from(messages)
+      .where(and(this.ownership(), isNull(messages.messageGroupId), mainlineWhere, olderThanCursor))
+      .orderBy(desc(messages.createdAt), desc(messages.id))
+      .limit(countBudget + 1)) as { createdAtIso: string; id: string; role: string }[];
+
+    if (rows.length === 0) return { hasMore: false, lowerBound: null };
+
+    let rounds = 0;
+    let boundaryIndex = -1;
+    for (let i = 0; i < rows.length; i += 1) {
+      if (rows[i].role === 'user') {
+        rounds += 1;
+        boundaryIndex = i;
+        if (rounds >= roundLimit) break;
+      }
+      // Safety cap: once a full budget has been walked and at least one whole
+      // round is captured, stop at the last boundary instead of scanning further.
+      if (i + 1 >= countBudget && rounds >= 1) break;
+    }
+
+    // No `user` turn in the visible window — an oversized newest round, or a tail
+    // with no user turn. Fall back to the oldest fetched row; that slice is a
+    // partial round the renderer roots as an orphan chain. Lazy step loading is
+    // the proper fix (a later stage).
+    if (boundaryIndex === -1) boundaryIndex = rows.length - 1;
+
+    const boundaryRow = rows[boundaryIndex];
+    const hasMore = boundaryIndex < rows.length - 1 || rows.length > countBudget;
+
+    return { hasMore, lowerBound: { createdAt: boundaryRow.createdAtIso, id: boundaryRow.id } };
+  };
+
+  /**
+   * `(createdAt, id)` strictly before the cursor — the "older than" half-open
+   * bound. Compares against the cursor's lossless microsecond string cast to
+   * `timestamptz`, so sub-millisecond boundaries stay exact.
+   */
+  private messageStrictlyBefore = (cursor: MessageRoundCursor) =>
+    or(
+      sql`${messages.createdAt} < ${cursor.createdAt}::timestamptz`,
+      and(
+        sql`${messages.createdAt} = ${cursor.createdAt}::timestamptz`,
+        lt(messages.id, cursor.id),
+      ),
+    );
+
+  /** `(createdAt, id)` at or after the lower bound — the inclusive window start. */
+  private messageAtOrAfter = (bound: { createdAt: string; id: string }) =>
+    or(
+      sql`${messages.createdAt} > ${bound.createdAt}::timestamptz`,
+      and(sql`${messages.createdAt} = ${bound.createdAt}::timestamptz`, gte(messages.id, bound.id)),
+    );
+
   private queryMessageGroupNodesForPage = async ({
     allowShareVisitor,
     current,
+    hasBeforeCursor,
     postProcessUrl,
     result,
     timing,
     topicId,
+    window,
   }: {
     /**
      * Effective visitor gate resolved by the caller (per-call
@@ -1829,6 +2132,13 @@ export class MessageModel {
      */
     allowShareVisitor?: boolean;
     current: number;
+    /**
+     * The page was fetched with a round-cursor (`before`): scope group nodes to
+     * the page's time window instead of the whole topic — page 0 already
+     * returned every group node, so an unwindowed fetch here would only
+     * duplicate them.
+     */
+    hasBeforeCursor?: boolean;
     postProcessUrl?: (
       path: string | null,
       file: { fileType: string; id?: string | null },
@@ -1836,11 +2146,26 @@ export class MessageModel {
     result: { createdAt: Date }[];
     timing?: ModelTimingContext;
     topicId?: string;
+    /** Explicit group window (cursor pagination); overrides the row-derived one. */
+    window?: MessageGroupNodeWindow;
   }): Promise<UIChatMessage[]> => {
     if (!topicId) return [];
 
+    if (window) {
+      return runTimedStage(
+        timing,
+        'db.message.queryWithWhere.messageGroups',
+        () =>
+          this.queryMessageGroupNodes(topicId, undefined, postProcessUrl, timing, {
+            allowShareVisitor,
+            window,
+          }),
+        { current, hasMessages: result.length > 0, topicId },
+      );
+    }
+
     if (result.length === 0) {
-      if (current !== 0) return [];
+      if (current !== 0 || hasBeforeCursor) return [];
 
       return runTimedStage(
         timing,
@@ -1853,7 +2178,7 @@ export class MessageModel {
       );
     }
 
-    if (current === 0) {
+    if (current === 0 && !hasBeforeCursor) {
       return runTimedStage(
         timing,
         'db.message.queryWithWhere.messageGroups',
@@ -1966,7 +2291,7 @@ export class MessageModel {
         this.db
           .select(fileDocumentColumns)
           .from(documents)
-          .where(inArray(documents.fileId, fileIds))
+          .where(and(inArray(documents.fileId, fileIds), notFileBackedPlaceholder()))
           .orderBy(...fileDocumentsOrder),
       { fileCount: fileIds.length },
     );
@@ -2351,7 +2676,7 @@ export class MessageModel {
       const documentsList = await this.db
         .select(fileDocumentColumns)
         .from(documents)
-        .where(inArray(documents.fileId, fileIds))
+        .where(and(inArray(documents.fileId, fileIds), notFileBackedPlaceholder()))
         .orderBy(...fileDocumentsOrder);
 
       documentsMap = toFileDocumentsMap(documentsList);
@@ -2488,7 +2813,7 @@ export class MessageModel {
       file: { fileType: string; id?: string | null },
     ) => Promise<string>,
     timing?: ModelTimingContext,
-    options: { allowShareVisitor?: boolean } = {},
+    options: { allowShareVisitor?: boolean; window?: MessageGroupNodeWindow } = {},
   ): Promise<UIChatMessage[]> => {
     // Effective visitor gate — see `queryMessageGroupNodesForPage`. Absent
     // this predicate, a creator's default `query({ topicId })` on a visitor
@@ -2510,6 +2835,15 @@ export class MessageModel {
         gte(messageGroups.createdAt, timeRange.startTime),
         lte(messageGroups.createdAt, timeRange.endTime),
       );
+    }
+
+    // Explicit half-open `[from, before)` window from cursor pagination, compared
+    // against lossless microsecond strings so page boundaries stay exact.
+    if (options.window?.from) {
+      whereConditions.push(sql`${messageGroups.createdAt} >= ${options.window.from}::timestamptz`);
+    }
+    if (options.window?.before) {
+      whereConditions.push(sql`${messageGroups.createdAt} < ${options.window.before}::timestamptz`);
     }
 
     const groups = await runTimedStage(
@@ -2751,7 +3085,18 @@ export class MessageModel {
       where: and(
         this.ownership(),
         eq(messages.agentId, agentId),
-        eq(messages.topicId, topicId),
+        inArray(
+          messages.topicId,
+          this.db
+            .select({ id: topics.id })
+            .from(topics)
+            .where(
+              and(
+                eq(topics.id, topicId),
+                buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, topics),
+              ),
+            ),
+        ),
         eq(messages.threadId, threadId),
         eq(messages.role, 'assistant'),
       ),
@@ -2765,7 +3110,7 @@ export class MessageModel {
   findVerifyMessageByOperationId = async (operationId: string) => {
     return this.db.query.messages.findFirst({
       where: and(
-        eq(messages.userId, this.userId),
+        this.ownership(),
         eq(messages.role, 'verify'),
         sql`${messages.metadata}->>'verifyOperationId' = ${operationId}`,
       ),
@@ -2792,8 +3137,19 @@ export class MessageModel {
   }) => {
     return this.db.query.messages.findFirst({
       where: and(
-        eq(messages.userId, this.userId),
-        eq(messages.topicId, topicId),
+        this.ownership(),
+        inArray(
+          messages.topicId,
+          this.db
+            .select({ id: topics.id })
+            .from(topics)
+            .where(
+              and(
+                eq(topics.id, topicId),
+                buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, topics),
+              ),
+            ),
+        ),
         eq(messages.role, 'assistant'),
         sql`${messages.metadata}->>'operationId' = ${operationId}`,
       ),

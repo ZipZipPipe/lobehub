@@ -25,6 +25,8 @@ export interface StartOperationDeps {
 }
 
 export interface StartOperationInput {
+  /** See {@link InternalExecAgentParams.acceptsMemberRuntimeEnd}. */
+  acceptsMemberRuntimeEnd?: boolean;
   approvalClaim: ApprovalClaimState;
   approvalSourceOperationId?: string;
   approvalSourceToolMessageIds: string[];
@@ -45,6 +47,7 @@ export interface StartOperationInput {
   initialContext: OperationPrepResult['initialContext'];
   initialStepCount?: number;
   maxSteps?: number;
+  onOperationCreated?: InternalExecAgentParams['onOperationCreated'];
   operationId: string;
   operationTaskId?: string;
   parentOperationId?: string;
@@ -92,6 +95,7 @@ export const startOperation = async (
     userMessageId,
   } = ctx;
   const {
+    acceptsMemberRuntimeEnd,
     approvalClaim,
     approvalSourceOperationId,
     approvalSourceToolMessageIds,
@@ -144,7 +148,17 @@ export const startOperation = async (
   // Wrap in try-catch to handle operation startup failures (e.g., QStash unavailable)
   // If createOperation fails, we still have valid messages that need error info
   try {
+    // A server-internal approval continuation (no client of its own declared
+    // anything — client-facing routes always pass a boolean) streams to the
+    // parked operation's client: carry its `member_runtime_end` declaration over
+    // (read here, before the parked operation is retired below).
+    const memberRuntimeEndAccepted =
+      acceptsMemberRuntimeEnd ??
+      (approvalSourceOperationId
+        ? await deps.agentRuntimeService.acceptsMemberRuntimeEnd(approvalSourceOperationId)
+        : undefined);
     const result = await deps.agentRuntimeService.createOperation({
+      acceptsMemberRuntimeEnd: memberRuntimeEndAccepted,
       includeFinalState: input.includeFinalState,
       activeDeviceId: discovery.activeDeviceId,
       activeDeviceScope: discovery.activeDeviceScope,
@@ -247,6 +261,7 @@ export const startOperation = async (
         trigger,
       },
       autoStart,
+      onOperationCreated: input.onOperationCreated,
       botContext,
       botPlatformContext,
       deviceAccessPolicy: { canUseDevice, reason: deviceAccessReason },

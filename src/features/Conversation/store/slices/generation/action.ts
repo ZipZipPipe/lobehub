@@ -693,12 +693,6 @@ export interface GenerationAction {
   regenerateUserMessage: (messageId: string) => Promise<void>;
 
   /**
-   * Re-invoke a tool message
-   * @deprecated Temporary bridge to ChatStore
-   */
-  reInvokeToolMessage: (messageId: string) => Promise<void>;
-
-  /**
    * Resend a thread message
    */
   resendThreadMessage: (messageId: string) => Promise<void>;
@@ -1203,11 +1197,6 @@ export const generationSlice: StateCreator<
   openThreadCreator: (messageId: string) => {
     const chatStore = useChatStore.getState();
     chatStore.openThreadCreator(messageId);
-  },
-
-  reInvokeToolMessage: async (messageId: string) => {
-    const chatStore = useChatStore.getState();
-    await chatStore.reInvokeToolMessage(messageId);
   },
 
   internal_beginHeteroOverloadWait: (scopeId: string) => {

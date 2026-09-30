@@ -43,6 +43,7 @@
   ],
   "scripts": {
     "alint": "alint",
+    "alint:audit": "alint --config alint.audit.toml --format json --rule-concurrency 48 src packages",
     "alint:setup": "bun packages/alint/setup.ts",
     "build": "bun run build:spa && bun run build:spa:auth && bun run build:spa:workbench && bun run build:spa:share && bun run build:spa:copy && bun run build:next",
     "build:analyze": "cross-env NODE_OPTIONS=--max-old-space-size=81920 next experimental-analyze",
@@ -293,6 +294,7 @@
     "@lobechat/editor-runtime": "workspace:*",
     "@lobechat/electron-client-ipc": "workspace:*",
     "@lobechat/electron-server-ipc": "workspace:*",
+    "@lobechat/env": "workspace:*",
     "@lobechat/eval-dataset-parser": "workspace:*",
     "@lobechat/eval-rubric": "workspace:*",
     "@lobechat/fetch-sse": "workspace:*",
@@ -378,6 +380,7 @@
     "docx-preview": "^0.4.0",
     "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.8.3",
+    "entities": "^8.1.0",
     "epub2": "^3.0.2",
     "es-toolkit": "^1.50.0",
     "exceljs": "^4.4.0",
