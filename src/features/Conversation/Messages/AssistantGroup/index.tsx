@@ -114,7 +114,7 @@ const GroupMessage = memo<GroupMessageProps>(
       agentId,
       usage,
       createdAt,
-      children,
+      children: groupChildren,
       performance,
       model,
       provider,
@@ -124,6 +124,11 @@ const GroupMessage = memo<GroupMessageProps>(
       signalCallbacks,
       taskCompletions,
     } = item;
+    const children = useMemo(
+      () =>
+        item.role === 'assistant' ? [item as unknown as AssistantContentBlock] : groupChildren,
+      [groupChildren, item],
+    );
     const avatar = useAgentMeta(agentId);
     const continuationMessages = useConversationStore(
       (s) => continuations.map((c) => dataSelectors.getDisplayMessageById(c.groupId)(s)),

@@ -65,6 +65,7 @@ import { getPendingTopicRepos } from '@/store/chat/pendingTopicRepos';
 import {
   dbMessageSelectors,
   displayMessageSelectors,
+  operationSelectors,
   topicSelectors,
 } from '@/store/chat/selectors';
 import { selectRuntimeType } from '@/store/chat/slices/agentRun/actions/dispatch/agentDispatcher';
@@ -139,7 +140,8 @@ export interface SendMessageWithContextParams extends SendMessageParams {
   /**
    * Editor owned by the calling ConversationProvider. Embedded conversations
    * must not fall back to ChatStore's global editor, which may belong to a
-   * sibling panel.
+   * sibling panel. Pass `null` when the send is not backed by a composer editor
+   * at all, so a failed send is not written into the global one.
    */
   inputEditor?: ChatInputEditor | null;
   /** Restore composer-owned context when sending fails before a message owns it. */
@@ -386,7 +388,12 @@ export class ConversationLifecycleActionImpl {
 
     let editorData = inputEditorData;
     const { executeClientAgent, mainInputEditor } = this.#get();
-    const targetInputEditor = inputEditor ?? mainInputEditor;
+    // `inputEditor` names the editor that owns this send. An explicit `null`
+    // means "this send has no composer editor": an embedded reply (a task run's
+    // inline follow-up) must not fall back to ChatStore's global editor, which
+    // belongs to a sibling surface and would be refilled with this send's text
+    // when it fails. Only an omitted editor falls back to the global one.
+    const targetInputEditor = inputEditor === undefined ? mainInputEditor : inputEditor;
     const ownerAgentId = context.agentId;
     const selectedSkills = parseSelectedSkillsFromEditorData(editorData);
     const selectedTools = parseSelectedToolsFromEditorData(editorData);
@@ -737,7 +744,11 @@ export class ConversationLifecycleActionImpl {
         break;
       }
     }
-    if (runningQueueBlockingOp) {
+    const queueDrainPending =
+      !runningQueueBlockingOp &&
+      !onlyAddUserMessage &&
+      operationSelectors.isQueueDrainPending(operationContext)(this.#get());
+    if (runningQueueBlockingOp || queueDrainPending) {
       // Snapshot file previews so the tray can render thumbnails AND the
       // resumed sendMessage can rebuild audioList/imageList/videoList — by the time
       // we drain, chatUploadFileList has long been cleared.
@@ -762,7 +773,7 @@ export class ConversationLifecycleActionImpl {
           metadata: userMessageMetadata,
           createdAt: Date.now(),
         },
-        runningQueueBlockingOp.id,
+        runningQueueBlockingOp?.id,
       );
       notifyMessageAccepted();
       return;
@@ -896,6 +907,9 @@ export class ConversationLifecycleActionImpl {
     // whole send.
     const tempId = optimisticUserMessageId ?? generateEntityId('messages');
     const tempAssistantId = generateEntityId('messages');
+    const steeredTurnStartTime = (metadata as Pick<MessageMetadata, 'steer'> | undefined)?.steer
+      ? operationSelectors.getLatestAgentRuntimeTurnStartTime(operationContext)(this.#get())
+      : undefined;
     const { operationId, abortController } = this.#get().startOperation({
       type: 'sendMessage',
       context: { ...operationContext, messageId: tempId },
@@ -903,6 +917,7 @@ export class ConversationLifecycleActionImpl {
       metadata: {
         // Mark this as thread operation if threadId exists
         inThread: !!operationContext.threadId,
+        ...(steeredTurnStartTime === undefined ? {} : { turnStartTime: steeredTurnStartTime }),
       },
     });
     sendOperationId = operationId;

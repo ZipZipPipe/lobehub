@@ -3,6 +3,7 @@ import { AcceptanceEvidenceIdentifier } from '@lobechat/builtin-tool-acceptance-
 import { BriefIdentifier } from '@lobechat/builtin-tool-brief';
 import { INBOX_SESSION_ID } from '@lobechat/const';
 import type { ExecAgentResult, TaskItem, TaskRunTrigger } from '@lobechat/types';
+import { readTaskExecutionConfig } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import debug from 'debug';
 
@@ -11,12 +12,18 @@ import { AgentModel } from '@/database/models/agent';
 import { BriefModel } from '@/database/models/brief';
 import { TaskModel } from '@/database/models/task';
 import { TaskTopicModel } from '@/database/models/taskTopic';
+import { TopicModel } from '@/database/models/topic';
 import type { LobeChatDatabase } from '@/database/type';
 import { AiAgentService } from '@/server/services/aiAgent';
 import { resolveFailedRunStatus } from '@/server/services/goal/recoveryPolicy';
 import { TaskLifecycleService } from '@/server/services/taskLifecycle';
 
 import { buildTaskPrompt } from './buildTaskPrompt';
+import {
+  resolveRunDeviceId,
+  resolveTaskRunExecution,
+  resolveTopicExecutionPatch,
+} from './resolveRunExecution';
 
 const log = debug('task-runner');
 
@@ -56,6 +63,7 @@ export class TaskRunnerService {
   private taskLifecycle: TaskLifecycleService;
   private taskModel: TaskModel;
   private taskTopicModel: TaskTopicModel;
+  private topicModel: TopicModel;
   private userId: string;
 
   private workspaceId?: string;
@@ -67,8 +75,31 @@ export class TaskRunnerService {
     this.agentModel = new AgentModel(db, userId, workspaceId);
     this.taskModel = new TaskModel(db, userId, workspaceId);
     this.taskTopicModel = new TaskTopicModel(db, userId, workspaceId);
+    this.topicModel = new TopicModel(db, userId, workspaceId);
     this.briefModel = new BriefModel(db, userId, workspaceId);
     this.taskLifecycle = new TaskLifecycleService(db, userId, workspaceId);
+  }
+
+  /**
+   * Mirror a task's execution selection onto a topic one of its runs continues.
+   *
+   * Deliberately NOT swallowed: the topic's stored directory outranks the
+   * selection this run brings, so an unsynced topic means the run may start in
+   * the previous machine's directory — failing the kickoff (and letting the
+   * caller's error path restore the task's resting state) is better than
+   * running somewhere the user did not pin.
+   */
+  private async syncTopicExecution(
+    topicId: string,
+    taskConfig: Record<string, unknown>,
+    runDeviceId: string | undefined,
+  ): Promise<void> {
+    const topic = await this.topicModel.findById(topicId);
+    const patch = resolveTopicExecutionPatch(topic?.metadata, taskConfig, runDeviceId);
+    if (!patch) return;
+
+    await this.topicModel.updateMetadata(topicId, patch);
+    log('runTask: synced topic %s execution metadata', topicId);
   }
 
   async runTask(params: RunTaskParams): Promise<RunTaskResult> {
@@ -228,6 +259,31 @@ export class TaskRunnerService {
         }
       }
 
+      // The execution selection the task itself carries — a pinned device and/or
+      // a working directory. Undefined when the task pins nothing, in which case
+      // the run keeps inheriting the assignee agent's target and cwd.
+      const taskExecution = readTaskExecutionConfig(taskConfig);
+      // The device the run will actually use. It differs from the task's pin
+      // when the author FIXED the agent's target, and that difference decides
+      // whether the directory may travel: see `resolveTaskRunExecution`.
+      const runDeviceId = taskExecution
+        ? resolveRunDeviceId(
+            taskExecution,
+            await this.agentModel.getAgentAgencyConfig(agentRef),
+            this.workspaceId,
+          )
+        : undefined;
+      const runExecution = resolveTaskRunExecution(taskExecution, runDeviceId);
+
+      // A continued topic keeps its own metadata (`turnSetup` stamps
+      // `initialTopicMetadata` only for a topic it creates) and those stored
+      // values outrank what this run brings — the directory this task pins would
+      // be ignored, and the previous machine's kept. Stamp the task's selection
+      // onto the topic first; see `resolveTopicExecutionPatch`.
+      if (continueTopicId) {
+        await this.syncTopicExecution(continueTopicId, taskConfig, runDeviceId);
+      }
+
       log('runTask: %s (continue=%s)', taskIdentifier, continueTopicId);
 
       const result = await aiAgentService.execAgent({
@@ -270,7 +326,25 @@ export class TaskRunnerService {
         title: extraPrompt ? extraPrompt.slice(0, 100) : task.name || task.identifier,
         trigger: TopicTrigger.RunTask,
         userInterventionConfig: { approvalMode: 'headless' },
-        ...(continueTopicId && { appContext: { topicId: continueTopicId } }),
+        // The task's own pin, when it has one. `deviceId` forces device routing
+        // unless the agent's selection policy is `fixed` (author-controlled
+        // targets stay authoritative — same rule the chat picker follows), and
+        // the directory rides into the topic this run creates.
+        ...(runExecution?.deviceId ? { deviceId: runExecution.deviceId } : {}),
+        ...(continueTopicId || runExecution?.initialTopicMetadata
+          ? {
+              appContext: {
+                ...(continueTopicId && { topicId: continueTopicId }),
+                // A continued topic keeps its own metadata (the server ignores
+                // this for an existing topic), so it is only meaningful on a
+                // fresh run — sent anyway so the task's intent is not lost if
+                // that ever changes.
+                ...(runExecution?.initialTopicMetadata && {
+                  initialTopicMetadata: runExecution.initialTopicMetadata,
+                }),
+              },
+            }
+          : {}),
       });
 
       if (!result.success) {
@@ -303,12 +377,17 @@ export class TaskRunnerService {
       if (result.topicId) {
         const topicId = result.topicId;
         // Record the run under the task's row lock (see TaskService.deleteTask).
-        // If the task was deleted while this run was being dispatched, nobody
-        // is left to stop it — stop it here instead of orphaning it.
+        // If the task was deleted — or canceled, e.g. by a Goal retiring its
+        // node — while this run was being dispatched, whoever did it found no
+        // topic to stop yet. Nobody else will stop it, so stop it here instead
+        // of recording an operation that keeps running behind the cancellation.
         const recorded = await this.db.transaction(async (tx) => {
           const taskModel = new TaskModel(tx, this.userId, this.workspaceId);
           const taskTopicModel = new TaskTopicModel(tx, this.userId, this.workspaceId);
-          if (!(await taskModel.lockForUpdate(task.id))) return false;
+          if (!(await taskModel.lockForUpdate(task.id))) return 'deleted' as const;
+          if ((await taskModel.findById(task.id))?.status === 'canceled') {
+            return 'canceled' as const;
+          }
           if (continueTopicId) {
             await taskTopicModel.updateStatus(task.id, continueTopicId, 'running');
             await taskTopicModel.updateOperationId(task.id, continueTopicId, result.operationId);
@@ -322,9 +401,9 @@ export class TaskRunnerService {
               trigger,
             });
           }
-          return true;
+          return 'recorded' as const;
         });
-        if (!recorded) {
+        if (recorded !== 'recorded') {
           const stop = await aiAgentService
             .interruptTask({ operationId: result.operationId })
             .catch((error) => {
@@ -334,10 +413,14 @@ export class TaskRunnerService {
           // Same confirmation gate as TaskService.interruptTaskOperation.
           const stopped = !!stop?.success && stop.deviceCancellationConfirmed !== false;
           throw new TRPCError({
-            code: stopped ? 'NOT_FOUND' : 'INTERNAL_SERVER_ERROR',
+            code: stopped
+              ? recorded === 'deleted'
+                ? 'NOT_FOUND'
+                : 'CONFLICT'
+              : 'INTERNAL_SERVER_ERROR',
             message: stopped
-              ? 'The task was deleted while its run was starting; the run was stopped.'
-              : `The task was deleted while its run was starting, and stopping that run (operation ${result.operationId}) could not be confirmed.`,
+              ? `The task was ${recorded} while its run was starting; the run was stopped.`
+              : `The task was ${recorded} while its run was starting, and stopping that run (operation ${result.operationId}) could not be confirmed.`,
           });
         }
       }

@@ -14,7 +14,20 @@ import type {
   GoalStatus,
 } from '@lobechat/types';
 import { experimentMembers, experimentOwner, experimentStatus } from '@lobechat/utils/goalGraph';
-import { and, asc, count, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 
 import { goals } from '../schemas/goal';
 import {
@@ -324,6 +337,32 @@ export class GoalGraphModel {
     });
 
   /**
+   * Work ids this goal already declares as produced, on any node.
+   *
+   * The claim predicate for deliverables: one Work is one deliverable, and it
+   * belongs to the node that first delivered it. A later round that merely
+   * revises the same resource (a shared document every task appends to is the
+   * common case) must not re-declare it on its own node, or the goal history
+   * repeats one deliverable under every task and its Works list counts one
+   * artifact several times.
+   *
+   * Read from the database rather than from a graph snapshot because the
+   * harvest of one settle has to see the links an earlier settle — possibly in
+   * the same tick — already wrote. Ticks of one goal are serialized by the
+   * dispatch advisory lock, so this read-then-write needs no extra guard.
+   */
+  listProducedWorkIds = async (goalId: string): Promise<Set<string>> => {
+    const rows = await this.db
+      .select({ workId: workVersions.workId })
+      .from(goalNodeWorkVersions)
+      .innerJoin(goalNodes, eq(goalNodeWorkVersions.nodeId, goalNodes.id))
+      .innerJoin(workVersions, eq(goalNodeWorkVersions.workVersionId, workVersions.id))
+      .where(and(eq(goalNodes.goalId, goalId), eq(goalNodeWorkVersions.relation, 'produced')));
+
+    return new Set(rows.map((row) => row.workId));
+  };
+
+  /**
    * How many of a goal's tasks are occupying a concurrency slot.
    *
    * Counted in the database rather than from a graph snapshot so it can be read
@@ -496,6 +535,10 @@ export class GoalGraphModel {
             eq(goalNodes.goalId, goalId),
             eq(goalNodes.id, nodeId),
             eq(goalNodes.kind, 'task'),
+            // A node retired (or otherwise settled) while its Task was being
+            // created must not be flipped back to `active` by the bind — that
+            // is the fence `GoalService.retireNodes` relies on.
+            notInArray(goalNodes.status, ['resolved', 'rejected', 'retired']),
             isNull(goalNodes.taskId),
           ),
         )
@@ -568,6 +611,17 @@ export class GoalGraphModel {
       return node;
     });
 
+  /** Current status of one node, read fresh — for writers holding an older snapshot. */
+  getNodeStatus = async (goalId: string, nodeId: string): Promise<GoalNodeStatus | undefined> => {
+    const [row] = await this.db
+      .select({ status: goalNodes.status })
+      .from(goalNodes)
+      .innerJoin(goals, eq(goals.id, goalNodes.goalId))
+      .where(and(eq(goalNodes.goalId, goalId), eq(goalNodes.id, nodeId), this.ownership()))
+      .limit(1);
+    return row?.status as GoalNodeStatus | undefined;
+  };
+
   updateNodeStatus = async (
     goalId: string,
     nodeId: string,
@@ -583,7 +637,17 @@ export class GoalGraphModel {
           status,
           updatedAt: new Date(),
         })
-        .where(and(eq(goalNodes.goalId, goalId), eq(goalNodes.id, nodeId)))
+        .where(
+          and(
+            eq(goalNodes.goalId, goalId),
+            eq(goalNodes.id, nodeId),
+            // Retirement is a person's final word on a node. A coordinator tick
+            // that loaded the node before it was retired must not write it back
+            // to `resolved` / `active` afterwards; the goal row lock taken above
+            // serializes this check with the retirement itself.
+            status === 'retired' ? undefined : ne(goalNodes.status, 'retired'),
+          ),
+        )
         .returning();
       if (!node) return undefined;
       const eventType: GoalEventType =

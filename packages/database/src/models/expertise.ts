@@ -40,6 +40,19 @@ export type ExpertiseTier = 'core' | 'niche' | 'unused';
 export type ExpertiseCarrier =
   { id: string; type: 'agent' } | { id: string; type: 'project' } | { type: 'user' };
 
+/** Whose a listed group is: the reviewer's own rules, or one agent's self-learning. */
+export type ExpertiseGroupOwner =
+  | { kind: 'mine' }
+  | {
+      agent: {
+        avatar: string | null;
+        backgroundColor: string | null;
+        id: string;
+        title: string | null;
+      };
+      kind: 'agent';
+    };
+
 /**
  * The single carrier column a binding sets. `user` resolves to the workspace when one is in
  * scope, so a workspace member's always-on standards reach their teammates rather than only
@@ -189,18 +202,24 @@ export class ExpertiseModel {
   };
 
   /**
-   * The reviewer's rules — every always-on domain as a group, with the rules filed in it and
-   * where the group takes effect.
+   * Everything the self-evolving page lists — the reviewer's rules first, then what each agent
+   * learned on its own — as groups with the lessons filed in them and where each takes effect.
    *
    * Reads the same binding arm the distillation writes through, so what this returns is exactly
    * what an acceptance without a project would add to. Rules come back in the reviewer's own
    * order (`sortOrder`, then creation) because they told us the order matters; the page does not
    * re-rank them by hit count.
+   *
+   * Each group carries an `owner`: `mine` when the reviewer, their workspace or a project holds
+   * it (it reaches every run in that scope), otherwise the one agent it was learned by. A group
+   * mounted on both is the reviewer's — that is the wider of the two reaches.
    */
   listRules = async () => {
-    // The reviewer's own groups plus the ones distilled from a project's acceptances, which are
-    // bound to that project only. Agent-bound domains are self-learning, not rules, and stay out.
-    const bound = await this.listDomainsBoundTo(isNotNull(expertiseBindings.projectId));
+    // The reviewer's own groups, the ones distilled from a project's acceptances, and every
+    // agent's self-learning domains — the same set the run context injects from.
+    const bound = await this.listDomainsBoundTo(
+      or(isNotNull(expertiseBindings.projectId), isNotNull(expertiseBindings.agentId)),
+    );
     const domainIds = bound.map(({ domain }) => domain.id);
     if (domainIds.length === 0) return [];
 
@@ -250,8 +269,12 @@ export class ExpertiseModel {
         ),
       this.db
         .select({
+          agentAvatar: agents.avatar,
+          agentBackgroundColor: agents.backgroundColor,
           agentId: expertiseBindings.agentId,
           agentTitle: agents.title,
+          // Null when the agent exists but the viewer may not see it.
+          visibleAgentId: agents.id,
           boundUserId: expertiseBindings.boundUserId,
           boundWorkspaceId: expertiseBindings.boundWorkspaceId,
           domainId: expertiseBindings.domainId,
@@ -279,35 +302,83 @@ export class ExpertiseModel {
         .orderBy(asc(expertiseBindings.sortOrder)),
     ]);
 
-    return bound.map(({ domain }) => ({
+    const bySource = await this.countHitsBySource(lessons.map((lesson) => lesson.id));
+
+    // Bucket once by domain: the page now spans every agent's domains, so filtering the full
+    // lesson and binding lists per group would grow with groups × rows.
+    const byDomain = <T extends { domainId: string }>(rows: T[]) => {
+      const map = new Map<string, T[]>();
+      for (const row of rows) {
+        const bucket = map.get(row.domainId);
+        if (bucket) bucket.push(row);
+        else map.set(row.domainId, [row]);
+      }
+      return map;
+    };
+    const lessonsByDomain = byDomain(lessons);
+    const bindingsByDomain = byDomain(bindings);
+
+    const ownerOf = (domainId: string): ExpertiseGroupOwner | null => {
+      const mounts = bindingsByDomain.get(domainId) ?? [];
+      if (mounts.some((binding) => !binding.agentId)) return { kind: 'mine' };
+      const agent = mounts.find((binding) => binding.visibleAgentId);
+      // Only mounted on agents the viewer cannot see: nothing of it belongs on their page.
+      if (!agent?.agentId) return null;
+      return {
+        agent: {
+          avatar: agent.agentAvatar,
+          backgroundColor: agent.agentBackgroundColor,
+          id: agent.agentId,
+          title: agent.agentTitle,
+        },
+        kind: 'agent',
+      };
+    };
+
+    const owned = bound.flatMap(({ domain }) => {
+      const owner = ownerOf(domain.id);
+      return owner ? [{ domain, owner }] : [];
+    });
+    // The reviewer's groups lead in their own order; each agent's follow together, agents in the
+    // order their first group was mounted.
+    const agentOrder = [
+      ...new Set(owned.flatMap(({ owner }) => (owner.kind === 'agent' ? [owner.agent.id] : []))),
+    ];
+    const rank = ({ owner }: (typeof owned)[number]) =>
+      owner.kind === 'mine' ? -1 : agentOrder.indexOf(owner.agent.id);
+    const ordered = owned
+      .map((entry, index) => ({ entry, index }))
+      .sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index)
+      .map(({ entry }) => entry);
+
+    return ordered.map(({ domain, owner }) => ({
+      owner,
       domain: {
         domainFilter: domain.domainFilter,
         id: domain.id,
         outOfScope: domain.outOfScope,
         title: domain.title,
       },
-      rules: lessons
-        .filter((lesson) => lesson.domainId === domain.id)
+      rules: (lessonsByDomain.get(domain.id) ?? [])
         // Written by the reviewer rather than distilled from a run. Hit counts grow as a rule is
         // applied, so provenance is read from where the row came from — same test the lesson
         // reader uses for `taughtByUser`.
         .map(({ originRunId, ...lesson }) => ({
           ...lesson,
+          ...(bySource.get(lesson.id) ?? { conversationHitCount: 0, rejectionHitCount: 0 }),
           authored: lesson.createdByUserId != null && originRunId == null,
         })),
-      scopes: bindings
-        .filter((binding) => binding.domainId === domain.id)
-        .map((binding) => {
-          if (binding.projectId) {
-            return { id: binding.projectId, kind: 'project' as const, title: binding.projectName };
-          }
-          if (binding.agentId) {
-            return { id: binding.agentId, kind: 'agent' as const, title: binding.agentTitle };
-          }
-          return binding.boundWorkspaceId
-            ? { id: binding.boundWorkspaceId, kind: 'workspace' as const, title: null }
-            : { id: binding.boundUserId!, kind: 'user' as const, title: null };
-        }),
+      scopes: (bindingsByDomain.get(domain.id) ?? []).map((binding) => {
+        if (binding.projectId) {
+          return { id: binding.projectId, kind: 'project' as const, title: binding.projectName };
+        }
+        if (binding.agentId) {
+          return { id: binding.agentId, kind: 'agent' as const, title: binding.agentTitle };
+        }
+        return binding.boundWorkspaceId
+          ? { id: binding.boundWorkspaceId, kind: 'workspace' as const, title: null }
+          : { id: binding.boundUserId!, kind: 'user' as const, title: null };
+      }),
     }));
   };
 
@@ -327,42 +398,63 @@ export class ExpertiseModel {
   listLessonSources = async (lessonId: string, limit = 20) => {
     const lineage = await this.resolveLineage(lessonId);
     if (lineage.length === 0) return [];
-    return this.db
-      .select({
-        acceptanceId: verifyRuns.acceptanceId,
-        checkTitle: verifyCheckResults.checkItemTitle,
-        createdAt: expertiseHits.createdAt,
-        example: expertiseHits.example,
-        id: expertiseHits.id,
-        reviewerComment: sql<string | null>`${verifyCheckResults.userDecisionDetail} ->> 'comment'`,
-        roundIndex: verifyRuns.roundIndex,
-        severity: expertiseHits.severity,
-        userDecision: expertiseHits.userDecision,
-        where: expertiseHits.where,
-      })
-      .from(expertiseHits)
-      .innerJoin(expertiseDomains, eq(expertiseDomains.id, expertiseHits.domainId))
-      .innerJoin(expertiseRuns, eq(expertiseRuns.id, expertiseHits.runId))
-      .leftJoin(verifyCheckResults, eq(verifyCheckResults.id, expertiseHits.sourceCheckResultId))
-      .leftJoin(verifyRuns, eq(verifyRuns.id, verifyCheckResults.verifyRunId))
-      .where(
-        and(
-          inArray(expertiseHits.lessonId, lineage),
-          this.scopeWhere(),
-          // Access to a shared group is not access to the rounds behind it: a hit distilled from
-          // a teammate's private round would otherwise show that round's check, the reviewer's
-          // words and a link to it. Same predicate the consolidation reader applies.
-          or(
-            eq(verifyCheckResults.userId, this.userId),
-            eq(verifyRuns.visibility, 'public'),
-            // No linked round (never mapped, or the round was deleted): nothing says the viewer
-            // may see where it came from, so only their own runs' evidence is shown.
-            and(isNull(verifyCheckResults.id), eq(expertiseRuns.userId, this.userId)),
+    return (
+      this.db
+        .select({
+          acceptanceId: verifyRuns.acceptanceId,
+          checkTitle: verifyCheckResults.checkItemTitle,
+          createdAt: expertiseHits.createdAt,
+          example: expertiseHits.example,
+          // Read from the run, not from the check-result join: a deleted acceptance leaves that
+          // join empty, and the hit was still a rejection.
+          fromAcceptance: sql<boolean>`coalesce(${expertiseRuns.reflectionKey}, '') like 'acceptance:%'`,
+          id: expertiseHits.id,
+          // Where a conversation source can be reopened: the topic, the agent it lives under, and
+          // the message the observation was read from when ingestion could find it.
+          messageId: expertiseHits.sourceMessageId,
+          reviewerComment: sql<
+            string | null
+          >`${verifyCheckResults.userDecisionDetail} ->> 'comment'`,
+          roundIndex: verifyRuns.roundIndex,
+          severity: expertiseHits.severity,
+          topicAgentId: topics.agentId,
+          topicId: topics.id,
+          userDecision: expertiseHits.userDecision,
+          where: expertiseHits.where,
+        })
+        .from(expertiseHits)
+        .innerJoin(expertiseDomains, eq(expertiseDomains.id, expertiseHits.domainId))
+        .innerJoin(expertiseRuns, eq(expertiseRuns.id, expertiseHits.runId))
+        // Only a topic the viewer can open: a shared group does not grant a teammate's topic.
+        .leftJoin(
+          topics,
+          and(
+            eq(expertiseRuns.subjectType, 'topic'),
+            eq(topics.id, expertiseRuns.subjectId),
+            buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, topics),
           ),
-        ),
-      )
-      .orderBy(desc(expertiseHits.createdAt))
-      .limit(limit);
+        )
+        .leftJoin(verifyCheckResults, eq(verifyCheckResults.id, expertiseHits.sourceCheckResultId))
+        .leftJoin(verifyRuns, eq(verifyRuns.id, verifyCheckResults.verifyRunId))
+        .where(
+          and(
+            inArray(expertiseHits.lessonId, lineage),
+            this.scopeWhere(),
+            // Access to a shared group is not access to the rounds behind it: a hit distilled from
+            // a teammate's private round would otherwise show that round's check, the reviewer's
+            // words and a link to it. Same predicate the consolidation reader applies.
+            or(
+              eq(verifyCheckResults.userId, this.userId),
+              eq(verifyRuns.visibility, 'public'),
+              // No linked round (never mapped, or the round was deleted): nothing says the viewer
+              // may see where it came from, so only their own runs' evidence is shown.
+              and(isNull(verifyCheckResults.id), eq(expertiseRuns.userId, this.userId)),
+            ),
+          ),
+        )
+        .orderBy(desc(expertiseHits.createdAt))
+        .limit(limit)
+    );
   };
 
   /**
@@ -371,33 +463,90 @@ export class ExpertiseModel {
    * many generations as there are. One level is not enough — merging a rule that was itself a
    * merge would otherwise keep the counts and lose the evidence.
    */
-  private resolveLineage = async (lessonId: string): Promise<string[]> => {
-    const readLinks = (ids: string[]) =>
-      this.db
+  private resolveLineage = async (lessonId: string): Promise<string[]> =>
+    (await this.resolveLineages([lessonId])).get(lessonId) ?? [];
+
+  /**
+   * {@link resolveLineage} for many rules at once: one read per generation instead of one walk
+   * per rule, so a whole page of rules costs a handful of queries. A rule outside the caller's
+   * scope maps to an empty lineage.
+   */
+  private resolveLineages = async (lessonIds: string[]) => {
+    const parents = new Map<string, string[]>();
+    let frontier = [...new Set(lessonIds)];
+    // Bounded so a malformed cycle can never spin; real lineages are a handful of steps deep.
+    for (let depth = 0; depth <= 16 && frontier.length > 0; depth += 1) {
+      const rows = await this.db
         .select({
           generalizedFromIds: expertiseLessons.generalizedFromIds,
+          id: expertiseLessons.id,
           salvagedFromId: expertiseLessons.salvagedFromId,
         })
         .from(expertiseLessons)
         .innerJoin(expertiseDomains, eq(expertiseDomains.id, expertiseLessons.domainId))
-        .where(and(inArray(expertiseLessons.id, ids), this.scopeWhere()));
-
-    let frontier = await readLinks([lessonId]);
-    if (frontier.length === 0) return [];
-    const seen = new Set<string>([lessonId]);
-    // Bounded so a malformed cycle can never spin; real lineages are a handful of steps deep.
-    for (let depth = 0; depth < 16 && frontier.length > 0; depth += 1) {
-      const next = frontier
-        .flatMap((lesson) => [
-          ...(lesson.generalizedFromIds ?? []),
-          ...(lesson.salvagedFromId ? [lesson.salvagedFromId] : []),
-        ])
-        .filter((id) => !seen.has(id));
-      if (next.length === 0) break;
-      for (const id of next) seen.add(id);
-      frontier = await readLinks(next);
+        .where(and(inArray(expertiseLessons.id, frontier), this.scopeWhere()));
+      for (const row of rows) {
+        parents.set(row.id, [
+          ...(row.generalizedFromIds ?? []),
+          ...(row.salvagedFromId ? [row.salvagedFromId] : []),
+        ]);
+      }
+      frontier = [...new Set(rows.flatMap((row) => parents.get(row.id) ?? []))].filter(
+        (id) => !parents.has(id),
+      );
     }
-    return [...seen];
+
+    return new Map(
+      lessonIds.map((root) => {
+        if (!parents.has(root)) return [root, []];
+        const seen = new Set<string>([root]);
+        const stack = [root];
+        while (stack.length > 0) {
+          for (const parent of parents.get(stack.pop()!) ?? []) {
+            if (seen.has(parent)) continue;
+            seen.add(parent);
+            stack.push(parent);
+          }
+        }
+        return [root, [...seen]];
+      }),
+    );
+  };
+
+  /**
+   * How many times each rule's lineage was hit by a rejected acceptance versus observed in a
+   * conversation. `hitCount` adds both, and the two mean different things to the reviewer: only
+   * the first is "you rejected a delivery for this".
+   */
+  private countHitsBySource = async (lessonIds: string[]) => {
+    const lineages = await this.resolveLineages(lessonIds);
+    const all = [...new Set([...lineages.values()].flat())];
+    const rows =
+      all.length === 0
+        ? []
+        : await this.db
+            .select({
+              conversations: sql<number>`count(*) filter (where coalesce(${expertiseRuns.reflectionKey}, '') not like 'acceptance:%')::int`,
+              lessonId: expertiseHits.lessonId,
+              rejections: sql<number>`count(*) filter (where ${expertiseRuns.reflectionKey} like 'acceptance:%')::int`,
+            })
+            .from(expertiseHits)
+            .innerJoin(expertiseRuns, eq(expertiseRuns.id, expertiseHits.runId))
+            .where(inArray(expertiseHits.lessonId, all))
+            .groupBy(expertiseHits.lessonId);
+    const byLesson = new Map(rows.map((row) => [row.lessonId, row]));
+
+    return new Map(
+      lessonIds.map((id) => {
+        const lineage = lineages.get(id) ?? [];
+        const sum = (key: 'conversations' | 'rejections') =>
+          lineage.reduce((total, member) => total + (byLesson.get(member)?.[key] ?? 0), 0);
+        return [
+          id,
+          { conversationHitCount: sum('conversations'), rejectionHitCount: sum('rejections') },
+        ];
+      }),
+    );
   };
 
   /**
@@ -530,6 +679,29 @@ export class ExpertiseModel {
       .selectDistinct({ actorId: expertiseRuns.actorId, domainId: expertiseRuns.domainId })
       .from(expertiseRuns)
       .where(and(inArray(expertiseRuns.domainId, domainIds), eq(expertiseRuns.actorType, 'agent')));
+  };
+
+  /**
+   * Who a domain reaches, as one comparable key — the same rule `listRules` uses for its
+   * `owner`: `mine` when any enabled binding is not an agent's (the reviewer, workspace or a
+   * project), otherwise the agents it is mounted on. A rule moved or merged across reaches would
+   * silently change which runs receive it, so both mutations refuse that.
+   */
+  private reachOf = async (domainId: string) => {
+    const mounts = await this.db
+      .select({ agentId: expertiseBindings.agentId })
+      .from(expertiseBindings)
+      .where(and(eq(expertiseBindings.domainId, domainId), eq(expertiseBindings.enabled, true)));
+    if (mounts.some((mount) => !mount.agentId)) return 'mine';
+    const agentIds = [...new Set(mounts.map((mount) => mount.agentId!))].sort();
+    return agentIds.length > 0 ? `agent:${agentIds.join(',')}` : 'unbound';
+  };
+
+  /** Whether two domains reach the same runs; see {@link reachOf}. */
+  sameReach = async (domainA: string, domainB: string) => {
+    if (domainA === domainB) return true;
+    const [a, b] = await Promise.all([this.reachOf(domainA), this.reachOf(domainB)]);
+    return a === b;
   };
 
   // L1: domain detail
@@ -907,11 +1079,22 @@ export class ExpertiseModel {
     return { id: lessonId };
   };
 
-  /** The next free `P-nn` code inside one domain; codes are unique per domain, not globally. */
+  /**
+   * The next free `P-nn` code inside one domain; codes are unique per domain, not globally.
+   *
+   * Takes the domain row lock first — the same lock distillation holds while it hands out codes —
+   * so two writers in one group queue up instead of computing the same number and having the
+   * unique index reject one of them. The lock lasts until the caller's transaction commits.
+   */
   private nextLessonCode = async (
     tx: Pick<LobeChatDatabase, 'select'>,
     domainId: string,
   ): Promise<string> => {
+    await tx
+      .select({ id: expertiseDomains.id })
+      .from(expertiseDomains)
+      .where(eq(expertiseDomains.id, domainId))
+      .for('update');
     const codes = await tx
       .select({ code: expertiseLessons.code })
       .from(expertiseLessons)
@@ -1068,8 +1251,20 @@ export class ExpertiseModel {
     ]);
     if (!lesson || !domain) return null;
     if (lesson.domainId === domainId) return { domainId, id: lessonId };
+    // Older clients list every group in the move menu; the boundary has to hold here too.
+    if (!(await this.sameReach(lesson.domainId, domainId))) return null;
 
     return this.db.transaction(async (tx) => {
+      // Re-read under a row lock and copy from that: a merge committed since the read above has
+      // already folded this rule into another one, and copying it now would leave the same
+      // evidence live twice.
+      const [current] = await tx
+        .select()
+        .from(expertiseLessons)
+        .where(eq(expertiseLessons.id, lessonId))
+        .for('update');
+      if (current?.status !== 'active' || current.domainId !== lesson.domainId) return null;
+
       const code = await this.nextLessonCode(tx, domainId);
       const [last] = await tx
         .select({ sortOrder: sql<number>`max(${expertiseLessons.sortOrder})` })
@@ -1095,7 +1290,7 @@ export class ExpertiseModel {
         updatedAt: _updatedAt,
         accessedAt: _accessedAt,
         ...carried
-      } = lesson;
+      } = current;
       const [copy] = await tx
         .insert(expertiseLessons)
         .values({ ...carried, code, domainId, salvagedFromId: lessonId, sortOrder })

@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { eq, inArray } from 'drizzle-orm';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getTestDB } from '../../core/getTestDB';
 import { ExpertiseRuleRepository } from '../../repositories/expertiseRules';
@@ -12,6 +12,7 @@ import {
   expertiseInsights,
   expertiseLessons,
   expertiseRuns,
+  messages,
   projects,
   topics,
   users,
@@ -36,6 +37,65 @@ describe('ExpertiseModel', () => {
 
   afterEach(async () => {
     await serverDB.delete(users);
+  });
+
+  it('points a conversation source at its topic, agent and message', async () => {
+    await serverDB.insert(agents).values({ id: 'expertise-source-agent', userId });
+    await serverDB.insert(topics).values({
+      agentId: 'expertise-source-agent',
+      id: 'expertise-source-topic',
+      title: '排查生产环境连接池超时',
+      userId,
+    });
+    await serverDB.insert(messages).values({
+      content: '先看连接池指标，再动超时配置',
+      id: 'expertise-source-message',
+      role: 'user',
+      topicId: 'expertise-source-topic',
+      userId,
+    });
+    await serverDB.insert(expertiseDomains).values({
+      domainFilter: '生产故障排查',
+      id: 'expertise-test-domain',
+      slug: 'expertise-test-domain',
+      title: '生产故障排查',
+      userId,
+    });
+    await serverDB.insert(expertiseRuns).values({
+      actorId: 'agent-1',
+      actorType: 'agent',
+      domainId: 'expertise-test-domain',
+      id: runId,
+      reflectionKey: 'topic:expertise-source-topic:operation:op-1',
+      runIndex: 1,
+      subjectId: 'expertise-source-topic',
+      subjectType: 'topic',
+      userId,
+    });
+    await serverDB.insert(expertiseLessons).values({
+      code: 'P-01',
+      domainId: 'expertise-test-domain',
+      id: lessonId,
+      polarity: 'rule',
+      sections: [{ body: '先看连接池指标', key: 'rule' }],
+      title: '先看连接池指标',
+    });
+    await serverDB.insert(expertiseHits).values({
+      domainId: 'expertise-test-domain',
+      id: hitId,
+      lessonId,
+      outcome: 'violation',
+      runId,
+      sourceMessageId: 'expertise-source-message',
+    });
+
+    const [source] = await new ExpertiseModel(serverDB, userId).listLessonSources(lessonId);
+    expect(source).toMatchObject({
+      fromAcceptance: false,
+      messageId: 'expertise-source-message',
+      topicAgentId: 'expertise-source-agent',
+      topicId: 'expertise-source-topic',
+    });
   });
 
   it('returns the source topic title for a lesson hit', async () => {
@@ -422,9 +482,11 @@ describe('ExpertiseModel', () => {
     expect(group.rules[2].enforcement).toBe('remind');
   });
 
-  it('lists groups distilled from a project, but not agent self-learning domains', async () => {
+  it("lists project groups as the reviewer's, and agent self-learning after them", async () => {
     await seedRuleGroup();
-    await serverDB.insert(agents).values({ id: 'rules-agent', userId });
+    await serverDB
+      .insert(agents)
+      .values({ avatar: '🦊', id: 'rules-agent', title: '狐狸', userId });
     await serverDB.insert(projects).values({
       coordinatorAgentId: 'rules-agent',
       id: 'rules-project',
@@ -457,11 +519,52 @@ describe('ExpertiseModel', () => {
 
     const groups = await new ExpertiseModel(serverDB, userId).listRules();
 
-    expect(groups.map((g) => g.domain.title)).toContain('lobehub 的规矩');
-    expect(groups.map((g) => g.domain.title)).not.toContain('智能体专长');
+    expect(groups.find((g) => g.domain.id === 'project-domain')?.owner).toEqual({ kind: 'mine' });
     expect(groups.find((g) => g.domain.id === 'project-domain')?.scopes).toEqual([
       { id: 'rules-project', kind: 'project', title: 'lobehub' },
     ]);
+    // Agent self-learning is listed too, owned by its agent, after every group of the reviewer's.
+    expect(groups.at(-1)?.domain.id).toBe('agent-domain');
+    expect(groups.at(-1)?.owner).toEqual({
+      agent: { avatar: '🦊', backgroundColor: null, id: 'rules-agent', title: '狐狸' },
+      kind: 'agent',
+    });
+    expect(groups.slice(0, -1).every((g) => g.owner.kind === 'mine')).toBe(true);
+  });
+
+  it("leaves out what a teammate's private agent learned", async () => {
+    const teammate = 'expertise-rules-private-learner';
+    const workspaceId = 'rules-private-learner-workspace';
+    await serverDB.insert(users).values({ id: teammate });
+    await serverDB.insert(workspaces).values({
+      id: workspaceId,
+      name: 'Team',
+      primaryOwnerId: userId,
+      slug: 'rules-private-learner',
+    });
+    await serverDB.insert(agents).values({
+      id: 'private-learner',
+      title: '队友的私有助手',
+      userId: teammate,
+      visibility: 'private',
+      workspaceId,
+    });
+    await serverDB.insert(expertiseDomains).values({
+      anchorChosenAt: new Date(),
+      domainFilter: '私有专长',
+      id: 'private-learned-domain',
+      slug: 'private-learned-domain',
+      title: '私有专长',
+      userId: teammate,
+      workspaceId,
+    });
+    await serverDB
+      .insert(expertiseBindings)
+      .values({ agentId: 'private-learner', domainId: 'private-learned-domain' });
+
+    const groups = await new ExpertiseModel(serverDB, userId, workspaceId).listRules();
+
+    expect(groups.map((g) => g.domain.id)).not.toContain('private-learned-domain');
   });
 
   it('files a hand-written rule at the top of its group with the next code', async () => {
@@ -706,6 +809,60 @@ describe('ExpertiseModel', () => {
       runId,
     });
   };
+
+  const seedAgentLesson = async () => {
+    await serverDB.insert(agents).values({ id: 'reach-agent', title: '狐狸', userId });
+    await serverDB.insert(expertiseDomains).values({
+      anchorChosenAt: new Date(),
+      domainFilter: '智能体专长',
+      id: 'reach-agent-domain',
+      slug: 'reach-agent-domain',
+      title: '狐狸学到的',
+      userId,
+    });
+    await serverDB
+      .insert(expertiseBindings)
+      .values({ agentId: 'reach-agent', domainId: 'reach-agent-domain' });
+    const id = '0d3e1a5c-6f52-4c2e-8f2a-9f2d3f26b1a1';
+    await serverDB.insert(expertiseLessons).values({
+      code: 'P-01',
+      domainId: 'reach-agent-domain',
+      id,
+      polarity: 'rule',
+      sections: [{ body: '空状态给出下一步', key: 'rule' }],
+      title: '空状态给出下一步',
+    });
+    return id;
+  };
+
+  it("refuses to move the reviewer's rule into an agent's lessons", async () => {
+    const { first } = await seedRuleGroup();
+    await seedAgentLesson();
+    const model = new ExpertiseModel(serverDB, userId);
+
+    expect(await model.moveRule(first, 'reach-agent-domain')).toBeNull();
+
+    const [row] = await serverDB
+      .select({ domainId: expertiseLessons.domainId, status: expertiseLessons.status })
+      .from(expertiseLessons)
+      .where(eq(expertiseLessons.id, first));
+    expect(row).toEqual({ domainId: 'rules-domain', status: 'active' });
+  });
+
+  it("refuses to merge across the reviewer's rules and an agent's lessons", async () => {
+    const { first } = await seedRuleGroup();
+    const agentLesson = await seedAgentLesson();
+    const repository = new ExpertiseRuleRepository(serverDB, userId);
+
+    expect(await repository.mergeRules(first, agentLesson)).toBeNull();
+    expect(await repository.mergeRules(agentLesson, first)).toBeNull();
+
+    const rows = await serverDB
+      .select({ id: expertiseLessons.id, status: expertiseLessons.status })
+      .from(expertiseLessons)
+      .where(inArray(expertiseLessons.id, [first, agentLesson]));
+    expect(rows.every((row) => row.status === 'active')).toBe(true);
+  });
 
   it('moves an unencumbered rule in place with a fresh code', async () => {
     const { first } = await seedRuleGroup();
@@ -1000,6 +1157,76 @@ describe('ExpertiseModel', () => {
     ]);
     // The reused group keeps its own gate question; the caller does not get to overwrite it.
     expect(groups[0].domain.domainFilter).toBe('交付标准');
+  });
+
+  it('tells rejections apart from conversation sightings, through a move', async () => {
+    const { first } = await seedRuleGroup();
+    const topicRunId = 'e3f9b0c6-6d0e-4f2e-9b1a-2c4d5e6f7a02';
+    await serverDB.insert(expertiseRuns).values([
+      {
+        actorId: userId,
+        actorType: 'user',
+        domainId: 'rules-domain',
+        id: runId,
+        reflectionKey: 'acceptance:acc-1:run:run-1',
+        runIndex: 1,
+        subjectId: 'x',
+        subjectType: 'standalone',
+        userId,
+      },
+      {
+        actorId: 'agent-1',
+        actorType: 'agent',
+        domainId: 'rules-domain',
+        id: topicRunId,
+        reflectionKey: 'topic:topic-1:operation:op-1',
+        runIndex: 2,
+        subjectId: 'topic-1',
+        subjectType: 'topic',
+        userId,
+      },
+    ]);
+    await serverDB.insert(expertiseHits).values(
+      [runId, topicRunId, topicRunId].map((run) => ({
+        domainId: 'rules-domain',
+        example: '证据',
+        lessonId: first,
+        outcome: 'violation' as const,
+        runId: run,
+      })),
+    );
+    const model = new ExpertiseModel(serverDB, userId);
+
+    const moved = await model.moveRule(first, 'rules-domain-2');
+
+    // The hits stayed on the original; the copy reads them through its lineage.
+    const groups = await model.listRules();
+    expect(groups[1].rules.find(({ id }) => id === moved!.id)).toMatchObject({
+      conversationHitCount: 2,
+      rejectionHitCount: 1,
+    });
+    // Each source is labelled by the run it came from, not by whether its check still exists.
+    const sources = await model.listLessonSources(moved!.id);
+    expect(sources.filter(({ fromAcceptance }) => fromAcceptance)).toHaveLength(1);
+    expect(sources.filter(({ fromAcceptance }) => !fromAcceptance)).toHaveLength(2);
+  });
+
+  it('refuses to move a rule a merge folded in after it was read', async () => {
+    const { first, second } = await seedRuleGroup();
+    await seedHitOn(second);
+    const model = new ExpertiseModel(serverDB, userId);
+    const stale = await model.findLesson(second);
+    await new ExpertiseRuleRepository(serverDB, userId).mergeRules(second, first);
+    // The move read the rule before the merge committed.
+    vi.spyOn(model, 'findLesson').mockResolvedValueOnce(stale);
+
+    expect(await model.moveRule(second, 'rules-domain-2')).toBeNull();
+    expect(await model.findLesson(second)).toMatchObject({
+      rejectedReason: `merged-into:${first}`,
+      status: 'retired',
+    });
+    const groups = await model.listRules();
+    expect(groups[1].rules).toHaveLength(0);
   });
 
   it('keeps the edit history of a rule re-filed with its evidence', async () => {

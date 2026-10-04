@@ -7,6 +7,7 @@ const MAX_BOOT_FAILURES = 3;
 const VERSION_NAME = /^[\w.+-]{1,64}$/;
 const UNSAFE_SEGMENT = /^\.\.?$/;
 const MAIN_ENTRY = 'dist/main/index.js';
+const RENDERER_PREFIX = 'dist/renderer/';
 
 const canonicalJson = (value) => {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -46,7 +47,7 @@ const writeJson = (file, value) => {
   fs.renameSync(`${file}.tmp`, file);
 };
 
-const verifyCandidate = (dir, { abi, publicKey }) => {
+const verifyCandidate = (dir, { abi, builtinHashes, publicKey, storeDir }) => {
   const manifest = readJson(path.join(dir, 'manifest.json'));
   if (!manifest) throw new Error('manifest missing or unreadable');
   if (!verifyManifestSignature(manifest, publicKey)) throw new Error('bad signature');
@@ -65,14 +66,19 @@ const verifyCandidate = (dir, { abi, publicKey }) => {
   // Content hashes are verified once while staging; hashing ~110 MB here cost ~600 ms on a
   // cold Windows boot. Sizes still catch truncated, deleted or quarantined files.
   for (const file of manifest.tree) {
-    const stat = fs.statSync(path.join(dir, file.path), { throwIfNoEntry: false });
+    const overlaid = file.path.startsWith(RENDERER_PREFIX);
+    // Renderer content is never materialized: the core serves it by hash from the builtin
+    // archive or the OTA object store.
+    if (overlaid && builtinHashes.has(file.sha256)) continue;
+    const source = overlaid ? path.join(storeDir, file.sha256) : path.join(dir, file.path);
+    const stat = fs.statSync(source, { throwIfNoEntry: false });
     if (!stat) throw new Error(`missing ${file.path}`);
     if (stat.size !== file.size) throw new Error(`size mismatch ${file.path}`);
   }
   return manifest;
 };
 
-function resolveCore({ userData, builtinDir, abi, publicKey }) {
+function resolveCore({ userData, builtinDir, abi, publicKey, platform = process.platform }) {
   const otaRoot = path.join(userData, 'core-ota');
   const bootFile = path.join(otaRoot, 'boot.json');
   const pointerFile = path.join(otaRoot, 'pointer.json');
@@ -100,13 +106,33 @@ function resolveCore({ userData, builtinDir, abi, publicKey }) {
   };
 
   const builtinManifest = readJson(path.join(builtinDir, 'manifest.json')) ?? null;
+  const updateChannel =
+    readJson(path.join(userData, 'lobehub-settings.json'))?.updateChannel ??
+    builtinManifest?.channel;
+  if (platform === 'darwin' && updateChannel !== 'canary' && updateChannel !== 'beta') {
+    log.push('macOS Stable uses full updates only; ignoring external core');
+    savePointer({ channel: 'stable', current: null, previous: null, staged: null });
+  }
   const builtinSeq = typeof builtinManifest?.seq === 'number' ? builtinManifest.seq : null;
+  const builtinHashes = new Set(
+    Array.isArray(builtinManifest?.tree) ? builtinManifest.tree.map((file) => file.sha256) : [],
+  );
+  const storeDir = path.join(otaRoot, 'store');
   const channel = typeof pointer.channel === 'string' ? pointer.channel : builtinManifest?.channel;
   // seq counters are per channel: a full release ships a builtin core with a seq above every
   // published core of its own channel, so older external cores of that channel must not outlive it.
   const rejectReason = (manifest) => {
     if (channel && manifest.channel && manifest.channel !== channel)
       return `channel ${manifest.channel} != ${channel}`;
+    // v4 seq counters restart for each shell version. A full update must not keep
+    // an older shell's core just because that namespace had a higher seq.
+    if (
+      manifest.schemaVersion === 4 &&
+      builtinManifest?.version &&
+      manifest.version !== builtinManifest.version &&
+      !manifest.version.startsWith(`${builtinManifest.version}-core.`)
+    )
+      return `app version ${manifest.version} does not belong to ${builtinManifest.version}`;
     if (
       builtinSeq !== null &&
       manifest.channel === builtinManifest.channel &&
@@ -137,7 +163,8 @@ function resolveCore({ userData, builtinDir, abi, publicKey }) {
       throw new Error(`invalid core version name ${JSON.stringify(version)}`);
     if (blacklist.includes(version)) throw new Error('blacklisted');
     const dir = path.join(otaRoot, 'cores', version);
-    if (!verified.has(version)) verified.set(version, verifyCandidate(dir, { abi, publicKey }));
+    if (!verified.has(version))
+      verified.set(version, verifyCandidate(dir, { abi, builtinHashes, publicKey, storeDir }));
     return { dir, manifest: verified.get(version) };
   };
   const verifies = (version) => {
