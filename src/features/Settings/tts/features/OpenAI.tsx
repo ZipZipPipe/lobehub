@@ -9,7 +9,6 @@ import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FORM_STYLE } from '@/const/layoutTokens';
-import { serviceModelFormStyles } from '@/features/ServiceModel/styles';
 import { SettingsSearchAnchor } from '@/features/SettingsSearch/anchor';
 import { usePermission } from '@/hooks/usePermission';
 import { useUserStore } from '@/store/user';
@@ -30,7 +29,6 @@ const OpenAI = memo(() => {
   const openai: FormGroupItemType = {
     children: [
       {
-        className: serviceModelFormStyles.centeredLabel,
         children: (
           <Select
             disabled={!canManageServiceModel}
