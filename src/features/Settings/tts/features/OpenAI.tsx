@@ -1,8 +1,8 @@
 'use client';
 
-import { type FormGroupItemType } from '@lobehub/ui';
-import { Form, Icon } from '@lobehub/ui';
+import { Icon } from '@lobehub/ui';
 import { Select, Skeleton } from '@lobehub/ui/base-ui';
+import { Form, type FormGroupItem, useForm } from '@lobehub/ui/base-ui/form';
 import isEqual from 'fast-deep-equal';
 import { Loader2Icon } from 'lucide-react';
 import { memo, useState } from 'react';
@@ -19,14 +19,27 @@ import { opeanaiTTSOptions } from './const';
 const OpenAI = memo(() => {
   const { t } = useTranslation('setting');
   const { allowed: canManageServiceModel, reason } = usePermission('manage_settings');
-  const [form] = Form.useForm();
   const tts = useUserStore(settingsSelectors.currentTTS, isEqual);
   const [setSettings, isUserStateInit] = useUserStore((s) => [s.setSettings, s.isUserStateInit]);
   const [loading, setLoading] = useState(false);
+  const form = useForm({
+    initialValues: tts,
+    values: tts,
+    onValuesChange: async (values) => {
+      if (!canManageServiceModel) return;
+
+      setLoading(true);
+      try {
+        await setSettings({ tts: values });
+      } finally {
+        setLoading(false);
+      }
+    },
+  });
 
   if (!isUserStateInit) return <Skeleton.Text rows={5} />;
 
-  const openai: FormGroupItemType = {
+  const openai: FormGroupItem = {
     children: [
       {
         children: (
@@ -41,7 +54,7 @@ const OpenAI = memo(() => {
             {t('settingTTS.openai.ttsModel')}
           </SettingsSearchAnchor>
         ),
-        name: ['openAI', 'ttsModel'],
+        name: 'openAI.ttsModel',
         tooltip: reason,
       },
     ],
@@ -53,19 +66,9 @@ const OpenAI = memo(() => {
     <Form
       collapsible={false}
       form={form}
-      initialValues={tts}
       items={[openai]}
       itemsType={'group'}
       variant={'filled'}
-      onValuesChange={async (values) => {
-        if (!canManageServiceModel) return;
-
-        setLoading(true);
-        await setSettings({
-          tts: values,
-        });
-        setLoading(false);
-      }}
       {...FORM_STYLE}
       itemMinWidth={undefined}
     />
