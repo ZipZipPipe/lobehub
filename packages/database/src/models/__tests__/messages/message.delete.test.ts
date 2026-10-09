@@ -44,6 +44,56 @@ afterEach(async () => {
 });
 
 describe('MessageModel Delete Tests', () => {
+  describe('recycle bin running operation protection', () => {
+    it.each([['active-soft-assistant'], ['active-soft-assistant', 'soft-user']])(
+      'should reject recycling active message %s and allow it after completion',
+      async (...ids) => {
+        await serverDB.insert(topics).values({
+          id: 'active-soft-topic',
+          metadata: {
+            runningOperation: { assistantMessageId: 'active-soft-assistant', operationId: 'op-soft' },
+          },
+          sessionId: '1',
+          userId,
+        });
+        await serverDB.insert(messages).values([
+          {
+            content: 'visible output',
+            id: 'active-soft-assistant',
+            role: 'assistant',
+            sessionId: '1',
+            topicId: 'active-soft-topic',
+            userId,
+          },
+          {
+            content: 'user message',
+            id: 'soft-user',
+            role: 'user',
+            sessionId: '1',
+            topicId: 'active-soft-topic',
+            userId,
+          },
+        ]);
+
+        await expect(
+          messageModel.softDeleteMessages(ids, { deletedAt: new Date() }),
+        ).rejects.toThrow('Cannot delete message active-soft-assistant while its agent run is active');
+        const before = await serverDB.select().from(messages).where(eq(messages.userId, userId));
+        expect(before).toHaveLength(2);
+        expect(before.every((row) => row.deletedAt === null)).toBe(true);
+
+        await serverDB
+          .update(topics)
+          .set({ metadata: { runningOperation: null } })
+          .where(eq(topics.id, 'active-soft-topic'));
+        const result = await messageModel.softDeleteMessages(ids, { deletedAt: new Date() });
+        expect(result.map((row) => row.id).sort()).toEqual([...ids].sort());
+        const after = await serverDB.select().from(messages).where(eq(messages.userId, userId));
+        expect(after.filter((row) => row.deletedAt !== null)).toHaveLength(ids.length);
+      },
+    );
+  });
+
   describe('deleteMessage', () => {
     it('should delete a message', async () => {
       // Create test data

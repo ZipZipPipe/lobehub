@@ -5464,6 +5464,7 @@ export class MessageModel {
       }
 
       const toDelete = [...requested, ...companions];
+      await this.assertNoRunningMessageDeletion(tx, toDelete);
       const deleteIds = toDelete.map((row) => row.id);
       const deleteSet = new Set(deleteIds);
       const parentMap = new Map(toDelete.map((row) => [row.id, row.parentId] as const));
