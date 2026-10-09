@@ -714,7 +714,6 @@ describe('createOpenAICompatibleImage', () => {
         background: 'opaque',
         model: 'gpt-image-2.5-flare',
         moderation: 'low',
-        n: 1,
         output_compression: 75,
         output_format: 'webp',
         prompt: 'Generate an image',

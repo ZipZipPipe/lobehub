@@ -66,7 +66,7 @@ export const agentManagementRuntime: ServerRuntimeRegistration = {
         params: CallAgentParams,
         ctx: ToolExecutionContext,
       ): Promise<ToolExecutionResult> => {
-        const { agentId, instruction, taskTitle, timeout } = params;
+        const { agentId, instruction } = params;
 
         if (ctx.isSubAgent) {
           return {
@@ -95,12 +95,11 @@ export const agentManagementRuntime: ServerRuntimeRegistration = {
           };
         }
 
-        const description = taskTitle || `Call agent ${agentId}`;
         const { started, error, subOperationId, threadId } = await ctx.subAgent.run({
           agentId,
-          description,
+          description: `Call agent ${agentId}`,
           instruction,
-          timeout: timeout || 1_800_000,
+          timeout: 1_800_000,
         });
 
         if (!started) {
@@ -311,9 +310,18 @@ export const agentManagementRuntime: ServerRuntimeRegistration = {
           let marketTotal = 0;
 
           if (source === 'user' || source === 'all') {
+            // This is the CRUD surface: every id it returns can be forwarded to
+            // `deleteAgent` / `updateAgent`. The inbox is product-owned and must
+            // not be deletable (see `AgentModel.delete`), so keep it out of the
+            // management search instead of letting a delete proposal reach it.
             const [userAgents, total] = await Promise.all([
-              agentModel.queryAgents({ keyword: params.keyword, limit, offset }),
-              agentModel.countAgents({ keyword: params.keyword }),
+              agentModel.queryAgents({
+                includeInbox: false,
+                keyword: params.keyword,
+                limit,
+                offset,
+              }),
+              agentModel.countAgents({ includeInbox: false, keyword: params.keyword }),
             ]);
             userTotal = total;
             results.push(...userAgents.map((a) => ({ ...a, isMarket: false })));

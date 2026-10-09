@@ -429,6 +429,7 @@ export const deviceRouter = router({
         env: z.record(z.string(), z.string()).optional(),
         type: z.enum([
           'codebuddy',
+          'codex',
           'cursor',
           'droid',
           'devin',
@@ -1425,6 +1426,43 @@ export const deviceRouter = router({
       await assertDeviceOperable(ctx, input.deviceId, 'update the app');
       return deviceGateway.installAppUpdate({
         deviceId: input.deviceId,
+        userId: ctx.userId,
+        workspaceId: ctx.workspaceId,
+      });
+    }),
+
+  getCliUpdateState: deviceProcedure
+    .input(z.object({ deviceId: z.string() }).strict())
+    .query(async ({ ctx, input }) => {
+      await assertDeviceOperable(ctx, input.deviceId, 'maintain the CLI');
+      return deviceGateway.getCliUpdateState({
+        deviceId: input.deviceId,
+        userId: ctx.userId,
+        workspaceId: ctx.workspaceId,
+      });
+    }),
+
+  checkCliUpdate: deviceProcedure
+    .input(z.object({ deviceId: z.string() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      await assertDeviceOperable(ctx, input.deviceId, 'maintain the CLI');
+      return deviceGateway.checkCliUpdate({
+        deviceId: input.deviceId,
+        userId: ctx.userId,
+        workspaceId: ctx.workspaceId,
+      });
+    }),
+
+  restartCli: deviceProcedure
+    .input(
+      z
+        .object({ deviceId: z.string(), requestId: z.string().uuid(), update: z.boolean() })
+        .strict(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertDeviceOperable(ctx, input.deviceId, 'maintain the CLI');
+      return deviceGateway.restartCli({
+        ...input,
         userId: ctx.userId,
         workspaceId: ctx.workspaceId,
       });

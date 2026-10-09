@@ -88,3 +88,43 @@ describe('getRowLatestMessageWithoutTools', () => {
     });
   });
 });
+
+describe('isRefreshingAt', () => {
+  it('matches only the resolved refreshing row', () => {
+    const state = { refreshingRowId: 'g2' } as unknown as State;
+
+    expect(dataSelectors.isRefreshingAt('g2')(state)).toBe(true);
+    expect(dataSelectors.isRefreshingAt('a1')(state)).toBe(false);
+  });
+
+  it('matches nothing once the fetch settled', () => {
+    expect(dataSelectors.isRefreshingAt('g2')({} as State)).toBe(false);
+  });
+});
+
+describe('getBlockMetadata', () => {
+  it('resolves metadata of a block nested inside a compressed group', () => {
+    const state = stateWith([
+      {
+        compressedMessages: [
+          {
+            children: [
+              { content: '', id: 'step-1', tools: [] },
+              { content: '[]', id: 'step-2', metadata: { isMultimodal: true } },
+            ],
+            id: 'group-1',
+            role: 'assistantGroup',
+          },
+        ],
+        id: 'compressed-1',
+        role: 'compressedGroup',
+      },
+    ]);
+
+    expect(dataSelectors.getBlockMetadata('step-2')(state)).toEqual({ isMultimodal: true });
+  });
+
+  it('returns undefined for an unknown block', () => {
+    expect(dataSelectors.getBlockMetadata('missing')(stateWith([]))).toBeUndefined();
+  });
+});

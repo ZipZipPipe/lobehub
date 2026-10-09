@@ -1,6 +1,6 @@
 import type { GoalReportDispatch, GoalReportState } from './goalReport';
 import type { InitialGoalOverviewContext } from './stepContext';
-import type { AcceptanceStatus } from './verify';
+import type { AcceptanceStatus, VerifyCheckTally } from './verify';
 import type { WorkType } from './work';
 
 // ============================================
@@ -138,7 +138,15 @@ export interface GoalExplorationConfig {
   maxExperiments: number;
 }
 
-/** Opt-in recovery supervision. It cannot grant new permissions or expand budgets. */
+/**
+ * Recovery supervision. It cannot grant new permissions or expand budgets.
+ *
+ * Every newly created Goal carries this with `enabled: true` — the server writes
+ * it at creation and rejecting the opposite is what makes "no Goal without a
+ * supervisor" hold. `enabled` is kept (rather than dropped) because Goals created
+ * before supervision became mandatory still read it to decide whether the
+ * supervisor runs.
+ */
 export interface GoalSupervisionPolicy {
   enabled: boolean;
   /** Bounded incident ledger and paid diagnostic runs per Goal (default 10, maximum 100). */
@@ -220,6 +228,32 @@ export interface GoalManagerPolicy {
   maxTurns?: number;
 }
 
+/** Bounded wait on time or one correlated external result. */
+export interface GoalManagerWait {
+  /**
+   * When the currently scheduled wake check fires. Ticks before this moment
+   * leave the queue alone, so polling a wait does not enqueue duplicate wakes.
+   */
+  armedUntil?: string;
+  event?: { key: string; type: string };
+  /** Fallback check even when an external event is lost. */
+  until: string;
+  wake?: {
+    at: string;
+    cause: 'event' | 'timer';
+    eventId?: string;
+    reference?: string;
+    summary?: string;
+  };
+}
+
+/** A question the main Agent escalates to the owner, with the answers it proposes. */
+export interface GoalManagerAsk {
+  options: GoalDecisionOption[];
+  question: string;
+  recommendedOptionId?: string;
+}
+
 /** Server-owned dispatch receipt, retained across backend restarts. */
 export interface GoalManagerState {
   /**
@@ -244,6 +278,23 @@ export interface GoalManagerState {
    * owner can edit.
    */
   dispatchNeverStarted?: boolean;
+  /**
+   * Consecutive turns that ended in an error without committing a plan. Reset by
+   * a turn that commits a plan or ends without an error. Reaching the limit
+   * pauses the Goal on the last error instead of re-dispatching an Agent that
+   * keeps failing the same way.
+   */
+  failedTurns?: number;
+  /**
+   * The device the last turn could not reach, when it failed as unavailable.
+   * Seeing it online again ends the `retryAfter` wait early.
+   */
+  offlineDevice?: { deviceId: string; userId: string; workspaceId?: string };
+  /**
+   * Consecutive turns that never reached their device. They are not charged to
+   * the turn budget and follow the Task offline retry schedule instead.
+   */
+  offlineTurns?: number;
   operationId?: string;
   /**
    * Management conversations this Goal planned in before a handoff moved it to
@@ -264,17 +315,32 @@ export interface GoalManagerState {
    *  it can retire exactly that node without parsing the key. */
   problemTaskId?: string;
   readyForAcceptance?: boolean;
+  replanReason?: string;
+  /**
+   * Earliest time the next turn may be dispatched after one failed without a
+   * plan: the provider's quota reset when the error carries one, otherwise an
+   * exponential backoff. Without it a failing Agent was re-dispatched on every
+   * tick and spent the whole turn budget in minutes.
+   */
+  retryAfter?: string;
   reviewSnapshot?: string;
   snapshot: string;
   startedAt: string;
   submitted?: {
-    action: 'tasks' | 'verify' | 'retry' | 'escalate';
+    action: 'tasks' | 'verify' | 'retry' | 'escalate' | 'wait';
+    /**
+     * The question an `escalate` puts to the owner, with the answers it offers.
+     * Without it the gate could only ask "retry or retire?" while the real
+     * question sat unanswerable in the reason text.
+     */
+    ask?: GoalManagerAsk;
     reason: string;
     taskId?: string;
   };
   token: string;
   topicId: string;
   turns: number;
+  wait?: GoalManagerWait;
 }
 
 /**
@@ -329,6 +395,11 @@ export interface GoalConfig {
   planningCheckpoint?: { expiresAt: string; token: string };
   /** Retained after release to distinguish lease-aware retries from legacy planners. */
   planningProtocol?: 'lease-v1';
+  /**
+   * Coordinator-owned: when the queued wake for a Task waiting on a usage-window
+   * reset fires. One wake per Goal, so ticks before the reset do not queue more.
+   */
+  quotaRetryWakeAt?: string;
   recovery?: GoalRecoveryPolicy;
   /** Coordinator-owned receipt of the latest wrap-up report dispatch. */
   report?: GoalReportDispatch;
@@ -418,8 +489,18 @@ export type GoalDecisionAuthority = 'agent' | 'user' | 'project_role';
 
 export type GoalDecisionStatus = 'pending' | 'resolved' | 'canceled';
 
+/**
+ * What answering with an option does to the Task the gate was opened for.
+ * Coordinator options carry it implicitly through their fixed ids
+ * (`retry` / `retire` / `fail`); options the main Agent writes for its own
+ * question name it, so its wording never has to match a reserved id.
+ */
+export type GoalDecisionOptionEffect = 'retry' | 'retire';
+
 export interface GoalDecisionOption {
+  /** The consequence of choosing this option, in the words the person reads. */
   description?: string;
+  effect?: GoalDecisionOptionEffect;
   id: string;
   label: string;
 }
@@ -548,6 +629,13 @@ export interface GoalGraphWorkVersionDisplay {
 
 /** Where a task node's own verification stands, for a reader scanning the goal. */
 export interface GoalNodeAcceptance {
+  /**
+   * The acceptance's current round, counted. Read in the same batched pass as
+   * the rows themselves so a surface can show each level's standing without
+   * opening it; absent when the acceptance has no round yet, which is not the
+   * same as a round that judged nothing.
+   */
+  checks?: VerifyCheckTally;
   id: string;
   status: AcceptanceStatus;
 }

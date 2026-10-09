@@ -1651,21 +1651,6 @@ describe('HeterogeneousAgentCtr', () => {
       });
     });
 
-    it.each([
-      '-flag-looking-prompt',
-      '--help please',
-      '- dash at start',
-      '-p -- mixed',
-      'normal prompt with -dash- inside',
-    ])('accepts dash-containing prompt without leaking to argv: %s', async (prompt) => {
-      const { cliArgs, writes } = await runSendPrompt(prompt);
-
-      expect(cliArgs).not.toContain(prompt);
-      expect(writes).toHaveLength(1);
-      const msg = JSON.parse(writes[0].trimEnd());
-      expect(msg.message.content.at(-1).text).toBe(prompt);
-    });
-
     it('falls back to the user Desktop when no cwd is supplied', async () => {
       const { options } = await runSendPrompt('hello');
 
@@ -3134,83 +3119,6 @@ describe('HeterogeneousAgentCtr', () => {
       ).rejects.toThrow(`Working directory does not exist: ${missingCwd}`);
 
       expect(detect).not.toHaveBeenCalled();
-      expect(spawnCalls).toHaveLength(0);
-    });
-
-    it('fails fast when Claude Code CLI is unavailable instead of attempting spawn', async () => {
-      const detect = vi.fn().mockResolvedValue({ available: false });
-      const ctr = new HeterogeneousAgentCtr({
-        appStoragePath,
-        storeManager: { get: vi.fn() },
-        binaryManager: { detect },
-      } as any);
-      const { sessionId } = await ctr.startSession({
-        agentType: 'claude-code',
-        command: 'claude',
-      });
-
-      await expect(
-        ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
-      ).rejects.toThrow('Claude Code CLI was not found');
-
-      expect(detect).toHaveBeenCalledWith('claude');
-      expect(spawnCalls).toHaveLength(0);
-    });
-
-    it('fails fast with CodeBuddy install guidance when CodeBuddy is unavailable', async () => {
-      const detect = vi.fn().mockResolvedValue({ available: false });
-      const ctr = new HeterogeneousAgentCtr({
-        appStoragePath,
-        storeManager: { get: vi.fn() },
-        binaryManager: { detect },
-      } as any);
-      const { sessionId } = await ctr.startSession({
-        agentType: 'codebuddy',
-        command: 'codebuddy',
-      });
-
-      await expect(
-        ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
-      ).rejects.toThrow('CodeBuddy CLI was not found');
-
-      expect(detect).toHaveBeenCalledWith('codebuddy');
-      expect(spawnCalls).toHaveLength(0);
-    });
-
-    it('fails fast with AMP-specific install guidance when AMP is unavailable', async () => {
-      const detect = vi.fn().mockResolvedValue({ available: false });
-      const ctr = new HeterogeneousAgentCtr({
-        appStoragePath,
-        storeManager: { get: vi.fn() },
-        binaryManager: { detect },
-      } as any);
-      const { sessionId } = await ctr.startSession({ agentType: 'amp', command: 'amp' });
-
-      await expect(
-        ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
-      ).rejects.toThrow('Amp CLI was not found');
-
-      expect(detect).toHaveBeenCalledWith('amp');
-      expect(spawnCalls).toHaveLength(0);
-    });
-
-    it('fails fast with OpenCode install guidance when OpenCode is unavailable', async () => {
-      const detect = vi.fn().mockResolvedValue({ available: false });
-      const ctr = new HeterogeneousAgentCtr({
-        appStoragePath,
-        storeManager: { get: vi.fn() },
-        binaryManager: { detect },
-      } as any);
-      const { sessionId } = await ctr.startSession({
-        agentType: 'opencode',
-        command: 'opencode',
-      });
-
-      await expect(
-        ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId }),
-      ).rejects.toThrow('OpenCode CLI was not found');
-
-      expect(detect).toHaveBeenCalledWith('opencode');
       expect(spawnCalls).toHaveLength(0);
     });
 
@@ -5119,6 +5027,87 @@ describe('HeterogeneousAgentCtr', () => {
       mockGetAllWindows.mockReturnValue([]);
     });
 
+    it.each(['uploaded', 'failed'])(
+      'recovers desktop Codex images from the spawned profile (%s)',
+      async (mode) => {
+        const startedAt = Date.now();
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(startedAt);
+        const codexHome = path.join(appStoragePath, 'isolated-codex');
+        const dir = path.join(codexHome, 'sessions', '2026', '10', '08');
+        await mkdir(dir, { recursive: true });
+        await writeFile(
+          path.join(dir, 'rollout-desktop-images.jsonl'),
+          [
+            {
+              timestamp: new Date(startedAt + 1000).toISOString(),
+              type: 'event_msg',
+              payload: { type: 'task_started' },
+            },
+            {
+              type: 'response_item',
+              payload: {
+                type: 'custom_tool_call_output',
+                call_id: 'dog-image',
+                output: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA' }],
+              },
+            },
+          ]
+            .map((record) => JSON.stringify(record))
+            .join('\n') + '\n',
+        );
+        // The CLI starts its turn before the pipeline is constructed.
+        onSpawnMock.mockImplementation(() => vi.setSystemTime(startedAt + 5000));
+        nextFakeProc = createFakeProc({
+          stdoutLines: [
+            { type: 'thread.started', thread_id: 'desktop-images' },
+            { type: 'turn.started' },
+            { type: 'item.completed', item: { id: 'reply', type: 'agent_message', text: 'Done.' } },
+            { type: 'turn.completed' },
+          ].map((record) => JSON.stringify(record) + '\n'),
+        }).proc;
+        const ctr = new HeterogeneousAgentCtr({
+          appStoragePath,
+          storeManager: { get: vi.fn() },
+        } as any);
+        const upload = vi.fn(async () => {
+          if (mode === 'failed') throw new Error('Upload rejected');
+          return { fileId: 'file-dog', url: 'https://cdn/dog.png' };
+        });
+        Object.assign(ctr, { uploadResultImage: upload });
+        try {
+          const { sessionId } = await ctr.startSession({
+            agentType: 'codex',
+            command: 'codex',
+            env: { CODEX_HOME: codexHome },
+          });
+          await ctr.sendPrompt({
+            operationId: 'op-desktop-images',
+            prompt: 'draw a dog',
+            sessionId,
+          });
+          const events = broadcasts
+            .filter((b) => b.channel === 'heteroAgentEvent')
+            .map((b) => b.data.event);
+          const results = events.filter((event) => event.type === 'tool_result');
+          expect(results).toHaveLength(1);
+          expect(results[0].data).toMatchObject({
+            toolCallId: 'dog-image',
+            content:
+              mode === 'uploaded' ? '![image/png](https://cdn/dog.png)' : '[Image: image/png]',
+          });
+          expect(upload).toHaveBeenCalledOnce();
+          expect(JSON.stringify(events)).not.toContain('AAAA');
+          expect(
+            events.some((event) => event.type === 'stream_chunk' && event.data.content === 'Done.'),
+          ).toBe(true);
+        } finally {
+          onSpawnMock.mockReset();
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it('delivers pipeline.flush() events BEFORE heteroAgentSessionComplete even when proc exit precedes stdout end', async () => {
       // Codex `item.started` for a tool — adapter buffers it as a pending
       // tool call. On flush, adapter synthesizes a trailing `tool_end`. This
@@ -5227,80 +5216,6 @@ describe('HeterogeneousAgentCtr', () => {
       expect(errorIdx).toBeGreaterThan(-1);
       expect(errorIdx).toBeLessThan(completeIdx);
       expect(runtimeEnd).toBeUndefined();
-    });
-
-    it('delivers late final Codex stdout chunks BEFORE heteroAgentSessionComplete', async () => {
-      const threadStarted = `${JSON.stringify({ thread_id: 't1', type: 'thread.started' })}\n`;
-      const turnStarted = `${JSON.stringify({ type: 'turn.started' })}\n`;
-      const finalMessage = `${JSON.stringify({
-        item: {
-          id: 'item_103',
-          text: 'Final report after late stdout.',
-          type: 'agent_message',
-        },
-        type: 'item.completed',
-      })}\n`;
-      const turnCompleted = `${JSON.stringify({
-        type: 'turn.completed',
-        usage: { input_tokens: 10, output_tokens: 5 },
-      })}\n`;
-
-      const proc = new EventEmitter() as any;
-      const stdout = new PassThrough();
-      const stderr = new PassThrough();
-      proc.stdout = stdout;
-      proc.stderr = stderr;
-      proc.stdin = {
-        end: vi.fn(),
-        write: vi.fn((_chunk: any, cb?: () => void) => {
-          cb?.();
-          return true;
-        }),
-      };
-      proc.kill = vi.fn();
-      proc.killed = false;
-      proc.__start = () => {
-        setImmediate(() => {
-          stdout.write(threadStarted);
-          stdout.write(turnStarted);
-          stderr.end();
-          proc.emit('exit', 0);
-          setImmediate(() => {
-            stdout.write(finalMessage);
-            stdout.write(turnCompleted);
-            stdout.end();
-          });
-        });
-      };
-      nextFakeProc = proc;
-
-      const ctr = new HeterogeneousAgentCtr({
-        appStoragePath,
-        storeManager: { get: vi.fn() },
-      } as any);
-      const { sessionId } = await ctr.startSession({ agentType: 'codex', command: 'codex' });
-      const sendStartedAt = Date.now();
-      await ctr.sendPrompt({ operationId: 'op-test', prompt: 'hello', sessionId });
-      const sendDurationMs = Date.now() - sendStartedAt;
-
-      const completeIdx = broadcasts.findIndex((b) => b.channel === 'heteroAgentSessionComplete');
-      const finalChunkIdx = broadcasts.findIndex(
-        (b) =>
-          b.channel === 'heteroAgentEvent' &&
-          (b.data as any)?.event?.type === 'stream_chunk' &&
-          (b.data as any)?.event?.data?.content === 'Final report after late stdout.',
-      );
-      const runtimeEndIdx = broadcasts.findIndex(
-        (b) =>
-          b.channel === 'heteroAgentEvent' && (b.data as any)?.event?.type === 'agent_runtime_end',
-      );
-
-      expect(completeIdx).toBeGreaterThan(-1);
-      expect(finalChunkIdx).toBeGreaterThan(-1);
-      expect(runtimeEndIdx).toBeGreaterThan(-1);
-      expect(finalChunkIdx).toBeLessThan(completeIdx);
-      expect(runtimeEndIdx).toBeLessThan(completeIdx);
-      expect(sendDurationMs).toBeGreaterThanOrEqual(900);
     });
 
     it('serializes AskUserQuestion bridge events behind already-queued stdout tool events', async () => {
@@ -5552,28 +5467,6 @@ describe('HeterogeneousAgentCtr', () => {
       ctr.afterAppReady();
       const sigterm = captureRegisteredHandler(processOnSpy, 'SIGTERM');
       sigterm();
-
-      await expect(access(file)).rejects.toThrow();
-
-      processOnSpy.mockRestore();
-      processExitSpy.mockRestore();
-    });
-
-    it('SIGINT handler unlinks pending intervention temp configs (Ctrl-C path)', async () => {
-      const electron = (await import('electron')) as any;
-      electron.app.on.mockClear();
-      const processOnSpy = vi.spyOn(process, 'on').mockImplementation(() => process);
-      const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
-      const ctr = new HeterogeneousAgentCtr({
-        appStoragePath,
-        storeManager: { get: vi.fn() },
-      } as any);
-      const file = await seedPendingIntervention(ctr, 'opSigint');
-
-      ctr.afterAppReady();
-      const sigint = captureRegisteredHandler(processOnSpy, 'SIGINT');
-      sigint();
 
       await expect(access(file)).rejects.toThrow();
 

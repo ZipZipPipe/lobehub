@@ -654,12 +654,16 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
   // the PR link after the ingest, whatever the scenario resolved to.
   let context: Record<string, unknown> | undefined;
   let pullRequest: ReturnType<typeof pullRequestFromResult>;
+  // Only a PR the report names is a delivery claim; the branch lookup below is
+  // best-effort provenance and may find a long-lived branch's unrelated PR.
+  let authoredPullRequest: ReturnType<typeof pullRequestFromResult>;
   if (scenario === 'coding') {
     const branch = typeof result.branch === 'string' ? result.branch : undefined;
     const surfaces = surfacesFromResult(result);
     // An authored PR wins; otherwise ask `gh` what the branch's PR is, so the
     // report links to it without the author having to remember the field.
-    pullRequest = pullRequestFromResult(result) ?? pullRequestFromBranch(branch);
+    authoredPullRequest = pullRequestFromResult(result);
+    pullRequest = authoredPullRequest ?? pullRequestFromBranch(branch);
     const contextEntries = Object.entries({
       branch,
       commit: typeof result.commit === 'string' ? result.commit : undefined,
@@ -699,6 +703,7 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
   // An external repository has none of those, so create a first-class
   // standalone subject instead of making the caller manufacture a Task ID.
   let subject = subjectFromResult(result);
+  let foldTaskRunTopic = false;
   if (!requestedAcceptanceId && options.subject) {
     const ref = parseSubjectRef(options.subject);
     if (!ref) {
@@ -714,6 +719,8 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
   } else if (!requestedAcceptanceId && !subject) {
     const ref = subjectFromEnv();
     if (ref) subject = { ref };
+    // Only the ambient topic may be folded onto its Task; an explicit subject stays exact.
+    foldTaskRunTopic = Boolean(ref);
   }
   if (!requestedAcceptanceId && !subject) {
     subject = {
@@ -772,10 +779,16 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
       requirement,
       subjectId: subject!.ref.subjectId,
       subjectType: subject!.ref.subjectType,
+      ...(foldTaskRunTopic ? { foldTaskRunTopic } : {}),
       ...(subject!.ref.subjectType === 'standalone' && (title || goal)
         ? { title: title || goal }
         : {}),
     });
+    // The server may fold the subject (a Task's run topic lands on the Task).
+    subject = {
+      ...subject!,
+      ref: { subjectId: acceptance.subjectId, subjectType: acceptance.subjectType },
+    };
     // A subject's acceptance may already hold rounds; this one has to line up
     // with them exactly as an explicit `--acceptance` round does.
     bundle = await client.acceptance.getBundle.query({ id: acceptance.id });
@@ -976,6 +989,24 @@ async function ingestReportAction(reportDir: string, options: IngestReportOption
       proposalPosted = true;
     } catch (e) {
       log.warn(`proposal not posted to the discussion: ${String(e)}`);
+    }
+  }
+
+  // 5. Link the PR to the acceptance itself. The round's context is a
+  //    snapshot of this ingest; the acceptance is what the PR delivers, and
+  //    the page reads its PRs from there. Only the report's own PR is linked:
+  //    a branch-inferred one stays round provenance. Never fatal: an older
+  //    server lacks the procedure, and the round itself is the deliverable.
+  if (authoredPullRequest?.url) {
+    try {
+      await client.acceptance.linkPullRequest.mutate({
+        id: acceptanceId,
+        title:
+          typeof authoredPullRequest.title === 'string' ? authoredPullRequest.title : undefined,
+        url: String(authoredPullRequest.url),
+      });
+    } catch (e) {
+      log.warn(`pull request not linked to the acceptance: ${String(e)}`);
     }
   }
 

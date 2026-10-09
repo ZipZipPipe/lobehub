@@ -255,8 +255,9 @@ describe('createXAIImage', () => {
           body: JSON.stringify({
             model: 'grok-imagine-image-2.0',
             prompt: 'Test image',
-            resolution: '1.5k',
+            response_format: 'url',
             quality: 'low',
+            resolution: '1.5k',
           }),
         }),
       );

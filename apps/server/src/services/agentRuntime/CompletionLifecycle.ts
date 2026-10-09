@@ -331,7 +331,13 @@ export class CompletionLifecycle {
    */
   private statusForReason(
     reason: string,
-  ): 'done' | 'error' | 'interrupted' | 'waiting_for_human' | 'waiting_for_async_tool' {
+  ):
+    | 'done'
+    | 'error'
+    | 'interrupted'
+    | 'waiting_for_human'
+    | 'waiting_for_async_tool'
+    | 'waiting_for_client' {
     switch (reason) {
       case 'error': {
         return 'error';
@@ -344,6 +350,9 @@ export class CompletionLifecycle {
       }
       case 'waiting_for_async_tool': {
         return 'waiting_for_async_tool';
+      }
+      case 'waiting_for_client': {
+        return 'waiting_for_client';
       }
       default: {
         return 'done';
@@ -368,7 +377,8 @@ export class CompletionLifecycle {
           reason === 'cost_limit' ||
           reason === 'tool_call_repeat_limit' ||
           reason === 'waiting_for_human' ||
-          reason === 'waiting_for_async_tool'
+          reason === 'waiting_for_async_tool' ||
+          reason === 'waiting_for_client'
         ? reason
         : this.statusForReason(reason);
 
@@ -926,7 +936,9 @@ export class CompletionLifecycle {
     // schedules a fresh continuation operation and then retires this parked
     // segment; the continuation receives the serialized hooks through
     // `host.hooks`.
-    const isAsyncToolPark = reason === 'waiting_for_async_tool';
+    // `waiting_for_client` (no client to run the next LLM call) parks the same
+    // operation the same way: it resumes under this id or expires to `error`.
+    const isAsyncToolPark = reason === 'waiting_for_async_tool' || reason === 'waiting_for_client';
     let shouldRetainHooksForRetry = false;
 
     try {
@@ -1094,7 +1106,10 @@ export class CompletionLifecycle {
       if (reason === 'error') {
         await hookDispatcher.dispatch(operationId, 'onError', event, state?.host?.hooks);
 
-        const assistantMessageId = metadata?.assistantMessageId;
+        const assistantMessageId =
+          state?.error && !options?.skipErrorMessageWrite
+            ? await this.resolveErrorMessageId(operationId, metadata, runOrigin)
+            : undefined;
         if (assistantMessageId && state?.error && !options?.skipErrorMessageWrite) {
           // Preserve the semantic error type written by the runtime. Rebuilding
           // this as a generic AgentRuntimeError would lose UI routing data such
@@ -1213,6 +1228,35 @@ export class CompletionLifecycle {
       return content;
     } catch (error) {
       log('[%s] recoverLastAssistantContent failed (non-fatal): %O', operationId, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * The assistant row an error belongs on. The client runtime names it in
+   * `metadata.assistantMessageId`; a server `execAgent` turn leaves that unset,
+   * so fall back to the run's own newest assistant row (`call_llm` stamps
+   * `metadata.operationId` on it). Without this, a server run that fails with
+   * no client online — a closed tab, a bot, a schedule — leaves an empty
+   * bubble with no error card. Never the topic's latest row: that may belong
+   * to an earlier turn or a concurrent run.
+   */
+  private async resolveErrorMessageId(
+    operationId: string,
+    metadata: { assistantMessageId?: string } | undefined,
+    runOrigin: { topicId?: string; userId?: string },
+  ): Promise<string | undefined> {
+    if (metadata?.assistantMessageId) return metadata.assistantMessageId;
+    if (!runOrigin.topicId || (runOrigin.userId && runOrigin.userId !== this.userId)) return;
+
+    try {
+      const row = await this.messageModel.findLatestAssistantByOperationId({
+        operationId,
+        topicId: runOrigin.topicId,
+      });
+      return row?.id;
+    } catch (error) {
+      log('[%s] Failed to resolve the run assistant row for its error: %O', operationId, error);
       return undefined;
     }
   }

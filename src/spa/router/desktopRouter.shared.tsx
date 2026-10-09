@@ -50,7 +50,11 @@ import { goalDetailRouteMeta, goalsRouteMeta } from '@/features/AgentGoals/route
 import { taskRouteMeta, tasksRouteMeta } from '@/features/AgentTasks/routeMeta';
 import { agentsRouteMeta } from '@/features/AgentViewAll/routeMeta';
 import { pageRouteMeta } from '@/features/Pages/routeMeta';
-import { projectsRouteMeta } from '@/features/Projects/routeMeta';
+import {
+  projectConversationRouteMeta,
+  projectDirectoriesRouteMeta,
+  projectsRouteMeta,
+} from '@/features/Projects/routeMeta';
 import { settingsRouteMeta } from '@/features/Settings/features/routeMeta';
 import { workspaceHomeRouteMeta } from '@/features/Workspace/routeMeta';
 import WorkspaceProviderRedirect from '@/features/WorkspaceSetting/ProviderRedirect';
@@ -71,6 +75,7 @@ import {
 } from '@/routes/(main)/group/features/routeMeta';
 import AppShellSkeleton, { APP_SHELL_FALLBACK_ID } from '@/spa/BootShell/AppShellSkeleton';
 import { loadRouteWithBuiltinToolSurfaces } from '@/spa/initialize/toolSurfaces';
+import { agentChatTopicListLoader } from '@/spa/router/agentChatTopicListLoader';
 import { NoRouteSkeleton, routeMeta, type RouteSkeletonProps } from '@/spa/router/routeMeta';
 import { SettingsTabs } from '@/store/global/initialState';
 import { dynamicElement, dynamicLayout, ErrorBoundary, redirectElement } from '@/utils/router';
@@ -146,10 +151,12 @@ export const sharedMainAreaChildren: RouteObject[] = [
                 element: agentChatElement,
                 handle: { meta: agentRouteMeta },
                 index: true,
+                loader: agentChatTopicListLoader,
               },
               {
                 element: agentChatElement,
                 handle: { meta: agentRouteMeta },
+                loader: agentChatTopicListLoader,
                 path: ':topicId',
               },
             ],
@@ -997,8 +1004,17 @@ export const sharedMainAreaChildren: RouteObject[] = [
   {
     children: [
       {
-        element: redirectElement('tasks'),
+        element: redirectElement('conversation'),
         index: true,
+      },
+      {
+        element: dynamicElement(
+          () => import('@/routes/(main)/project/[projectId]/conversation'),
+          'Desktop > Project Conversation',
+          { preloadId: 'project-conversation' },
+        ),
+        handle: { meta: projectConversationRouteMeta },
+        path: 'conversation/:topicId?',
       },
       {
         element: dynamicElement(
@@ -1007,6 +1023,15 @@ export const sharedMainAreaChildren: RouteObject[] = [
         ),
         handle: { meta: tasksRouteMeta },
         path: 'tasks',
+      },
+      {
+        element: dynamicElement(
+          () => import('@/routes/(main)/project/[projectId]/settings'),
+          'Desktop > Project Working Directories',
+          { preloadId: 'project-settings' },
+        ),
+        handle: { meta: projectDirectoriesRouteMeta },
+        path: 'settings/:section?',
       },
       {
         element: dynamicElement(
@@ -1452,6 +1477,14 @@ const createMainAreaChildrenDefinition = (options: MainAreaRouteOptions = {}): R
                 ),
                 handle: { meta: routeMeta({ Skeleton: createSurfaceSkeleton('list') }) },
                 path: 'devices',
+              },
+              {
+                element: dynamicElement(
+                  () => import('@/routes/(main)/[workspaceSlug]/settings/environments'),
+                  'Desktop > Workspace > Settings > Environments',
+                ),
+                handle: { meta: routeMeta({ Skeleton: createSurfaceSkeleton('list') }) },
+                path: 'environments',
               },
               // Account-level tabs mirrored inside the workspace so members can
               // adjust user settings without leaving the workspace. Same pages

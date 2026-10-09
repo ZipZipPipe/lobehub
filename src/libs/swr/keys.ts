@@ -123,12 +123,6 @@ export const isMessageListKey = (
 
 // ---- topic --------------------------------------------------------------
 export const topicKeys = {
-  agentView: def('topic:agentView', (containerKey: string, opts: Record<string, unknown>) => [
-    'topic:agentView',
-    containerKey,
-    opts,
-  ]),
-  detail: def('topic:detail', (topicId: string) => ['topic:detail', topicId]),
   list: def('topic:list', (containerKey: string, opts: Record<string, unknown>) => [
     'topic:list',
     containerKey,
@@ -249,31 +243,6 @@ export const isDocumentCommentKeyForEvent = (
   return false;
 };
 
-// ---- agent --------------------------------------------------------------
-export const agentKeys = {
-  /** Sidebar agent list network sync. Zustand owns the persisted UI projection. */
-  list: def('agentSync:list', (isLogin: boolean, scope: string) => [
-    'agentSync:list',
-    isLogin,
-    scope,
-  ]),
-};
-
-export const isAgentListKey = (key: unknown, scope: string): boolean =>
-  Array.isArray(key) && key[0] === agentKeys.list.root && key[2] === scope;
-
-export const agentProjectionKeys = {
-  configHydration: def('agentProjection:configHydration', (scope: string, agentId: string) => [
-    'agentProjection:configHydration',
-    scope,
-    agentId,
-  ]),
-  listHydration: def('agentProjection:listHydration', (scope: string) => [
-    'agentProjection:listHydration',
-    scope,
-  ]),
-};
-
 // ---- agent labels -------------------------------------------------------
 export const agentLabelKeys = {
   /**
@@ -336,19 +305,6 @@ export const threadKeys = {
 
 // ---- recent -------------------------------------------------------------
 export const recentKeys = {
-  /** Home "all recents" drawer list, keyed by open state and identity scope. */
-  allDrawer: def('recent:allDrawer', (open: boolean, scope: string) => [
-    'recent:allDrawer',
-    open,
-    scope,
-  ]),
-  /** Home recents list, keyed by login + limit + identity scope. */
-  list: def('recent:list', (isLogin: boolean, limit: number, scope: string) => [
-    'recent:list',
-    isLogin,
-    limit,
-    scope,
-  ]),
   /** Home chat-only list; filtering happens before the server-side limit. */
   topicList: def('recent:topicList', (limit: number, scope: string, view: 'mine' | 'team') => [
     'recent:topicList',
@@ -359,16 +315,6 @@ export const recentKeys = {
 };
 
 // ---- task ---------------------------------------------------------------
-/**
- * SWR `mutate` matcher for every cached `task:list` variant — any agent scope,
- * visibility chip, ordering, or automation filter. A task edit can move a row
- * across each of those boundaries at once (reassigning, sharing, touching its
- * `updatedAt`, attaching a schedule), so refresh invalidates by key root
- * instead of enumerating variants.
- */
-export const isTaskListKey = (key: unknown): boolean =>
-  Array.isArray(key) && key[0] === 'task:list';
-
 export const isScheduledTaskListKey = (key: unknown): boolean =>
   Array.isArray(key) && key[0] === 'task:scheduledList';
 
@@ -384,79 +330,19 @@ export const goalKeys = {
   metricSeries: def('goal:metricSeries', (goalId: string) => ['goal:metricSeries', goalId]),
   /** Clarifications waiting on the user across every goal they own. */
   pendingClarifications: def('goal:pendingClarifications', () => ['goal:pendingClarifications']),
+  /** Gates and sign-offs waiting on the user across every goal, for the approval island. */
+  pendingForIsland: def('goal:pendingForIsland', () => ['goal:pendingForIsland']),
   /** Goals whose planning conversation is this topic (`subject_type = 'topic'`). */
   topicGoals: def('goal:topicGoals', (topicId: string) => ['goal:topicGoals', topicId]),
 };
 
 export const taskKeys = {
-  detail: def('task:detail', (taskId: string) => ['task:detail', taskId]),
-  groupList: def(
-    'task:groupList',
-    (
-      agentKey: string | undefined,
-      visibility: 'all' | 'private' | 'workspace' = 'all',
-      groupBy: 'assignee' | 'member' | 'priority' | 'status' = 'status',
-      excludeStatuses?: string,
-      projectId?: string,
-      automated?: boolean,
-    ) => {
-      const hasBoardFilter = groupBy !== 'status' || excludeStatuses !== undefined;
-      const key = hasBoardFilter
-        ? projectId
-          ? ['task:groupList', agentKey, visibility, groupBy, excludeStatuses, projectId]
-          : ['task:groupList', agentKey, visibility, groupBy, excludeStatuses]
-        : projectId
-          ? ['task:groupList', agentKey, visibility, projectId]
-          : ['task:groupList', agentKey, visibility];
-
-      return automated === undefined ? key : [...key, { automated }];
-    },
-  ),
   /**
    * The home rail's cross-agent goal roll-up. Scoped by cache scope like the
    * other home feeds — goals are workspace rows, so a list left over from the
    * previous workspace holds ids this one cannot open.
    */
   homeGoals: def('task:homeGoals', (scope: string) => ['task:homeGoals', scope]),
-  list: def(
-    'task:list',
-    (
-      agentKey: string | undefined,
-      visibility: 'all' | 'private' | 'workspace' = 'all',
-      // Part of the key, not a detail: Home orders by activity while the Tasks
-      // page orders by creation, and they read the same store field.
-      orderBy: 'createdAt' | 'updatedAt' = 'createdAt',
-      projectId?: string,
-      // Same reasoning as `orderBy`: Home's recent block excludes live
-      // automation and finished statuses server-side while the Tasks page
-      // fetches everything, and a shared entry would serve one surface the
-      // other's filter. Folded into one trailing slot (appended only when a
-      // filter is actually set) so unfiltered keys keep their shape.
-      // `complete` marks the every-page walk the Tasks list view does; the
-      // kanban view and Home read a single page and must not be served (or
-      // serve) the walked list from a shared entry.
-      filters?: { automated?: boolean; complete?: boolean; statuses?: readonly string[] },
-    ) => {
-      const key = projectId
-        ? ['task:list', agentKey, visibility, orderBy, projectId]
-        : ['task:list', agentKey, visibility, orderBy];
-      const automated = filters?.automated;
-      const complete = filters?.complete ? true : undefined;
-      // Order-insensitive: the same status set must hash to the same key.
-      const statuses = filters?.statuses?.length
-        ? [...filters.statuses].sort().join(',')
-        : undefined;
-      if (automated === undefined && complete === undefined && statuses === undefined) return key;
-      return [
-        ...key,
-        {
-          ...(automated === undefined ? {} : { automated }),
-          ...(complete === undefined ? {} : { complete }),
-          ...(statuses === undefined ? {} : { statuses }),
-        },
-      ];
-    },
-  ),
   /**
    * Home's automated-task roll-up: the tasks that fire on a schedule or a
    * heartbeat. Kept off `list` because it is a different result set entirely —
@@ -553,42 +439,13 @@ export const homeInboxKeys = {
 };
 
 // ---- agent config / available / search ----------------------------------
-// (agentKeys.list defined above)
 export const agentConfigKeys = {
   available: def('agent:available', () => ['agent:available']),
-  config: def('agentSync:config', (agentId: string, scope: string) => [
-    'agentSync:config',
-    agentId,
-    scope,
-  ]),
   search: def('agent:search', (keyword?: string) => ['agent:search', keyword]),
   serverDefaultHeterogeneousCapability: def('agent:serverDefaultHeterogeneousCapability', () => [
     'agent:serverDefaultHeterogeneousCapability',
   ]),
 };
-
-export const isAgentConfigKey = (key: unknown, agentId: string, scope: string): boolean =>
-  Array.isArray(key) &&
-  key[0] === agentConfigKeys.config.root &&
-  key[1] === agentId &&
-  key[2] === scope;
-
-// ---- project ------------------------------------------------------------
-export const projectKeys = {
-  detail: def('project:detail', (scope: string, id: string) => ['project:detail', scope, id]),
-  detailHydration: def('project:detailHydration', (scope: string, id: string) => [
-    'project:detailHydration',
-    scope,
-    id,
-  ]),
-  list: def('project:list', (scope: string) => ['project:list', scope]),
-  listHydration: def('project:listHydration', (scope: string) => ['project:listHydration', scope]),
-};
-
-export const isProjectDetailKey = (key: unknown, scope: string, id: string): boolean =>
-  Array.isArray(key) && key[0] === projectKeys.detail.root && key[1] === scope && key[2] === id;
-export const isProjectListKey = (key: unknown, scope: string): boolean =>
-  Array.isArray(key) && key[0] === projectKeys.list.root && key[1] === scope;
 
 // ---- aiModel ------------------------------------------------------------
 export const aiModelKeys = {
@@ -890,6 +747,11 @@ export const trashKeys = {
 };
 
 export const deviceKeys = {
+  cliUpdateState: def('device:cliUpdateState', (workspaceId: string | null, deviceId: string) => [
+    'device:cliUpdateState',
+    workspaceId,
+    deviceId,
+  ]),
   appUpdateState: def('device:appUpdateState', (workspaceId: string | null, deviceId: string) => [
     'device:appUpdateState',
     workspaceId,
@@ -1035,8 +897,6 @@ export const userMemoryKeys = {
 
 // ---- tool (skills / plugins / builtin / mcp / composio stores) -------------
 export const toolKeys = {
-  agentSkillDetail: def('tool:agentSkillDetail', (id: string) => ['tool:agentSkillDetail', id]),
-  agentSkills: def('tool:agentSkills', () => ['tool:agentSkills']),
   composioAppTools: def('tool:composioAppTools', (appSlug: string) => [
     'tool:composioAppTools',
     appSlug,
@@ -1049,11 +909,6 @@ export const toolKeys = {
   lobehubSkillTools: def('tool:lobehubSkillTools', (provider: string) => [
     'tool:lobehubSkillTools',
     provider,
-  ]),
-  mcpPluginList: def('tool:mcpPluginList', (locale: string, params: unknown) => [
-    'tool:mcpPluginList',
-    locale,
-    params,
   ]),
   uninstalledBuiltins: def('tool:uninstalledBuiltins', (workspaceId: string | null | undefined) => [
     'tool:uninstalledBuiltins',
@@ -1192,6 +1047,22 @@ export const expertiseKeys = {
   rules: def('expertise:rules', () => ['expertise:rules']),
 };
 
+/** The Acceptance list narrowing as key parts — mirrors `AcceptanceListQuery`. */
+interface AcceptanceListKeyQuery {
+  filter?: string;
+  projectId?: string | null;
+  scope?: string;
+  source?: string;
+}
+
+const acceptanceListKeyParts = ({ filter, projectId, scope, source }: AcceptanceListKeyQuery) => [
+  filter ?? '',
+  // `null` (no project) and `undefined` (any project) are different reads.
+  projectId === null ? '~none' : (projectId ?? ''),
+  scope ?? '',
+  source ?? '',
+];
+
 export const verifyKeys = {
   acceptanceBundle: def('verify:acceptanceBundle', (acceptanceId: string) => [
     'verify:acceptanceBundle',
@@ -1224,23 +1095,21 @@ export const verifyKeys = {
   ]),
   acceptancePage: def(
     'verify:acceptancePage',
-    (workspaceId: string | undefined, filter: string, projectId?: string, cursor?: string) => [
+    (workspaceId: string | undefined, query: AcceptanceListKeyQuery, cursor?: string) => [
       'verify:acceptancePage',
       workspaceId ?? '',
-      filter,
-      projectId ?? '',
+      ...acceptanceListKeyParts(query),
       cursor ?? '',
     ],
   ),
   /** Query inputs are part of the key so server-side list filtering never reuses stale rows. */
   acceptances: def(
     'verify:acceptances',
-    (limit?: number, q?: string, filter?: string, projectId?: string) => [
+    (limit?: number, q?: string, query: AcceptanceListKeyQuery = {}) => [
       'verify:acceptances',
       String(limit ?? ''),
       q ?? '',
-      filter ?? '',
-      projectId ?? '',
+      ...acceptanceListKeyParts(query),
     ],
   ),
   criteria: def('verify:criteria', () => ['verify:criteria']),
@@ -1534,6 +1403,7 @@ export const openInAppKeys = {
   detect: def('openInApp:detect', () => ['openInApp:detect']),
 };
 export const gatewayKeys = {
+  clientLlmWaits: def('gateway:clientLlmWaits', () => ['gateway:clientLlmWaits']),
   reconnect: def('gateway:reconnect', (operationId: string) => ['gateway:reconnect', operationId]),
 };
 export const userKeys = {
@@ -1575,7 +1445,7 @@ export const matchDomain =
  * Aggregate registry — one entry point for every domain's keys.
  */
 export const swrKeys = {
-  agent: { ...agentKeys, ...agentConfigKeys, ...agentProjectionKeys },
+  agent: agentConfigKeys,
   agentBot: agentBotKeys,
   agentBuilder: agentBuilderKeys,
   agentDocument: agentDocumentSWRKeys,
@@ -1617,7 +1487,6 @@ export const swrKeys = {
   onboarding: onboardingKeys,
   openInApp: openInAppKeys,
   portal: portalKeys,
-  project: projectKeys,
   provider: providerKeys,
   ragEval: ragEvalKeys,
   recent: recentKeys,

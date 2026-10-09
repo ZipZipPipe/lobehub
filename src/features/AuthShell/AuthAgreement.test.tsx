@@ -1,6 +1,6 @@
 import * as BaseUI from '@lobehub/ui/base-ui';
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
-import { Form } from 'antd';
+import { useForm } from '@lobehub/ui/base-ui/form';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -61,18 +61,20 @@ describe('AuthAgreement', () => {
 describe('SignInEmailStep', () => {
   it('should keep email sign-in visible while hiding signup when registration is disabled', () => {
     const TestSignInEmailStep = () => {
-      const [form] = Form.useForm<{ email: string }>();
+      const form = useForm<{ email: string }>();
 
       return (
         <SignInEmailStep
+          agreementChecked
           disableSignUp
           serverConfigInit
+          continueWithAgreement={(next) => next()}
           form={form}
           isSocialOnly={false}
           loading={false}
           oAuthSSOProviders={[]}
+          setAgreementChecked={vi.fn()}
           socialLoading={null}
-          onCheckUser={vi.fn(async () => {})}
           onGoToSignup={vi.fn()}
           onResetEmail={vi.fn()}
           onSetPassword={vi.fn()}
@@ -86,6 +88,55 @@ describe('SignInEmailStep', () => {
     expect(screen.getByRole('textbox')).toBeTruthy();
     expect(screen.getAllByRole('button')).toHaveLength(1);
   });
+  it.each(['', 'invalid@', 'user@example.com'])(
+    'should not validate or submit email %j when choosing OAuth',
+    async (email) => {
+      const onSubmit = vi.fn();
+      const onSocialSignIn = vi.fn();
+      const TestSignInEmailStep = () => {
+        const form = useForm({ initialValues: { email }, onSubmit });
+
+        return (
+          <SignInEmailStep
+            agreementChecked
+            serverConfigInit
+            continueWithAgreement={(next) => next()}
+            form={form}
+            isSocialOnly={false}
+            loading={false}
+            oAuthSSOProviders={['google']}
+            setAgreementChecked={vi.fn()}
+            socialLoading={null}
+            onGoToSignup={vi.fn()}
+            onResetEmail={vi.fn()}
+            onSetPassword={vi.fn()}
+            onSocialSignIn={onSocialSignIn}
+          />
+        );
+      };
+
+      render(<TestSignInEmailStep />);
+      const input = screen.getByRole('textbox');
+      await act(async () => {
+        fireEvent.blur(input);
+        fireEvent.click(screen.getByRole('button', { name: /Google/ }));
+      });
+
+      expect(onSocialSignIn).toHaveBeenCalledExactlyOnceWith('google');
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(input).not.toHaveAttribute('aria-invalid', 'true');
+
+      fireEvent.click(screen.getByRole('button', { name: 'betterAuth.signin.nextStep' }));
+      await waitFor(() => {
+        if (email === 'user@example.com') {
+          expect(onSubmit).toHaveBeenCalledExactlyOnceWith({ email });
+        } else {
+          expect(input).toHaveAttribute('aria-invalid', 'true');
+          expect(onSubmit).not.toHaveBeenCalled();
+        }
+      });
+    },
+  );
 
   it('should confirm the agreement before social sign-in', async () => {
     let confirmAgreement: (() => Promise<void>) | (() => void) | undefined;
@@ -96,18 +147,21 @@ describe('SignInEmailStep', () => {
     const onSocialSignIn = vi.fn();
 
     const TestSignInEmailStep = () => {
-      const [form] = Form.useForm<{ email: string }>();
+      const form = useForm<{ email: string }>();
+      const { agreementChecked, continueWithAgreement, setAgreementChecked } = useAuthAgreement();
 
       return (
         <SignInEmailStep
           disableEmailPassword
           serverConfigInit
+          agreementChecked={agreementChecked}
+          continueWithAgreement={continueWithAgreement}
           form={form}
           isSocialOnly={false}
           loading={false}
           oAuthSSOProviders={['google']}
+          setAgreementChecked={setAgreementChecked}
           socialLoading={null}
-          onCheckUser={vi.fn(async () => {})}
           onGoToSignup={vi.fn()}
           onResetEmail={vi.fn()}
           onSetPassword={vi.fn()}

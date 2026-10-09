@@ -7,7 +7,7 @@ import type {
   GoalNodeKind,
   GoalTickResult,
 } from '@lobechat/types';
-import type { Command } from 'commander';
+import { type Command, Option } from 'commander';
 import pc from 'picocolors';
 
 import { getTrpcClient } from '../api/client';
@@ -185,11 +185,53 @@ const hasOperationToken = () => {
 export function registerGoalCommand(program: Command) {
   const goal = program.command('goal').description('Run long-horizon Goal Graphs');
   goal
+    .command('wake <id>')
+    .description('Deliver an external result to a specific Goal wait')
+    .requiredOption('--token <token>', 'managerState.token from the waiting Goal')
+    .requiredOption('--event <id>', 'Stable delivery ID')
+    .requiredOption('--type <type>', 'Event type declared by the wait')
+    .requiredOption('--key <key>', 'Event correlation key declared by the wait')
+    .option('--summary <text>', 'Short observation')
+    .option('--reference <reference>', 'Evidence reference, not an inline dataset')
+    .option('--json', 'Output JSON')
+    .action(
+      async (
+        id: string,
+        options: {
+          token: string;
+          event: string;
+          type: string;
+          key: string;
+          summary?: string;
+          reference?: string;
+          json?: boolean;
+        },
+      ) => {
+        const client = await getTrpcClient();
+        const result = await client.goal.wake.mutate({
+          id,
+          waitToken: options.token,
+          eventId: options.event,
+          type: options.type,
+          key: options.key,
+          summary: options.summary,
+          reference: options.reference,
+        });
+        if (options.json) outputJson(result.data);
+        else
+          console.log(
+            result.data.accepted
+              ? 'Event recorded; Goal continuation queued.'
+              : `Event not applied: ${result.data.reason}`,
+          );
+      },
+    );
+  goal
     .command('plan <id>')
     .description('Atomically submit the current main Agent plan')
     .requiredOption(
       '--file <path>',
-      'JSON plan: action tasks/verify/retry/escalate, reason and action fields',
+      'JSON plan: action tasks/wait/verify/retry/escalate, reason and action fields',
     )
     .requiredOption('--token <token>', 'Current server-issued planning turn token')
     .option('--operation <id>', 'Defaults to LOBEHUB_OPERATION_ID')
@@ -275,10 +317,9 @@ export function registerGoalCommand(program: Command) {
     .option('--project <id>', 'Project ID')
     .option('--explore <instruction>', 'Explore alternatives using completed experiment results')
     .option('--max-experiments <n>', 'Maximum experiment nodes (requires --explore, default 10)')
-    .option('--supervise', 'Enable bounded recovery supervision in an independent topic')
     .option(
       '--max-supervision-incidents <n>',
-      'Maximum supervised interruptions (default 10, maximum 100)',
+      'Maximum supervised interruptions (supervision is always on; default 10, maximum 100)',
     )
     .option('--max-rounds <n>', 'Maximum goal rounds')
     .option('--max-cost <usd>', 'Maximum total cost in USD')
@@ -294,9 +335,11 @@ export function registerGoalCommand(program: Command) {
       'Reclaim a Task operation after this idle time (minimum: 60000)',
     )
     .option(
-      '--conversation',
-      'Create the goal from the current conversation run (/goal): this agent supervises it from this conversation, and the output carries a turnToken for the first plan',
+      '--topic',
+      "Link the goal to the current topic. Use it whenever you create a goal for the user from a chat, not only for /goal: without it the goal is standalone and never shows on this topic's goal tray. This agent supervises the goal from this topic; the output carries a turnToken, so submit the first plan with `lh goal plan <id> --token <turnToken> --file <plan.json>`",
     )
+    // Former name of --topic, kept so existing prompts and scripts keep working.
+    .addOption(new Option('--conversation').hideHelp())
     .option('--criterion <text...>', 'Acceptance criterion (repeatable)')
     .option('--json [fields]', 'Output JSON')
     .action(async (title: string, options) => {
@@ -304,58 +347,49 @@ export function registerGoalCommand(program: Command) {
         throw new Error('--max-experiments requires --explore');
       }
       const operationId = process.env.LOBEHUB_OPERATION_ID;
-      if (options.conversation && !operationId) {
-        throw new Error(
-          '--conversation must run inside an agent conversation (LOBEHUB_OPERATION_ID)',
-        );
+      const fromTopic = Boolean(options.topic || options.conversation);
+      if (fromTopic && !operationId) {
+        throw new Error('--topic must run inside an agent topic (LOBEHUB_OPERATION_ID)');
       }
       const client = await getTrpcClient();
       const buildUrl = await resolveAppUrlBuilder(client);
       const goalInput = {
-        config:
-          options.maxManagerTurns ||
-          options.explore ||
-          options.supervise ||
-          options.maxAttemptsPerTask ||
-          options.maxStepsPerRun ||
-          options.operationLeaseTimeoutMs ||
-          options.maxConcurrentTasks ||
-          options.taskAgent
+        // Supervision is stated by the client, not left to the server: this CLI
+        // ships on its own and can be pointed at a server that predates the
+        // creation invariant, where nothing else would turn supervision on now
+        // that `--supervise` is gone.
+        config: {
+          exploration: options.explore
             ? {
-                taskAgentId: options.taskAgent,
-                manager: options.maxManagerTurns
-                  ? { maxTurns: Number(options.maxManagerTurns) }
-                  : undefined,
-                exploration: options.explore
-                  ? {
-                      instruction: options.explore,
-                      maxExperiments: Number(options.maxExperiments ?? 10),
-                    }
-                  : undefined,
-                supervision: options.supervise
-                  ? {
-                      enabled: true,
-                      maxIncidents: options.maxSupervisionIncidents
-                        ? Number.parseInt(options.maxSupervisionIncidents, 10)
-                        : undefined,
-                    }
-                  : undefined,
-                maxConcurrentTasks: options.maxConcurrentTasks
-                  ? Number.parseInt(options.maxConcurrentTasks, 10)
-                  : undefined,
-                recovery: {
-                  maxAttemptsPerTask: options.maxAttemptsPerTask
-                    ? Number.parseInt(options.maxAttemptsPerTask, 10)
-                    : undefined,
-                  maxStepsPerRun: options.maxStepsPerRun
-                    ? Number.parseInt(options.maxStepsPerRun, 10)
-                    : undefined,
-                  operationLeaseTimeoutMs: options.operationLeaseTimeoutMs
-                    ? Number.parseInt(options.operationLeaseTimeoutMs, 10)
-                    : undefined,
-                },
+                instruction: options.explore,
+                maxExperiments: Number(options.maxExperiments ?? 10),
               }
             : undefined,
+          manager: options.maxManagerTurns
+            ? { maxTurns: Number(options.maxManagerTurns) }
+            : undefined,
+          maxConcurrentTasks: options.maxConcurrentTasks
+            ? Number.parseInt(options.maxConcurrentTasks, 10)
+            : undefined,
+          recovery: {
+            maxAttemptsPerTask: options.maxAttemptsPerTask
+              ? Number.parseInt(options.maxAttemptsPerTask, 10)
+              : undefined,
+            maxStepsPerRun: options.maxStepsPerRun
+              ? Number.parseInt(options.maxStepsPerRun, 10)
+              : undefined,
+            operationLeaseTimeoutMs: options.operationLeaseTimeoutMs
+              ? Number.parseInt(options.operationLeaseTimeoutMs, 10)
+              : undefined,
+          },
+          supervision: {
+            enabled: true,
+            ...(options.maxSupervisionIncidents
+              ? { maxIncidents: Number.parseInt(options.maxSupervisionIncidents, 10) }
+              : {}),
+          },
+          taskAgentId: options.taskAgent,
+        },
         criteria: (options.criterion as string[] | undefined)?.map((criterion) => ({
           title: criterion,
         })),
@@ -367,12 +401,12 @@ export function registerGoalCommand(program: Command) {
         title,
         tasks: options.task,
       };
-      // A conversation goal takes its agent and conversation from the running
+      // A topic goal takes its agent and topic from the running
       // operation on the server; the CLI only names the run. Device and gateway
       // runs hold an operation token, which only the operation endpoint accepts.
       // A local desktop run keeps its operation client-side, so it also names
-      // its conversation and agent for the server to check.
-      const result = options.conversation
+      // its topic and agent for the server to check.
+      const result = fromTopic
         ? hasOperationToken()
           ? await client.goal.createConversationGoal.mutate({
               ...goalInput,
@@ -678,6 +712,61 @@ export function registerGoalCommand(program: Command) {
       });
       log.info(result.message);
     });
+
+  goal
+    .command('bind-topic <id>')
+    .description(
+      'Attach an existing goal to the current topic run: this agent supervises it from this topic, as if it had been created here with create --topic',
+    )
+    .option('--force', 'Move a goal that is already bound to another topic or task')
+    .option(
+      '--goal-only',
+      'When the goal agent changes, leave existing tasks with their current agent',
+    )
+    .option('--json [fields]', 'Output JSON')
+    .action(
+      async (
+        id: string,
+        options: { force?: boolean; goalOnly?: boolean; json?: boolean | string },
+      ) => {
+        const operationId = process.env.LOBEHUB_OPERATION_ID;
+        if (!operationId)
+          throw new Error('bind-topic must run inside an agent topic (LOBEHUB_OPERATION_ID)');
+        const client = await getTrpcClient();
+        const buildUrl = await resolveAppUrlBuilder(client);
+        const input = { force: options.force, goalOnly: options.goalOnly, id, operationId };
+        // Same split as `create --topic`: the server takes the agent and
+        // topic from the run; a local desktop run, whose operation lives
+        // only on the client, also names them for the server to check.
+        const result = hasOperationToken()
+          ? await client.goal.bindOperationTopic.mutate(input)
+          : await client.goal.bindTopic.mutate({
+              ...input,
+              agentId: process.env.LOBEHUB_AGENT_ID,
+              topicId: process.env.LOBEHUB_TOPIC_ID,
+            });
+        const turnToken = result.turnToken;
+        const url = buildUrl(`/goal/${encodeURIComponent(result.data!.goal.id)}`);
+        if (options.json !== undefined)
+          return outputJson(
+            {
+              ...result.data,
+              previousSubject: result.previousSubject,
+              reassignedTaskIds: result.reassignedTaskIds,
+              turnToken,
+              url,
+            },
+            options.json,
+          );
+        log.info(result.message);
+        console.log(`${pc.bold('goal')}: ${url}`);
+        if (turnToken) {
+          console.log(
+            `${pc.bold('planning turn')}: lh goal plan ${result.data!.goal.id} --token ${turnToken} --file <plan.json>`,
+          );
+        }
+      },
+    );
 
   goal
     .command('restart <id>')

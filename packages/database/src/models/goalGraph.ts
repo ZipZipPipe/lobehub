@@ -37,7 +37,7 @@ import {
   goalNodes,
   goalNodeWorkVersions,
 } from '../schemas/goalGraph';
-import { tasks } from '../schemas/task';
+import { briefs, tasks } from '../schemas/task';
 import { works, workVersions } from '../schemas/work';
 import type { LobeChatDatabase, Transaction } from '../type';
 import { notTrashed } from '../utils/softDelete';
@@ -77,6 +77,27 @@ interface CreateDecisionInput {
 }
 
 /** Persistence boundary for an owned Goal Graph and its append-only audit trail. */
+/**
+ * A goal gate is asked in two places — the goal itself and the brief that
+ * carries it to the inbox. Whichever answers, the other must stop asking, so
+ * every write that settles a decision settles its brief in the same transaction.
+ */
+const settleDecisionBriefs = async (
+  tx: Transaction,
+  decisionId: string,
+  action: string,
+  comment?: string,
+) =>
+  tx
+    .update(briefs)
+    .set({ resolvedAction: action, resolvedAt: new Date(), resolvedComment: comment ?? null })
+    .where(
+      and(
+        isNull(briefs.resolvedAt),
+        sql`${briefs.metadata} -> 'goal' ->> 'decisionId' = ${decisionId}`,
+      ),
+    );
+
 export class GoalGraphModel {
   /**
    * `actor` is who the audit trail records for the transitions made through this
@@ -291,6 +312,27 @@ export class GoalGraphModel {
     });
   };
 
+  /**
+   * Record a change to the goal row itself that is not a status move, such as
+   * binding it to a topic, so the goal's timeline says when and by whom
+   * its carrier changed.
+   */
+  recordGoalUpdate = async (
+    goalId: string,
+    input: { operationId?: string; reason: string },
+  ): Promise<void> => {
+    await this.db.insert(goalEvents).values({
+      actorId: this.actor?.id ?? this.userId,
+      actorType: this.actor?.type ?? 'user',
+      entityId: goalId,
+      entityType: 'goal',
+      eventType: 'updated',
+      goalId,
+      operationId: input.operationId,
+      reason: input.reason,
+    });
+  };
+
   attachWorkVersion = async (
     goalId: string,
     nodeId: string,
@@ -383,6 +425,67 @@ export class GoalGraphModel {
         ),
       );
     return row?.count ?? 0;
+  };
+
+  /**
+   * The goal a task belongs to — as the responsible Task of one of its nodes,
+   * as the goal's own execution carrier, or through the nearest ancestor that is
+   * either (goal Tasks spawn their own subtasks). Lets a Task page link back to
+   * the goal that owns it.
+   */
+  findGoalByTaskId = async (taskId: string): Promise<{ id: string; title: string } | undefined> => {
+    // Walk up `parent_task_id`, nearest first. The task tree has no depth limit,
+    // so stop on a revisited id instead of a fixed depth: a corrupt cycle ends
+    // without truncating a valid deep chain.
+    const chain = await this.db.execute<{ depth: number; id: string }>(sql`
+      WITH RECURSIVE chain(id, depth, visited) AS (
+        SELECT ${tasks.id}, 0, ARRAY[${tasks.id}] FROM ${tasks} WHERE ${tasks.id} = ${taskId}
+        UNION ALL
+        SELECT ${tasks.parentTaskId}, chain.depth + 1, chain.visited || ${tasks.parentTaskId}
+        FROM ${tasks} JOIN chain ON ${tasks.id} = chain.id
+        WHERE ${tasks.parentTaskId} IS NOT NULL
+          AND NOT (${tasks.parentTaskId} = ANY(chain.visited))
+      )
+      SELECT id, depth FROM chain
+    `);
+    const depthOf = new Map(chain.rows.map((row) => [row.id, Number(row.depth)]));
+    if (depthOf.size === 0) return undefined;
+    const taskIds = [...depthOf.keys()];
+
+    const rows = await this.db
+      .select({
+        carrierTaskId: goals.subjectId,
+        createdAt: goals.createdAt,
+        id: goals.id,
+        nodeTaskId: goalNodes.taskId,
+        subjectType: goals.subjectType,
+        title: goals.title,
+      })
+      .from(goals)
+      .leftJoin(goalNodes, and(eq(goalNodes.goalId, goals.id), inArray(goalNodes.taskId, taskIds)))
+      .where(
+        and(
+          this.ownership(),
+          or(
+            inArray(goalNodes.taskId, taskIds),
+            and(eq(goals.subjectType, 'task'), inArray(goals.subjectId, taskIds)),
+          ),
+        ),
+      );
+
+    const depthOfRow = (row: (typeof rows)[number]) =>
+      Math.min(
+        row.nodeTaskId ? (depthOf.get(row.nodeTaskId) ?? Infinity) : Infinity,
+        row.subjectType === 'task' && row.carrierTaskId
+          ? (depthOf.get(row.carrierTaskId) ?? Infinity)
+          : Infinity,
+      );
+    const [nearest] = rows.sort(
+      (a, b) =>
+        depthOfRow(a) - depthOfRow(b) ||
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    return nearest ? { id: nearest.id, title: nearest.title } : undefined;
   };
 
   createNode = async (goalId: string, input: CreateNodeInput) =>
@@ -743,6 +846,7 @@ export class GoalGraphModel {
         eventType: 'resolved',
         reason: resolution,
       });
+      await settleDecisionBriefs(tx, decision.id, optionId, resolution);
       return decision;
     });
 
@@ -786,6 +890,7 @@ export class GoalGraphModel {
         eventType: 'retired',
         reason,
       });
+      await settleDecisionBriefs(tx, decision.id, 'canceled', reason);
       return decision;
     });
 }

@@ -169,8 +169,27 @@ export interface AcceptanceMetadata {
   [key: string]: unknown;
   /** Current checklist organization; frozen plans, results and reviews keep their original IDs. */
   checkGrouping?: { groups: AcceptanceCheckGroup[]; version: number };
+  /**
+   * Pull requests linked by hand (`lh acceptance link-pr`, or ingest finding
+   * one). Display-only claims: nothing is verified against the provider, so
+   * they never drive merge → accepted. That stays with provider-verified
+   * `scm_change_requests` rows, which take precedence when both name a PR.
+   */
+  pullRequests?: AcceptancePullRequestLink[];
   /** User-set display-title override for the acceptance (sidebar rename). */
   title?: string;
+}
+
+/** A hand-linked pull request on an acceptance. */
+export interface AcceptancePullRequestLink {
+  /** When it was linked (ISO 8601). */
+  linkedAt: string;
+  number: number;
+  provider: 'github';
+  /** `owner/name` as pasted; compare case-insensitively. */
+  repoFullName: string;
+  title?: string;
+  url: string;
 }
 
 /**
@@ -773,6 +792,25 @@ export interface VerifyVisualizationManifest {
 export interface VerifyCheckResultMetadata {
   [key: string]: unknown;
   visualization?: VerifyVisualizationManifest;
+}
+
+/**
+ * How one round's checks came out, counted — what a surface shows as
+ * "3 passed · 1 undecided" without reading the checks themselves.
+ *
+ * Deliberately the same three-way split the acceptance's criteria list uses
+ * (`CriterionOutcomeState`): a check with no verdict falls back to its status,
+ * and everything else is undecided. Two surfaces reading the same round must
+ * not be able to disagree about it.
+ */
+export interface VerifyCheckTally {
+  /** Judged failed — a failed verdict, or a failed status where no verdict landed. */
+  failed: number;
+  /** Judged passed — a passed verdict, or a passed status where no verdict landed. */
+  passed: number;
+  total: number;
+  /** Planned but never judged: neither passed nor failed. */
+  unjudged: number;
 }
 
 /**

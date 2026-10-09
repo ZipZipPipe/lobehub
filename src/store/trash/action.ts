@@ -20,12 +20,18 @@ type Setter = StoreSetter<TrashStore>;
 /** SWR key roots whose lists can regain rows after a restore. */
 const RESTORE_AFFECTED_KEY_PREFIXES = [
   'agent:',
+  // Agent sidebar sync keys (#18913) live outside `agent:` so they skip SWR persistence.
+  'agentSync:',
   'document:',
   'file:',
   'group:',
   'home:',
   'image:',
   'knowledgeBase:',
+  // Replicas (topic list, …) sync through `replica:sync` keys (`@lobechat/replica`).
+  'replica:',
+  // conversation transcripts — a restored message must reappear in its thread
+  'message:',
   'page',
   'project',
   'recent:',
