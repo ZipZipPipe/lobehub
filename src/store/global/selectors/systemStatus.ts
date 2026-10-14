@@ -3,6 +3,7 @@ import { type TopicGroupMode } from '@/types/topic';
 import type {
   GlobalState,
   ModelDetailPanelExpandedKey,
+  ProjectTopicSubGroupMode,
   SystemStatus,
   WorkspaceOverridableField,
 } from '../initialState';
@@ -90,12 +91,26 @@ const collapsedTopicGroupKeys =
   (s: GlobalState): string[] | undefined =>
     s.status.collapsedTopicGroupKeysByMode?.[mode];
 
+const projectTopicSubGroupMode =
+  (groupId: string) =>
+  (s: GlobalState): ProjectTopicSubGroupMode =>
+    s.status.projectTopicSubGroupModeByGroup?.[groupId] ?? 'none';
+
 const agentSidebarSections =
   (agentId: string | undefined) =>
   (s: GlobalState): Record<string, boolean> | undefined =>
     agentId ? s.status.expandAgentSidebarSectionsByAgent?.[agentId] : undefined;
 
-const topicPageSize = (s: GlobalState): number => s.status.topicPageSize || 20;
+/** Upper bound of `topic.getTopics`'s `pageSize` input on the server. */
+export const MAX_TOPIC_PAGE_SIZE = 100;
+
+/**
+ * Clamped to the server's cap: the project sidebar's "load more" used to grow
+ * the persisted value past 100, after which every topic list request failed
+ * validation. Clamping on read recovers users who already persisted it.
+ */
+const topicPageSize = (s: GlobalState): number =>
+  Math.min(s.status.topicPageSize || 20, MAX_TOPIC_PAGE_SIZE);
 
 const agentPageSize = (s: GlobalState): number => s.status.agentPageSize || 5;
 
@@ -178,6 +193,7 @@ export const SIDEBAR_SPACER_ID = '__spacer__';
 
 export const DEFAULT_SIDEBAR_ITEMS: string[] = [
   'tasks',
+  'dashboard',
   'resource',
   'recents',
   'project',
@@ -388,6 +404,8 @@ const homeGoalsCollapsed = (s: GlobalState): boolean => s.status.homeGoalsCollap
 const homeRecentsCount = (s: GlobalState): number => s.status.homeRecentsCount ?? 8;
 const homeTaskCount = (s: GlobalState): number => s.status.homeTaskCount ?? 8;
 const showRightPanel = (s: GlobalState) => s.status.showRightPanel;
+const showWorkingOverview = (s: GlobalState) =>
+  s.status.showWorkingOverview ?? !s.status.showRightPanel;
 const showLeftPanel = (s: GlobalState) => s.status.showLeftPanel;
 const showPageAgentPanel = (s: GlobalState) => s.status.showPageAgentPanel;
 const showTaskAgentPanel = (s: GlobalState) => s.status.showTaskAgentPanel;
@@ -528,6 +546,7 @@ export const systemStatusSelectors = {
   showRightPanel,
   showSystemRole,
   showTaskAgentPanel,
+  showWorkingOverview,
   showTerminalPanel,
   showVerifyReportPanel,
   showVideoPanel,
@@ -537,6 +556,7 @@ export const systemStatusSelectors = {
   verifyReportPanelWidth,
   tokenDisplayFormatShort,
   collapsedTopicGroupKeys,
+  projectTopicSubGroupMode,
   topicPageSize,
   videoPanelWidth,
   videoTopicViewMode,

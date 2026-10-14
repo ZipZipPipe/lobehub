@@ -66,7 +66,8 @@ vi.mock('@/hooks/useFetchMemoryForTopic', () => ({ useFetchTopicMemories: vi.fn(
 vi.mock('@/hooks/useFetchNotebookDocuments', () => ({ useFetchNotebookDocuments: vi.fn() }));
 
 vi.mock('@/libs/swr', () => ({
-  useClientDataSWRWithSync: () => ({
+  mutate: vi.fn(),
+  useClientDataSWR: () => ({
     data: undefined,
     error: undefined,
     isLoading: false,
@@ -92,9 +93,11 @@ vi.mock('@/store/agent', () => ({
 
 vi.mock('@/store/chat', () => ({
   getChatStoreState: () => ({}),
-  useChatStore: (
-    selector: (state: { activeAgentId: string; creatingTopicIds: string[] }) => unknown,
-  ) => selector({ activeAgentId: 'agt_old', creatingTopicIds: [] }),
+  useChatStore: Object.assign(
+    (selector: (state: { activeAgentId: string; creatingTopicIds: string[] }) => unknown) =>
+      selector({ activeAgentId: 'agt_old', creatingTopicIds: [] }),
+    { getState: () => ({}) },
+  ),
 }));
 
 vi.mock('@/store/chat/selectors', () => ({
@@ -105,11 +108,15 @@ vi.mock('@/store/chat/selectors', () => ({
 
 vi.mock('@/store/serverConfig', () => ({
   featureFlagsSelectors: vi.fn(),
-  useServerConfigStore: () => ({ enableAgentSelfIteration: false }),
+  useServerConfigStore: () => ({}),
 }));
 
 vi.mock('@/store/user', () => ({ useUserStore: () => false }));
-vi.mock('@/store/user/selectors', () => ({ authSelectors: {}, settingsSelectors: {} }));
+vi.mock('@/store/user/selectors', () => ({
+  authSelectors: {},
+  labPreferSelectors: {},
+  settingsSelectors: {},
+}));
 
 const oldContext = {
   agentId: 'agt_old',
@@ -222,11 +229,13 @@ describe('ConversationProvider', () => {
     const fakeScrollMethods = {
       getItemOffset: vi.fn(),
       getItemSize: vi.fn(),
+      getScrollElement: vi.fn(() => null),
       getScrollOffset: vi.fn(),
       getScrollSize: vi.fn(),
       getTotalCount: vi.fn(),
       getViewportSize: vi.fn(),
       scrollTo: vi.fn(),
+      scrollToEnd: vi.fn(),
       scrollToIndex: vi.fn(),
     };
 
@@ -234,6 +243,7 @@ describe('ConversationProvider', () => {
       api!.setState({
         activeIndex: 3,
         atBottom: false,
+        autoScrollDetached: true,
         chatInputOverlayHeight: 48,
         editor: fakeEditor,
         heteroOverloadRetryAttempts: { msg_old: 2 },
@@ -270,6 +280,7 @@ describe('ConversationProvider', () => {
     expect(state.scheduledSendAt).toBeUndefined();
     expect(state.activeIndex).toBeNull();
     expect(state.atBottom).toBe(true);
+    expect(state.autoScrollDetached).toBe(false);
     expect(state.isScrolling).toBe(false);
     expect(state.visibleItems.size).toBe(0);
 

@@ -16,7 +16,7 @@ export type ShareVisibility = 'private' | 'link';
 export type TimeGroupId =
   'today' | 'yesterday' | 'week' | 'month' | `${number}-${string}` | `${number}`;
 
-export type TopicGroupMode = 'byTime' | 'byProject' | 'flat' | 'byStatus';
+export type TopicGroupMode = 'byTime' | 'byProject' | 'flat' | 'byStatus' | 'byAgent';
 export type TopicSortBy = 'createdAt' | 'updatedAt';
 
 /**
@@ -124,6 +124,14 @@ export interface ChatTopicMetadata {
   bot?: ChatTopicBotContext;
   boundDeviceId?: string;
   cronJobId?: string;
+  /**
+   * Set on a topic created by editing and resending a user message of a
+   * runtime whose native history cannot be rewound (Codex). The topic holds a
+   * copy of the source ancestry but no native session, so a fresh local run
+   * replays the copied history as `<previous_conversation>`. Ordinary topics
+   * never carry it, so their fresh sessions keep starting without replay.
+   */
+  editedFrom?: { messageId: string; topicId: string };
   /**
    * The agent whose Profile page this Agent Builder conversation was started
    * from (mirrors `ExecAgentAppContext.editingAgentId`).
@@ -765,6 +773,14 @@ export interface CreateTopicParams {
   metadata?: ChatTopicMetadata;
   /** Pinned model snapshot for the new topic (see `ChatTopic.model`). */
   model?: string;
+  /**
+   * Bind the new topic to a project working directory. The server resolves the
+   * directory and pins its project, device and paths onto the topic — the same
+   * binding `projectWorkingDirectory.startTopic` writes. Carried by the first
+   * message of a conversation started from a project group's "+", so deferring
+   * the topic creation does not drop the project membership.
+   */
+  projectWorkingDirectoryId?: string;
   provider?: string;
   sessionId?: string | null;
   title: string;

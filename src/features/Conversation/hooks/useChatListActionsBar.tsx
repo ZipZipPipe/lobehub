@@ -6,6 +6,7 @@ import {
   Copy,
   DownloadIcon,
   Edit,
+  GitFork,
   LanguagesIcon,
   ListChevronsDownUp,
   ListChevronsUpDown,
@@ -41,6 +42,7 @@ interface ChatListActionsBar {
   edit: ActionBarItem;
   expand: ActionBarItem;
   export: ActionBarItem;
+  fork: ActionBarItem;
   regenerate: ActionBarItem;
   share: ActionBarItem;
   translate: ActionBarItem;
@@ -118,6 +120,11 @@ export const useChatListActionsBar = ({
         key: 'export',
         label: 'Export as PDF',
         sfSymbol: 'square.and.arrow.up',
+      },
+      fork: {
+        icon: GitFork,
+        key: 'fork',
+        label: t('forkTopic'),
       },
       regenerate: {
         disabled: isRegenerating,

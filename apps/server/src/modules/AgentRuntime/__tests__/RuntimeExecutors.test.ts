@@ -261,6 +261,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       // call_llm does a parent existence preflight; return a truthy row by
       // default so existing tests don't have to stub it.
       findById: vi.fn().mockResolvedValue({ id: 'msg-existing' }),
+      findMessagePlugin: vi.fn().mockResolvedValue(undefined),
       // The abort settle asks whether a row already holds the call. Null by
       // default: these tests exercise calls that never got one.
       findToolMessageIdByToolCallId: vi.fn().mockResolvedValue(null),
@@ -6123,10 +6124,17 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
                 }),
               );
             }
+            // Under `toolCall`, afterToolCall gates a completed result: a call the
+            // before control denied never runs, so it has no result to gate.
             expect(
               fetchSpy.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).hookType),
-            ).toEqual(['beforeToolCall', 'afterToolCall']);
-            expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).mocked).toBe(false);
+            ).toEqual(
+              permissionDecision === 'allow'
+                ? ['beforeToolCall', 'afterToolCall']
+                : ['beforeToolCall'],
+            );
+            if (permissionDecision === 'allow')
+              expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).mocked).toBe(false);
           } finally {
             fetchSpy.mockRestore();
             vi.unstubAllEnvs();
@@ -6150,6 +6158,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         async (throws) => {
           const mockDispatcher = {
             dispatch: vi.fn().mockResolvedValue(undefined),
+            hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+            evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
             evaluateToolCall: vi.fn().mockResolvedValue({
               status: 'allow',
             }),
@@ -6201,6 +6211,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should preserve native identity and structured results across tool notifications', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6287,6 +6299,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should report structured blocked results as unsuccessful notifications, not exceptions', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6326,6 +6340,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should correlate repeated tool names in a batch by native call ids', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6367,6 +6383,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should retain client routing and structured client results in notifications', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6412,6 +6430,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should dispatch beforeToolCall and afterToolCall hooks', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6455,6 +6475,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         const controller = new AbortController();
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6487,6 +6509,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         // webhook consumer would see `afterToolCall` after `onComplete`.
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6521,6 +6545,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should skip real execution when beforeToolCall returns mock', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6561,6 +6587,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should preserve failed mock results without executing the real tool', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6601,6 +6629,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
 
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6630,6 +6660,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should derive callIndex from state.usage.tools.byTool', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6682,6 +6714,8 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should dispatch beforeCompact and afterCompact hooks', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),
@@ -6720,9 +6754,51 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
     });
 
     describe('request_human_approve hooks', () => {
+      it('creates an empty result slot before a human answer can be claimed', async () => {
+        const state = createToolState({
+          messages: [{ content: '', id: 'asst-1', role: 'assistant' }],
+        });
+        const dispatcher = new HookDispatcher();
+        dispatcher.register('op-123', [
+          {
+            id: 'result-control',
+            type: 'afterToolCall',
+            webhook: { url: 'https://hooks.example/policy', responseHandling: 'toolCall' },
+          },
+        ]);
+        const executors = createRuntimeExecutors({
+          ...ctx,
+          hookDispatcher: dispatcher,
+          loadAgentState: async () => state,
+        });
+        await executors.request_human_approve!(
+          {
+            type: 'request_human_approve',
+            pendingToolsCalling: [
+              {
+                apiName: 'ask',
+                arguments: '{}',
+                id: 'call-ask',
+                identifier: 'questions',
+                type: 'builtin',
+              },
+            ],
+          },
+          state,
+        );
+        expect(mockMessageModel.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            content: '',
+            tool_call_id: 'call-ask',
+          }),
+        );
+      });
+
       it('should dispatch beforeHumanIntervention hook', async () => {
         const mockDispatcher = {
           dispatch: vi.fn().mockResolvedValue(undefined),
+          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
           evaluateToolCall: vi.fn().mockResolvedValue({
             status: 'allow',
           }),

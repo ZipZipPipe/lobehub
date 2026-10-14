@@ -1,8 +1,11 @@
 import type { DocumentLoadFormat, DocumentLoadRule } from '@lobechat/agent-templates';
 import { type AgentContextDocument } from '@lobechat/context-engine';
 
-import { lambdaClient } from '@/libs/trpc/client';
+import { lambdaClient, withLlmRelay } from '@/libs/trpc/client';
 import { invalidateDocumentMutation } from '@/services/document/invalidation';
+import { oneShotRelay } from '@/services/llmRelay';
+import { useUserStore } from '@/store/user';
+import { systemAgentSelectors } from '@/store/user/selectors';
 import { toAgentContextDocuments } from '@/utils/agentDocumentContextMapping';
 
 export { agentDocumentSWRKeys } from '@/services/document/swrKeys';
@@ -67,6 +70,7 @@ class AgentDocumentService {
     scope?: 'agent' | 'currentTopic';
     sourceType?: 'all' | 'file' | 'web';
     topicId?: string;
+    withChildCount?: boolean;
   }) => {
     return lambdaClient.agentDocument.listDocuments.query(params);
   };
@@ -210,14 +214,17 @@ class AgentDocumentService {
       documentId?: string;
       id: string;
       topicId?: string;
+      /** Also delete documents nested under it; a parent with children is refused otherwise. */
+      withChildren?: boolean;
     } & AgentDocumentToolTriggerInput,
   ) => {
-    const { agentId, documentId, id, topicId, toolContext, trigger } = params;
+    const { agentId, documentId, id, topicId, toolContext, trigger, withChildren } = params;
     const result = await lambdaClient.agentDocument.removeDocument.mutate({
       agentId,
       id,
       toolContext,
       trigger,
+      withChildren,
     });
     await invalidateDocumentMutation({
       agentDocumentId: id,
@@ -281,8 +288,15 @@ class AgentDocumentService {
     return result;
   };
 
+  /**
+   * Runs on the `agentMeta` system agent model; a model only this device
+   * reaches is relayed back to this tab (one-shot relay).
+   */
   generateSkillMeta = async (params: { agentId: string; sourceAgentDocumentId: string }) => {
-    return lambdaClient.agentDocument.generateSkillMeta.mutate(params);
+    const { provider } = systemAgentSelectors.agentMeta(useUserStore.getState());
+    return oneShotRelay.run(provider, (relay) =>
+      lambdaClient.agentDocument.generateSkillMeta.mutate(params, withLlmRelay(relay)),
+    );
   };
 
   /**
@@ -310,39 +324,25 @@ class AgentDocumentService {
     }
   };
 
-  createFolder = async (params: { agentId: string; path: string; recursive?: boolean }) => {
-    const result = await lambdaClient.agentDocument.mkdirDocumentByPath.mutate(params);
-    await revalidateAgentDocuments(params.agentId);
-
-    return result;
-  };
-
-  moveDocument = async (params: {
+  /** Tool-oriented: create a folder by name under the root or a parent folder id. */
+  createFolderById = async (params: {
     agentId: string;
-    force?: boolean;
-    fromPath: string;
-    toPath: string;
+    parentId?: string | null;
+    title: string;
   }) => {
-    const result = await lambdaClient.agentDocument.renameDocumentByPath.mutate(params);
+    const result = await lambdaClient.agentDocument.createFolder.mutate(params);
     await revalidateAgentDocuments(params.agentId);
 
     return result;
   };
 
-  writeByPath = async (params: {
+  /** Tool-oriented: move documents/folders by id into a folder, or to the root with null. */
+  moveDocumentsById = async (params: {
     agentId: string;
-    content: string;
-    createMode?: 'always-new' | 'if-missing' | 'must-exist';
-    path: string;
+    ids: string[];
+    parentId: string | null;
   }) => {
-    const result = await lambdaClient.agentDocument.writeDocumentByPath.mutate(params);
-    await revalidateAgentDocuments(params.agentId);
-
-    return result;
-  };
-
-  deleteByPath = async (params: { agentId: string; path: string; recursive?: boolean }) => {
-    const result = await lambdaClient.agentDocument.deleteDocumentByPath.mutate(params);
+    const result = await lambdaClient.agentDocument.moveDocuments.mutate(params);
     await revalidateAgentDocuments(params.agentId);
 
     return result;

@@ -19,6 +19,7 @@ import {
   isParkedStatus,
 } from '@lobechat/agent-runtime';
 import type { ISnapshotStore } from '@lobechat/agent-tracing';
+import { DASHBOARD_DRY_RUN_AUDIT } from '@lobechat/builtin-tool-dashboard';
 import { appendSubAgentReference, isCallSubAgentCall } from '@lobechat/builtin-tool-lobe-agent';
 import { dynamicInterventionAudits } from '@lobechat/builtin-tools/dynamicInterventionAudits';
 import { ABANDONED_OPERATION_ERROR_PREFIX } from '@lobechat/const/goal';
@@ -96,6 +97,7 @@ import { QueueService } from '@/server/services/queue';
 import { LocalQueueServiceImpl } from '@/server/services/queue/impls';
 import { ToolExecutionService } from '@/server/services/toolExecution';
 import { BuiltinToolsExecutor } from '@/server/services/toolExecution/builtin';
+import { createWidgetDryRunAudit } from '@/server/services/widget/dryRunAudit';
 import {
   resolveRunWorkAccessScope,
   stateHasEntityFileEdits,
@@ -114,7 +116,12 @@ import {
 } from './CompletionLifecycle';
 import { stepChangedCredentials } from './credentialFacts';
 import { logToolCallPc } from './formalObservation';
-import { type AgentHook, hookDispatcher } from './hooks';
+import { type AgentHook, hookDispatcher, parseSerializedHooks } from './hooks';
+import {
+  controlDeferredToolResult,
+  type DeferredToolResultControlInput,
+  loadDurableToolResultHooks,
+} from './hooks/deferredToolResultControl';
 import { HumanInterventionHandler } from './HumanInterventionHandler';
 import { buildProjectedMessagePatch } from './messagePatch';
 import { OperationTraceRecorder } from './OperationTraceRecorder';
@@ -889,6 +896,23 @@ export class AgentRuntimeService {
     }
   }
 
+  /** Review out-of-band results before any subsequent history read can expose them. */
+  async controlCompletedToolResult(input: DeferredToolResultControlInput) {
+    const controlled = await controlDeferredToolResult(
+      {
+        dispatcher: hookDispatcher,
+        loadState: (operationId) => this.coordinator.loadAgentState(operationId),
+        loadDurableHooks: (operationId) =>
+          loadDurableToolResultHooks(this.agentOperationModel, operationId),
+        messageModel: this.messageModel,
+        userId: this.userId,
+        workspaceId: this.workspaceId,
+      },
+      input,
+    );
+    return controlled;
+  }
+
   /** Load the authoritative runtime state for a deterministic intervention continuation. */
   async loadInterventionContinuationState(operationId: string): Promise<AgentState | null> {
     return this.coordinator.loadAgentState(operationId);
@@ -1228,6 +1252,18 @@ export class AgentRuntimeService {
     // stop can still reach the member's supervisor (`loadGroupMemberBridge`).
     const groupMemberBridge = hooks?.find((hook) => hook.id === 'group-member-bridge')?.webhook
       ?.body as Omit<GroupActionMemberBridgeParams, 'operationId' | 'reason'> | undefined;
+    // The Redis state expires independently of pending tools/approvals. Keep
+    // caller hook templates on the private operation record, as hetero runs do.
+    const durableHooks = parseSerializedHooks(
+      (hooks ?? []).flatMap((hook) =>
+        hook.webhook
+          ? [{ id: hook.id, type: hook.type, matcher: hook.matcher, webhook: hook.webhook }]
+          : [],
+      ),
+    );
+    const requiresDurableResultControl = durableHooks.some(
+      (hook) => hook.type === 'afterToolCall' && hook.webhook?.responseHandling === 'toolCall',
+    );
     const operationStartPersisted = await traceStartStage('record_start', () =>
       this.completionLifecycle.recordStart({
         agentId: appContext?.agentId ?? null,
@@ -1242,20 +1278,14 @@ export class AgentRuntimeService {
         },
         chatGroupId: appContext?.groupId ?? null,
         maxSteps,
-        // Persist the Agent Signal run marker on the operation row so server-side
-        // self-iteration tools can read it back (operation.metadata.agentSignal) at tool-call
-        // time — the trimmed appContext above intentionally drops it.
-        ...(appContext?.agentSignal || interventionResolution || groupMemberBridge
-          ? {
-              metadata: {
-                ...(appContext?.agentSignal ? { agentSignal: appContext.agentSignal } : {}),
-                ...(interventionResolution
-                  ? { agentInterventionContinuation: interventionResolution }
-                  : {}),
-                ...(groupMemberBridge ? { groupMemberBridge } : {}),
-              },
-            }
-          : {}),
+        metadata: {
+          ...(durableHooks.length > 0 && { _hooks: durableHooks }),
+          ...(appContext?.agentSignal ? { agentSignal: appContext.agentSignal } : {}),
+          ...(interventionResolution
+            ? { agentInterventionContinuation: interventionResolution }
+            : {}),
+          ...(groupMemberBridge ? { groupMemberBridge } : {}),
+        },
         model: modelRuntimeConfig?.model,
         modelRuntimeConfig: withoutFrozenModelFacts(modelRuntimeConfig),
         operationId,
@@ -1267,6 +1297,9 @@ export class AgentRuntimeService {
         trigger: appContext?.trigger,
       }),
     );
+    if (requiresDurableResultControl && !operationStartPersisted) {
+      throw new Error('Failed to durably persist afterToolCall control policy before dispatch');
+    }
     if (interventionResolution && !operationStartPersisted) {
       throw new Error(
         `Failed to durably persist intervention continuation ${operationId} before dispatch`,
@@ -4361,26 +4394,39 @@ export class AgentRuntimeService {
       ? appendSubAgentReference(resultContent, threadId)
       : resultContent;
 
-    const backfill = await this.messageModel.updateToolMessage(toolMessageId, {
-      content,
-      pluginError: failed
-        ? formatErrorForMetadata(finalState?.error ?? params.errorMessage)
-        : undefined,
-      pluginState: {
-        model: finalState?.modelRuntimeConfig?.model,
-        status: failed ? 'error' : 'completed',
-        threadId,
-        // The child's spend rides on this anchor row so the parent's usage tray can
-        // account for it. The tray sums per-MESSAGE usage, and the child's own
-        // assistant messages live in an isolation thread the parent never loads —
-        // this row is the only place the child's cost surfaces in the parent's own
-        // message list.
-        totalCost: finalState?.cost?.total,
-        totalInputTokens: finalState?.usage?.llm?.tokens?.input,
-        totalOutputTokens: finalState?.usage?.llm?.tokens?.output,
-        totalToolCalls: finalState?.usage?.tools?.totalCalls,
-        totalTokens: finalState?.usage?.llm?.tokens?.total,
+    const { result: completed, blocked } = await this.controlCompletedToolResult({
+      preserveUsage: true,
+      operationId: parentOperationId,
+      toolMessageId,
+      result: {
+        content,
+        success: !failed,
+        error: failed
+          ? formatErrorForMetadata(finalState?.error ?? params.errorMessage)
+          : undefined,
+        state: {
+          model: finalState?.modelRuntimeConfig?.model,
+          status: failed ? 'error' : 'completed',
+          threadId,
+          // The child's spend rides on this anchor row so the parent's usage tray can
+          // account for it. The tray sums per-MESSAGE usage, and the child's own
+          // assistant messages live in an isolation thread the parent never loads —
+          // this row is the only place the child's cost surfaces in the parent's own
+          // message list.
+          totalCost: finalState?.cost?.total,
+          totalInputTokens: finalState?.usage?.llm?.tokens?.input,
+          totalOutputTokens: finalState?.usage?.llm?.tokens?.output,
+          totalToolCalls: finalState?.usage?.tools?.totalCalls,
+          totalTokens: finalState?.usage?.llm?.tokens?.total,
+        },
       },
+    });
+    const backfill = await this.messageModel.updateToolMessage(toolMessageId, {
+      content: completed.content,
+      pluginError: completed.error ?? null,
+      pluginState: completed.state,
+      onlyIfEmpty: true,
+      ...(blocked && { replacePluginState: true }),
     });
     if (!backfill.success) {
       throw new Error(
@@ -4612,24 +4658,38 @@ export class AgentRuntimeService {
         ? `Agent ${agentLabel} responded in the group.`
         : lastAssistantContent || 'Agent member completed without a textual answer.';
 
-    const anchorBackfill = await this.messageModel.updateToolMessage(anchorMessageId, {
-      content: anchorContent,
-      pluginError: failed ? formatErrorForMetadata(finalState?.error) : undefined,
-      pluginState: {
-        model: finalState?.modelRuntimeConfig?.model,
-        status: failed ? 'error' : 'completed',
-        threadId,
-        // The child's spend rides on this anchor row so the parent's usage tray can
-        // account for it. The tray sums per-MESSAGE usage, and the child's own
-        // assistant messages live in an isolation thread the parent never loads —
-        // this row is the only place the child's cost surfaces in the parent's own
-        // message list.
-        totalCost: finalState?.cost?.total,
-        totalInputTokens: finalState?.usage?.llm?.tokens?.input,
-        totalOutputTokens: finalState?.usage?.llm?.tokens?.output,
-        totalToolCalls: finalState?.usage?.tools?.totalCalls,
-        totalTokens: finalState?.usage?.llm?.tokens?.total,
+    const { result: completed, blocked } = await this.controlCompletedToolResult({
+      preserveUsage: true,
+      contextToolMessageId: groupToolMessageId,
+      operationId: parentOperationId,
+      toolMessageId: anchorMessageId,
+      result: {
+        content: anchorContent,
+        success: !failed,
+        error: failed ? formatErrorForMetadata(finalState?.error) : undefined,
+        state: {
+          model: finalState?.modelRuntimeConfig?.model,
+          status: failed ? 'error' : 'completed',
+          threadId,
+          // The child's spend rides on this anchor row so the parent's usage tray can
+          // account for it. The tray sums per-MESSAGE usage, and the child's own
+          // assistant messages live in an isolation thread the parent never loads —
+          // this row is the only place the child's cost surfaces in the parent's own
+          // message list.
+          totalCost: finalState?.cost?.total,
+          totalInputTokens: finalState?.usage?.llm?.tokens?.input,
+          totalOutputTokens: finalState?.usage?.llm?.tokens?.output,
+          totalToolCalls: finalState?.usage?.tools?.totalCalls,
+          totalTokens: finalState?.usage?.llm?.tokens?.total,
+        },
       },
+    });
+    const anchorBackfill = await this.messageModel.updateToolMessage(anchorMessageId, {
+      content: completed.content,
+      pluginError: completed.error ?? null,
+      pluginState: completed.state,
+      onlyIfEmpty: true,
+      ...(blocked && { replacePluginState: true }),
     });
     if (!anchorBackfill.success) {
       throw new Error(
@@ -4637,6 +4697,24 @@ export class AgentRuntimeService {
       );
     }
 
+    return this.completeGroupMemberBarrier({
+      anchorMessageId,
+      expectedMembers,
+      groupToolMessageId,
+      parentOperationId,
+    });
+  }
+
+  /** Shared by a child's completion and a member that failed before an operation existed. */
+  async completeGroupMemberBarrier({
+    anchorMessageId,
+    expectedMembers,
+    groupToolMessageId,
+    parentOperationId,
+  }: Pick<
+    GroupActionMemberBridgeParams,
+    'anchorMessageId' | 'expectedMembers' | 'groupToolMessageId' | 'parentOperationId'
+  >): Promise<boolean> {
     // 2. K=N member barrier (multi-member actions only — single-member actions
     //    use the group tool call itself as the anchor, already backfilled above).
     if (expectedMembers > 1 && anchorMessageId !== groupToolMessageId) {
@@ -4644,7 +4722,7 @@ export class AgentRuntimeService {
       if (fulfilled < expectedMembers) {
         log(
           '[%s] group-member barrier %d/%d, holding parent %s',
-          operationId,
+          parentOperationId,
           fulfilled,
           expectedMembers,
           parentOperationId,
@@ -4661,9 +4739,23 @@ export class AgentRuntimeService {
       // All members done — backfill the group tool call so the parked op's
       // single-tool barrier ([groupTool]) passes. Idempotent across racing
       // last-committers; the resume/finish CAS guarantees one transition.
+      const { result: groupResult, blocked: groupBlocked } = await this.controlCompletedToolResult({
+        operationId: parentOperationId,
+        toolMessageId: groupToolMessageId,
+        result: {
+          content: `All ${expectedMembers} agent members completed.`,
+          state: { expectedMembers, status: 'completed' },
+          success: true,
+        },
+      });
       const groupBackfill = await this.messageModel.updateToolMessage(groupToolMessageId, {
-        content: `All ${expectedMembers} agent members completed.`,
-        pluginState: { expectedMembers, status: 'completed' },
+        content: groupResult.content,
+        pluginError: groupResult.error ?? null,
+        pluginState: groupResult.state,
+        onlyIfEmpty: true,
+        ...(groupBlocked && {
+          replacePluginState: true,
+        }),
       });
       if (!groupBackfill.success) {
         throw new Error(
@@ -5048,7 +5140,14 @@ export class AgentRuntimeService {
         enabled: world?.agent?.chatConfig?.enableContextCompression ?? true,
         maxWindowToken: contextWindowTokens ?? undefined,
       },
-      dynamicInterventionAudits,
+      dynamicInterventionAudits: {
+        ...dynamicInterventionAudits,
+        [DASHBOARD_DRY_RUN_AUDIT]: createWidgetDryRunAudit(
+          this.serverDB,
+          origin?.userId ?? this.userId,
+          this.workspaceId,
+        ),
+      },
       modelRuntimeConfig,
       operationId,
       userId: origin?.userId,
@@ -5088,6 +5187,7 @@ export class AgentRuntimeService {
       execSubAgent: this.delegate.execSubAgent,
       execVirtualSubAgent: this.delegate.execVirtualSubAgent,
       execGroupMember: this.delegate.execGroupMember,
+      onGroupMemberResult: (params) => this.completeGroupMemberBarrier(params),
       hookDispatcher,
       loadAgentState: this.coordinator.loadAgentState.bind(this.coordinator),
       messageModel: this.messageModel,

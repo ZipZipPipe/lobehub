@@ -5,6 +5,7 @@ import { hasAnyCliFlag, hasCliConfigKey, hasCliFlag } from './heteroCliArgs';
 import type { HeterogeneousAgentType, LocalHeterogeneousAgentType } from './heterogeneousAgent';
 import {
   HETEROGENEOUS_AGENT_CONFIGS,
+  LOCAL_RUNTIME_HETEROGENEOUS_AGENT_CONFIGS,
   REMOTE_HETEROGENEOUS_AGENT_CONFIGS,
 } from './heterogeneousAgent';
 import type {
@@ -123,6 +124,20 @@ export const isServerDefaultHeterogeneousModel = (
   requestModel: unknown,
   operationModel: string,
 ): boolean => requestModel === formatServerDefaultHeterogeneousModel(operationModel);
+
+/**
+ * Model-card facts a CLI needs to describe a deployment model it has no
+ * built-in entry for (context window, modalities, reasoning). Credential-free.
+ */
+export interface ServerDefaultHeterogeneousModelDescriptor {
+  abilities: { reasoning: boolean; vision: boolean };
+  contextWindowTokens?: number;
+  displayName?: string;
+  maxOutput?: number;
+  model: string;
+  /** Served on the OpenAI Responses API natively; Codex ships its own entry for it. */
+  nativeResponses: boolean;
+}
 
 export interface ServerDefaultHeterogeneousRelayInvocation {
   acceptedAt: string;
@@ -359,6 +374,7 @@ export const applyTopicModelToHeterogeneousProvider = (
 
 const HETEROGENEOUS_AGENT_TYPES = new Set<string>([
   ...HETEROGENEOUS_AGENT_CONFIGS.map(({ type }) => type),
+  ...LOCAL_RUNTIME_HETEROGENEOUS_AGENT_CONFIGS.map(({ type }) => type),
   ...REMOTE_HETEROGENEOUS_AGENT_CONFIGS.map(({ type }) => type),
 ]);
 
@@ -1078,6 +1094,9 @@ export interface LobeAgentAgencyConfig {
    * Legacy values are plain path strings. New git-aware values may carry `git`
    * metadata; when `git.activeWorktree` is present, that active worktree is the
    * effective cwd while `path` remains the source/recent entry.
+   * Each device value is a complete selection: updating it replaces the value,
+   * including Git metadata. Other devices are preserved; `undefined` deletes
+   * an explicitly patched device entry.
    *
    * Keyed per device so switching the bound device never resolves a path that
    * only exists on another machine. Persisted (server-synced) so the choice
@@ -1280,20 +1299,20 @@ export const resolveAgentAgencyConfig = (
 };
 
 /**
- * Apply "undefined means delete" semantics to a `workingDirByDevice` patch.
+ * Apply per-device replacement semantics to a `workingDirByDevice` patch.
  *
- * Deep-merge (used by both the client optimistic store and the server persist
- * path) can only add/overwrite keys — it silently skips `undefined` sources, so
- * it can never *remove* a per-device entry. To clear a device's cwd the patch
- * carries `{ [deviceId]: undefined }`; this prunes those keys from the merged
- * map after the merge has run.
+ * Run after a config deep-merge. Only explicitly marked devices are complete
+ * selections: omitted Git fields must not survive from the previous repository.
+ * Unmarked entries retain legacy deep-merge semantics because older clients
+ * send cached complete maps. Explicit `undefined` values still remove entries.
  *
  * Mutates `merged` in place (safe on an immer draft) and is a no-op when the
  * patch touches no device entries.
  */
-export const pruneWorkingDirByDeviceDeletes = (
+export const applyWorkingDirByDevicePatch = (
   merged: { workingDirByDevice?: Record<string, unknown> } | null | undefined,
   patch: { workingDirByDevice?: Record<string, unknown> } | null | undefined,
+  replaceDeviceIds: readonly string[] = [],
 ): void => {
   const incoming = patch?.workingDirByDevice;
   const target = merged?.workingDirByDevice;
@@ -1301,5 +1320,6 @@ export const pruneWorkingDirByDeviceDeletes = (
 
   for (const key of Object.keys(incoming)) {
     if (incoming[key] === undefined) delete target[key];
+    else if (replaceDeviceIds.includes(key)) target[key] = incoming[key];
   }
 };

@@ -1,6 +1,14 @@
+import type { DeviceBoundAgentItem, DeviceEnroller, DeviceRunningSummary } from '@lobechat/types';
+
 import { lambdaClient } from '@/libs/trpc/client';
+import { type TopicListItem } from '@/services/topic';
 
 type DeviceClient = typeof lambdaClient.device;
+
+/** A running topic on a device, with the member who started it. */
+export interface DeviceRunningTopic extends TopicListItem {
+  user: DeviceEnroller | null;
+}
 
 /**
  * Single chokepoint for the `device` TRPC router. Components, hooks and stores
@@ -31,6 +39,11 @@ class DeviceService {
     return lambdaClient.device.browseDirectory.query(input);
   }
 
+  /** Create a folder inside the directory a remote folder picker is browsing. */
+  createDirectory(input: Parameters<DeviceClient['createDirectory']['mutate']>[0]) {
+    return lambdaClient.device.createDirectory.mutate(input);
+  }
+
   /** Probe whether an agent platform (openclaw / hermes) is available on a device. */
   checkCapability(input: Parameters<DeviceClient['checkCapability']['query']>[0]) {
     return lambdaClient.device.checkCapability.query(input);
@@ -44,6 +57,20 @@ class DeviceService {
   /** Scan a device for every known heterogeneous agent type in one pass. */
   scanAgents(input: Parameters<DeviceClient['scanAgents']['query']>[0]) {
     return lambdaClient.device.scanAgents.query(input);
+  }
+
+  /** Topics running on a device right now, and the agents routed to it. */
+  getDeviceActivity(
+    input: Parameters<DeviceClient['getDeviceActivity']['query']>[0],
+  ): Promise<{ agents: DeviceBoundAgentItem[]; runningTopics: DeviceRunningTopic[] }> {
+    // Same row shape `topicService.queryTopics` serves; its DB-side type differs
+    // only in how timestamps are declared.
+    return lambdaClient.device.getDeviceActivity.query(input) as any;
+  }
+
+  /** Running-topic count and the members behind it, for every device in the list. */
+  getRunningSummary(): Promise<DeviceRunningSummary[]> {
+    return lambdaClient.device.getRunningSummary.query();
   }
 
   /** Live tunnel links, optionally narrowed to one device. */
@@ -95,6 +122,33 @@ class DeviceService {
 
   restartCli(input: Parameters<DeviceClient['restartCli']['mutate']>[0]) {
     return lambdaClient.device.restartCli.mutate(input);
+  }
+
+  /**
+   * Interactive terminal on the device. `createTerminalSession` opens a PTY and
+   * the rest drive it: `writeTerminal` for input, `readTerminal` to drain
+   * output from a cursor, `resizeTerminal` when the panel changes size and
+   * `closeTerminal` to end it. Polling rather than streaming is deliberate —
+   * see `@lobechat/device-control`'s terminal types.
+   */
+  createTerminalSession(input: Parameters<DeviceClient['createTerminalSession']['mutate']>[0]) {
+    return lambdaClient.device.createTerminalSession.mutate(input);
+  }
+
+  writeTerminal(input: Parameters<DeviceClient['writeTerminal']['mutate']>[0]) {
+    return lambdaClient.device.writeTerminal.mutate(input);
+  }
+
+  readTerminal(input: Parameters<DeviceClient['readTerminal']['mutate']>[0]) {
+    return lambdaClient.device.readTerminal.mutate(input);
+  }
+
+  resizeTerminal(input: Parameters<DeviceClient['resizeTerminal']['mutate']>[0]) {
+    return lambdaClient.device.resizeTerminal.mutate(input);
+  }
+
+  closeTerminal(input: Parameters<DeviceClient['closeTerminal']['mutate']>[0]) {
+    return lambdaClient.device.closeTerminal.mutate(input);
   }
 
   /** The device's recent CPU / memory / load history, bucketed for charting. */

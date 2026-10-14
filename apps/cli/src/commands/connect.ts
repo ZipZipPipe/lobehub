@@ -56,7 +56,10 @@ import {
   resolveDeviceIdentity,
   resolveWorkspaceDeviceIdentity,
 } from '../device/register';
+import { TerminalSessionManager } from '../device/terminal';
 import {
+  CONNECT_RETRYABLE_EXIT_CODE,
+  getWorkspaceFailureExitCode,
   installConnectService,
   readConnectServiceStatus,
   restartConnectService,
@@ -93,7 +96,7 @@ interface ConnectOptions {
   serviceChild?: boolean;
   token?: string;
   verbose?: boolean;
-  /** Enroll this machine as a device of the given workspace (admin only). */
+  /** Enroll this machine as a device of the given workspace (workspace members). */
   workspace?: string;
 }
 
@@ -104,7 +107,7 @@ export function registerConnectCommand(program: Command) {
     .option('--token <jwt>', 'JWT access token')
     .option('--gateway <url>', 'Device gateway URL')
     .option('--device-id <id>', 'Device ID (auto-generated if not provided)')
-    .option('--workspace <id>', 'Enroll as a device of this workspace (admin only)')
+    .option('--workspace <id>', 'Enroll as a device of this workspace (workspace members)')
     .option(
       '--public',
       'With --workspace: enroll into the shared pool visible to every member (default: private, visible only to you)',
@@ -201,9 +204,18 @@ export function registerConnectCommand(program: Command) {
   serviceCmd
     .command('install')
     .description('Install and start the Linux user systemd connect service')
-    .action(() => {
-      installConnectService();
-      log.info(`Installed and started ${CONNECT_SERVICE_NAME}.`);
+    .option('--workspace <id>', 'Enroll as a device of this workspace (workspace members)')
+    .option(
+      '--public',
+      'With --workspace: enroll into the shared pool visible to every member (default: private, visible only to you)',
+    )
+    .action((options: Pick<ConnectOptions, 'public' | 'workspace'>) => {
+      installConnectService({ public: options.public, workspace: options.workspace });
+      log.info(
+        options.workspace
+          ? `Installed and started ${CONNECT_SERVICE_NAME} for workspace ${options.workspace}.`
+          : `Installed and started ${CONNECT_SERVICE_NAME}.`,
+      );
       log.info("Run 'lh connect service status' to inspect the service.");
     });
 
@@ -326,7 +338,8 @@ function buildDaemonArgs(options: ConnectOptions): string[] {
 }
 
 async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
-  let auth = await resolveToken(options);
+  const unavailableExitCode = options.workspace ? CONNECT_RETRYABLE_EXIT_CODE : undefined;
+  let auth = await resolveToken({ ...options, unavailableExitCode });
   const settings = loadSettings();
   const gatewayUrl = normalizeUrl(options.gateway) || settings?.gatewayUrl;
 
@@ -363,14 +376,20 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
   let connectToken = auth.token;
   let connectTokenType: 'apiKey' | 'jwt' | 'serviceToken' = auth.tokenType;
   if (workspaceId) {
-    const minted = await mintWorkspaceConnectToken(auth, workspaceId);
-    connectToken = minted.token;
+    try {
+      const minted = await mintWorkspaceConnectToken(auth, workspaceId);
+      connectToken = minted.token;
+    } catch (err) {
+      log.error(`Workspace connect token mint failed: ${(err as Error).message}`);
+      process.exit(getWorkspaceFailureExitCode(err));
+      throw new Error('process.exit', { cause: err });
+    }
     connectTokenType = 'jwt';
   }
 
   // Re-resolve the admin auth and, for workspace mode, re-mint the connect token.
   const refreshConnectToken = async (): Promise<string | undefined> => {
-    const refreshed = await resolveToken({});
+    const refreshed = await resolveToken({ unavailableExitCode });
     if (!refreshed) return undefined;
     auth = refreshed;
     if (workspaceId) {
@@ -420,14 +439,22 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
   info('───────────────────');
 
   // Update local connection status so other CLI commands can resolve the current device
-  const updateStatus = (connectionStatus: string) => {
+  let connectionStatus = 'connecting';
+  let lastRequestAt: string | undefined;
+  const updateStatus = (status: string) => {
+    connectionStatus = status;
     writeStatus({
       connectionStatus,
       deviceId: client.currentDeviceId,
       gatewayUrl: resolvedGatewayUrl,
+      lastRequestAt,
       pid: process.pid,
       startedAt: startedAt.toISOString(),
     });
+  };
+  const recordRequest = () => {
+    lastRequestAt = new Date().toISOString();
+    updateStatus(connectionStatus);
   };
 
   const startedAt = new Date();
@@ -449,6 +476,15 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
   // mode-specific `enrollWorkspace` / `unenrollWorkspace` handlers are attached
   // further below once the workspace-share machinery is in scope — every bound
   // connection reads this object by reference, so late attachment is safe.
+  //
+  // Interactive shells for the remote terminal. One manager per process, read
+  // by reference by every gateway connection this daemon owns, so a
+  // workspace-share connection reaches the same sessions as the personal one.
+  // Constructing it is cheap — the native PTY binding is only loaded when a
+  // session is actually created, so a daemon that never opens a terminal never
+  // touches it.
+  const terminals = new TerminalSessionManager({ logger: { warn: (message) => info(message) } });
+
   const maintenance = new CliMaintenance({
     activeTasks: () =>
       getActiveShellCount() + listTasks().filter((task) => isProcessAlive(task.pid)).length,
@@ -457,8 +493,11 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
     restartArgs: buildDaemonArgs(options).slice(1),
     shutdown: () => shutdown(),
   });
+
   const deviceControlDeps: DeviceControlDeps = {
     checkCliUpdate: maintenance.check,
+    closeTerminal: (params) => Promise.resolve(terminals.close(params)),
+    createTerminalSession: (params) => terminals.create(params),
     getCliUpdateState: maintenance.getState,
     getLocalFilePreview: defaultGetLocalFilePreview,
     getProjectFileIndex: defaultGetProjectFileIndex,
@@ -467,8 +506,11 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
         ...params,
         env: { ...process.env, ...params.env },
       }),
+    readTerminal: (params) => Promise.resolve(terminals.read(params)),
+    resizeTerminal: (params) => Promise.resolve(terminals.resize(params)),
     restartCli: maintenance.restart,
     searchProjectFiles: defaultSearchProjectFiles,
+    writeTerminal: (params) => Promise.resolve(terminals.write(params)),
   };
 
   const handlerContext: GatewayHandlerContext = {
@@ -479,6 +521,7 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
     info,
     isDaemonChild,
     maintenance,
+    recordRequest,
   };
 
   // Request handlers (system info / tool calls / device RPCs / agent runs) —
@@ -738,6 +781,7 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
   // (e.g., auto-reconnect may send an expired JWT before proactive refresh fires)
   let authFailedRefreshAttempted = false;
   client.on('auth_failed', async (reason) => {
+    let exitCode = 1;
     if (connectTokenType === 'jwt' && !authFailedRefreshAttempted) {
       authFailedRefreshAttempted = true;
       info(`Authentication failed (${reason}). Attempting token refresh...`);
@@ -752,8 +796,9 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
           await client.reconnect();
           return;
         }
-      } catch {
-        // fall through
+      } catch (err) {
+        error(`Token refresh failed: ${(err as Error).message}`);
+        if (workspaceId) exitCode = getWorkspaceFailureExitCode(err);
       }
     }
 
@@ -762,7 +807,7 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
       `Run '${CLI_PRIMARY_BIN} login', or set ${CLI_API_KEY_ENV} and run '${CLI_PRIMARY_BIN} login --server <url>' to configure API key authentication.`,
     );
     cleanup();
-    process.exit(1);
+    process.exit(exitCode);
   });
 
   // Handle auth expired — refresh token and reconnect automatically
@@ -773,6 +818,7 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
     }
 
     info('Authentication expired. Attempting to refresh token...');
+    let exitCode = 1;
 
     try {
       const newToken = await refreshConnectToken();
@@ -783,13 +829,14 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
         await client.reconnect();
         return;
       }
-    } catch {
-      // refresh failed — fall through
+    } catch (err) {
+      error(`Token refresh failed: ${(err as Error).message}`);
+      if (workspaceId) exitCode = getWorkspaceFailureExitCode(err);
     }
 
     error("Could not refresh token. Run 'lh login' to re-authenticate.");
     cleanup();
-    process.exit(1);
+    process.exit(exitCode);
   });
 
   // Another `lh connect` of this install (same persisted connection id) took
@@ -813,6 +860,9 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
     info('Shutting down...');
     cancelRefreshTimer?.();
     cleanupAllProcesses();
+    // Kill every remote-terminal shell this daemon started, so a stopping
+    // `lh connect` does not leave orphaned PTYs behind on the machine.
+    terminals.dispose();
     // Close share connections but keep the persisted enrollments — the next
     // startup restores them (or clears them if revoked meanwhile).
     for (const wsId of workspaceConnections.keys()) closeWorkspaceConnection(wsId);
@@ -864,7 +914,7 @@ async function runConnect(options: ConnectOptions, isDaemonChild: boolean) {
       if (workspaceId) {
         error(`Workspace device registration failed: ${(err as Error).message}`);
         cleanup();
-        process.exit(1);
+        process.exit(getWorkspaceFailureExitCode(err));
       }
       error(`Device registration failed (non-fatal): ${(err as Error).message}`);
     }
@@ -891,6 +941,7 @@ interface GatewayHandlerContext {
   info: (msg: string) => void;
   isDaemonChild: boolean;
   maintenance: CliMaintenance;
+  recordRequest: () => void;
 }
 
 /**
@@ -904,7 +955,7 @@ function bindGatewayClientHandlers(
   ctx: GatewayHandlerContext,
   connectionWorkspaceId?: string,
 ) {
-  const { deps, error, getServerUrl, info, isDaemonChild, maintenance } = ctx;
+  const { deps, error, getServerUrl, info, isDaemonChild, maintenance, recordRequest } = ctx;
 
   // Handle system info requests
   client.on('system_info_request', (request: SystemInfoRequestMessage) => {
@@ -918,6 +969,7 @@ function bindGatewayClientHandlers(
 
   // Handle tool call requests
   client.on('tool_call_request', async (request: ToolCallRequestMessage) => {
+    recordRequest();
     const { operationId, requestId, timeout, toolCall } = request;
     if (isDaemonChild) {
       appendLog(
@@ -989,6 +1041,7 @@ function bindGatewayClientHandlers(
   // once the child starts, `rejected` if it fails to spawn (e.g. bad cwd) — so
   // a failed dispatch surfaces as an error instead of a stuck assistant message.
   client.on('agent_run_request', async (request: AgentRunRequestMessage) => {
+    recordRequest();
     info(
       `Received agent_run_request: operationId=${request.operationId} type=${request.agentType}`,
     );
@@ -996,6 +1049,7 @@ function bindGatewayClientHandlers(
       const ack = await maintenance.run(() =>
         spawnHeteroAgentRun(
           {
+            agentId: request.agentId,
             agentType: request.agentType,
             assistantMessageId: request.assistantMessageId,
             args: request.args,

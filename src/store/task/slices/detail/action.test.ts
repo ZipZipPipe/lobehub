@@ -11,12 +11,23 @@ import { cacheScope, createReplicaState } from '@/libs/replica';
 import { useClientDataSWR } from '@/libs/swr';
 import { taskService } from '@/services/task';
 import { workService } from '@/services/work';
+import { goalGraphResource } from '@/store/goal/projection';
 import { taskDetailSelectors } from '@/store/task/selectors';
 import { useUserStore } from '@/store/user';
 
 import { useTaskStore } from '../../store';
 import { taskDetailResource } from './projection';
 import { taskDetailRefreshes } from './testUtils';
+
+/** A goal graph's replica sync key, as the refresh matcher has to recognise it. */
+const goalGraphSyncKey = (goalId: string) => [
+  'replica:sync',
+  goalGraphResource.name,
+  goalGraphResource.version,
+  goalGraphResource.scope.get(),
+  goalId,
+  {},
+];
 
 vi.mock('@/services/task', () => ({
   taskService: {
@@ -53,6 +64,10 @@ beforeEach(() => {
   vi.resetAllMocks();
   useTaskStore.setState({
     activeTaskId: undefined,
+    activeTopicDrawerAgentId: undefined,
+    activeTopicDrawerFocusRequest: undefined,
+    activeTopicDrawerTitle: undefined,
+    activeTopicDrawerTopicId: undefined,
     isCreatingTask: false,
     isDeletingTask: false,
     taskDetailMap: {},
@@ -212,6 +227,45 @@ describe('TaskDetailSliceAction', () => {
       useTaskStore.getState().setActiveTaskId('T-1');
       // Should not trigger state change
       expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('topic drawer focus request', () => {
+    it('should start a focus request when the drawer opens with conversational intent', () => {
+      useTaskStore.getState().openTopicDrawer('tpc-1', { agentId: 'agt-1', autoFocus: true });
+
+      expect(taskDetailSelectors.topicDrawerFocusRequest(useTaskStore.getState())).toBe(1);
+    });
+
+    it('should not start a focus request for a plain opening', () => {
+      useTaskStore.getState().openTopicDrawer('tpc-1', { agentId: 'agt-1' });
+
+      expect(useTaskStore.getState().activeTopicDrawerFocusRequest).toBeUndefined();
+    });
+
+    it('should bump the request on every repeated autoFocus opening of the same topic', () => {
+      useTaskStore.getState().openTopicDrawer('tpc-1', { agentId: 'agt-1' });
+      useTaskStore.getState().openTopicDrawer('tpc-1', { agentId: 'agt-1', autoFocus: true });
+      useTaskStore.getState().openTopicDrawer('tpc-1', { agentId: 'agt-1', autoFocus: true });
+
+      expect(useTaskStore.getState().activeTopicDrawerFocusRequest).toBe(2);
+    });
+
+    it('should not carry a focus request over to a plainly opened different topic', () => {
+      useTaskStore.getState().openTopicDrawer('tpc-1', { autoFocus: true });
+      useTaskStore.getState().openTopicDrawer('tpc-2');
+
+      expect(useTaskStore.getState().activeTopicDrawerFocusRequest).toBeUndefined();
+    });
+
+    it('should clear the focus request on close and when switching tasks', () => {
+      useTaskStore.getState().openTopicDrawer('tpc-1', { autoFocus: true });
+      useTaskStore.getState().closeTopicDrawer();
+      expect(useTaskStore.getState().activeTopicDrawerFocusRequest).toBeUndefined();
+
+      useTaskStore.getState().openTopicDrawer('tpc-1', { autoFocus: true });
+      useTaskStore.getState().setActiveTaskId('T-2');
+      expect(useTaskStore.getState().activeTopicDrawerFocusRequest).toBeUndefined();
     });
   });
 
@@ -500,8 +554,10 @@ describe('TaskDetailSliceAction', () => {
         .mock.calls.map(([key]) => key)
         .filter((key): key is (key: unknown) => boolean => typeof key === 'function');
       const matchesGoalGraph = (key: unknown) => matchers.some((match) => match(key));
-      expect(matchesGoalGraph(['goal:graph', 'goal-1'])).toBe(true);
-      expect(matchesGoalGraph(['goal:graph', 'goal-1', 'ws-1'])).toBe(true);
+      // The goal graph is a replica: its sync keys live outside the SWR `goal:`
+      // cache, so the refresh matches through the resource.
+      expect(matchesGoalGraph(goalGraphSyncKey('goal-1'))).toBe(true);
+      expect(matchesGoalGraph(['goal:graph', 'goal-1'])).toBe(false);
       expect(matchesGoalGraph(['task:detail', 'T-1'])).toBe(false);
     });
 
@@ -518,7 +574,7 @@ describe('TaskDetailSliceAction', () => {
         .mocked(mutate)
         .mock.calls.map(([key]) => key)
         .filter((key): key is (key: unknown) => boolean => typeof key === 'function');
-      expect(matchers.some((match) => match(['goal:graph', 'goal-1']))).toBe(false);
+      expect(matchers.some((match) => match(goalGraphSyncKey('goal-1')))).toBe(false);
     });
 
     it('should clear stale editorData for instruction-only optimistic updates', async () => {

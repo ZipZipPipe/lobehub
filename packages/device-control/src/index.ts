@@ -3,8 +3,10 @@ export {
   APP_UPDATE_UNSUPPORTED_MESSAGE,
   CLI_UPDATE_UNSUPPORTED_MESSAGE,
   DEVICE_RPC_METHODS,
+  deviceRpcClients,
   type DeviceRpcMethod,
   executeDeviceRpc,
+  TERMINAL_UNSUPPORTED_MESSAGE,
   TRASH_UNSUPPORTED_MESSAGE,
 } from './dispatch';
 export {

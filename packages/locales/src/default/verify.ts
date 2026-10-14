@@ -266,6 +266,13 @@ export default {
   'acceptance.comments.empty': 'No discussion yet.',
   'acceptance.comments.readOnly': 'You can read the discussion; sign in to take part.',
   'acceptance.comments.region': 'Region',
+  'acceptance.comments.beforeDelivery': 'Before delivery',
+  'acceptance.comments.sectionMessages': '{{count}} message(s)',
+  'acceptance.comments.aside.label': 'Acceptance details',
+  'acceptance.comments.aside.status': 'Status',
+  'acceptance.comments.aside.round': 'Round',
+  'acceptance.comments.aside.approvals': 'Approved by',
+  'acceptance.comments.aside.decide': 'Review checks to decide',
   'acceptance.comments.roundContext': 'Round {{round}}',
   'acceptance.comments.commentEvidence': 'Comment on a region',
   'acceptance.comments.regionModalTitle': 'Mark the area you mean',
@@ -394,6 +401,9 @@ export default {
   'acceptance.origin.agentFallback': 'Agent',
   'acceptance.origin.backToRuns': 'Back to runs',
   'acceptance.origin.openTopic': 'Open topic',
+  'acceptance.preview.review': 'Review on preview',
+  'acceptance.preview.reviewHint':
+    'Open the deployed preview with the review toolbar to comment on the live page',
   'acceptance.reject.descriptionCopy':
     'No agent is attached to this delivery. Rejecting copies the repair prompt, including any reason you add — paste it to any agent to start the next round.',
   'acceptance.reject.description':
