@@ -1,4 +1,4 @@
-import { Select } from '@lobehub/ui/base-ui';
+import { Select } from '@lobehub/ui';
 import { useTranslation } from 'react-i18next';
 
 import { useGenerationConfigParam } from '@/store/image/slices/generationConfig/hooks';

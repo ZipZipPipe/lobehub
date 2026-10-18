@@ -1,5 +1,4 @@
-import { Flexbox, InputNumber } from '@lobehub/ui';
-import { ActionIcon, Button, Text } from '@lobehub/ui/base-ui';
+import { ActionIcon, Button, Flexbox, InputNumber, Text } from '@lobehub/ui';
 import { Check, Plus, X } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
