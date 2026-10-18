@@ -33,7 +33,7 @@ vi.mock('react-router', () => ({
   useSearchParams: () => [{ get: mockSearchParamsGet }],
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   toast: { error: mockMessageError, success: mockMessageSuccess },
 }));
@@ -91,7 +91,7 @@ const mockForm = vi.hoisted(() => ({
   setValue: vi.fn(),
   validate: vi.fn(),
 }));
-vi.mock('@lobehub/ui/base-ui/form', () => ({
+vi.mock('@lobehub/ui/form', () => ({
   useForm: () => mockForm,
 }));
 

@@ -8,7 +8,6 @@ import { useEdgeSpeech, useMicrosoftSpeech, useOpenAITTS } from '@lobehub/tts/re
 import isEqual from 'fast-deep-equal';
 
 import { useBusinessTTSProvider } from '@/business/client/hooks/useBusinessTTSProvider';
-import { createHeaderWithOpenAI } from '@/services/_header';
 import { API_ENDPOINTS } from '@/services/_url';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors } from '@/store/agent/selectors';
@@ -41,7 +40,6 @@ export const useTTS = (content: string, config?: TTSConfig) => {
       useSelectedTTS = useOpenAITTS;
       options = {
         api: {
-          headers: createHeaderWithOpenAI(),
           serviceUrl: API_ENDPOINTS.tts(enableBusinessFeatures ? businessTTSProvider : 'openai'),
         },
         options: {

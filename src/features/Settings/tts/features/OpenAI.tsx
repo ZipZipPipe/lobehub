@@ -1,8 +1,7 @@
 'use client';
 
-import { Icon } from '@lobehub/ui';
-import { Select, Skeleton } from '@lobehub/ui/base-ui';
-import { Form, type FormGroupItem, useForm } from '@lobehub/ui/base-ui/form';
+import { Icon, Select, Skeleton } from '@lobehub/ui';
+import { Form, type FormGroupItem, useForm } from '@lobehub/ui/form';
 import isEqual from 'fast-deep-equal';
 import { Loader2Icon } from 'lucide-react';
 import { memo, useState } from 'react';

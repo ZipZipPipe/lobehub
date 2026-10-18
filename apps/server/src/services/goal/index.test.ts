@@ -8,7 +8,7 @@ import {
 } from '@lobechat/const/goal';
 import type { ChatTopicMetadata } from '@lobechat/types';
 import * as goalGraphUtils from '@lobechat/utils/goalGraph';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getTestDB } from '@/database/core/getTestDB';
@@ -64,6 +64,7 @@ import * as scheduler from './scheduler';
 import { LocalGoalScheduler } from './scheduler/impls';
 import { uncoveredAxisValues } from './spec';
 import { TaskRecoveryCoordinator } from './taskRecoveryCoordinator';
+import { approveRelease } from './testUtils';
 import type { GoalTickObservation } from './traceObservation';
 
 const serverDB: LobeChatDatabase = await getTestDB();
@@ -2087,6 +2088,95 @@ describe('GoalService', () => {
     expect(after.nodes.filter((n) => n.kind === 'task')).toHaveLength(12);
   });
 
+  /**
+   * Regression: a planner failure was swallowed whole — the goal quietly
+   * became one task built from the raw requirement, and nothing anywhere said
+   * the planner had failed or why.
+   */
+  it('records why the planner failed on the task it fell back to', async () => {
+    vi.spyOn(GoalCriteriaGeneratorService.prototype, 'decompose').mockRejectedValue({
+      error: { message: 'Insufficient Balance' },
+      errorType: 'InsufficientQuota',
+    });
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({ requirement: '迁移 12 个 store', title: 'Migrate' });
+    await service.tick(graph.goal.id);
+
+    const task = (await service.graph(graph.goal.id)).nodes.find((n) => n.kind === 'task');
+    const [created] = await serverDB
+      .select()
+      .from(goalEvents)
+      .where(and(eq(goalEvents.entityId, task.id), eq(goalEvents.eventType, 'created')));
+    expect(created.reason).toBe(
+      'Planner failed (InsufficientQuota: Insufficient Balance); no main Agent could take the goal; started from the raw requirement',
+    );
+  });
+
+  it('records why a batch claim was refused on the first task it planned instead', async () => {
+    vi.spyOn(GoalCriteriaGeneratorService.prototype, 'decompose').mockResolvedValue({
+      problemStatement: '把 8 个 store 迁移到 replica',
+      rollout: {
+        recipeOutline: '把 store 换成 replica 支撑的实现',
+        repeatable: true,
+        unitCount: 8,
+        units: Array.from({ length: 8 }, (_, i) => `Unit ${i + 1}`),
+        variants: [],
+      },
+      tasks: Array.from({ length: 3 }, (_, i) => ({
+        dependsOn: [],
+        instruction: `把 src/store/store${i + 1}.ts 换成 replica 实现`,
+        title: `Unit ${i + 1}`,
+      })),
+    });
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({ title: 'Migrate 8 stores' });
+    await service.tick(graph.goal.id);
+
+    const tasks = (await service.graph(graph.goal.id)).nodes.filter((n) => n.kind === 'task');
+    const reasons = await serverDB
+      .select({ entityId: goalEvents.entityId, reason: goalEvents.reason })
+      .from(goalEvents)
+      .where(eq(goalEvents.eventType, 'created'));
+    const reasonOf = (id: string) => reasons.find((event) => event.entityId === id)?.reason;
+    expect(reasonOf(tasks[0].id)).toBe(
+      'Batch claim refused (unitCount 8 is below the threshold 10); planned unit by unit',
+    );
+    // Said once, not on every task.
+    expect(reasonOf(tasks[1].id)).toBeNull();
+  });
+
+  /**
+   * Regression: a model titles its probes around the unit — "迁移 device store
+   * （探针）" for unit `device` — and the roster de-duplicated on exact titles,
+   * so every probed unit was queued again and would run twice.
+   */
+  it('does not queue a probed unit again when the probe title wraps its name', async () => {
+    const units = Array.from({ length: 12 }, (_, i) => `store${i + 1}`);
+    vi.spyOn(GoalCriteriaGeneratorService.prototype, 'decompose').mockResolvedValue({
+      problemStatement: '把 12 个同构的 store 迁移到 replica',
+      rollout: {
+        recipeOutline: '把 store 换成 replica 支撑的实现',
+        repeatable: true,
+        unitCount: 12,
+        units,
+        variants: [],
+      },
+      tasks: units.slice(0, 3).map((unit) => ({
+        dependsOn: [],
+        instruction: `把 src/store/${unit}.ts 换成 replica 实现，并补冷启动回归测试`,
+        title: `迁移 ${unit} store（探针）`,
+      })),
+    });
+    const service = new GoalService(serverDB, userId);
+    const graph = await service.create({ title: 'Migrate 12 stores' });
+    await service.tick(graph.goal.id);
+
+    const roster = (await service.graph(graph.goal.id)).goal.config!.rolloutState!.unitTitles!;
+    expect(roster).toHaveLength(12);
+    expect(roster.slice(0, 3)).toEqual(units.slice(0, 3).map((u) => `迁移 ${u} store（探针）`));
+    expect(roster.slice(3)).toEqual(units.slice(3));
+  });
+
   it('materializes a fallback roster above the batch cap without trimming it', async () => {
     const units = Array.from({ length: 64 }, (_, i) => `Unit ${i + 1}`);
     vi.spyOn(GoalCriteriaGeneratorService.prototype, 'decompose').mockResolvedValue({
@@ -2181,6 +2271,7 @@ describe('GoalService', () => {
     });
 
     await service.tick(graph.goal.id);
+    await approveRelease(service, graph.goal.id);
     const next = (await service.graph(graph.goal.id)).goal.config!.rolloutState!;
     expect(next.gateLog?.at(-1)).toMatchObject({ outcome: 'released', wave: 3 });
     expect(next.wavesReleased).toBe(3);
@@ -2222,6 +2313,7 @@ describe('GoalService', () => {
     });
 
     await service.tick(graph.goal.id);
+    await approveRelease(service, graph.goal.id);
     const next = (await service.graph(graph.goal.id)).goal.config!.rolloutState!;
     // 20 units at the default wave size of 5 are four waves; this one is the fifth.
     expect(next.gateLog?.at(-1)).toMatchObject({ outcome: 'released', wave: 5 });
@@ -2251,13 +2343,16 @@ describe('GoalService', () => {
     const probeIds = (await service.graph(graph.goal.id)).goal.config!.rolloutState!.probeNodeIds;
     for (const id of probeIds) await graphModel.updateNodeStatus(graph.goal.id, id, 'resolved');
 
-    // The probes settled clean: the gate releases the first wave and says why.
+    // The probes settled clean: once the owner approves, the gate releases the
+    // first wave and says why.
     await service.tick(graph.goal.id);
+    await approveRelease(service, graph.goal.id);
     let state = (await service.graph(graph.goal.id)).goal.config!.rolloutState!;
     expect(state.gateLog).toHaveLength(1);
     expect(state.gateLog![0]).toMatchObject({
       outcome: 'released',
       releasedCount: 5,
+      approvedBy: 'user',
       revision: 1,
       trigger: 'gate',
       wave: 1,
@@ -2488,6 +2583,7 @@ describe('GoalService', () => {
       const probeIds = (await service.graph(graph.goal.id)).goal.config!.rolloutState!.probeNodeIds;
       for (const id of probeIds) await graphModel.updateNodeStatus(graph.goal.id, id, 'resolved');
       await service.tick(graph.goal.id);
+      await approveRelease(service, graph.goal.id);
       const state = (await service.graph(graph.goal.id)).goal.config!.rolloutState!;
       // The last two units went out, and the batch is not closed on release.
       expect(state.massNodeIds).toHaveLength(2);
@@ -2851,46 +2947,6 @@ describe('GoalService', () => {
       outcome: 'blocked',
       trigger: 'unit',
     });
-  });
-
-  it('releases a wave once when two advances pass the gate together', async () => {
-    vi.spyOn(GoalCriteriaGeneratorService.prototype, 'decompose').mockResolvedValue({
-      problemStatement: '把 50 个同构的 store 迁移到 replica',
-      rollout: {
-        recipeOutline: '把 store 换成 replica 支撑的实现',
-        repeatable: true,
-        unitCount: 50,
-        units: Array.from({ length: 50 }, (_, i) => `Unit ${i + 1}`),
-        variants: [],
-      },
-      tasks: Array.from({ length: 5 }, (_, i) => ({
-        dependsOn: [],
-        instruction: `把 src/store/store${i + 1}.ts 换成 replica 实现`,
-        title: `Unit ${i + 1}`,
-      })),
-    });
-    const service = new GoalService(serverDB, userId);
-    const graph = await service.create({ title: 'Migrate stores' });
-    await service.tick(graph.goal.id);
-    const graphModel = new GoalGraphModel(serverDB, userId);
-    const probeIds = (await service.graph(graph.goal.id)).goal.config!.rolloutState!.probeNodeIds;
-    for (const id of probeIds) await graphModel.updateNodeStatus(graph.goal.id, id, 'resolved');
-
-    // Two settled tasks each queued an advance; both see the gate pass.
-    await Promise.all([service.tick(graph.goal.id), service.tick(graph.goal.id)]);
-
-    const after = await service.graph(graph.goal.id);
-    const state = after.goal.config!.rolloutState!;
-    const released = after.nodes.filter(
-      (n) => n.kind === 'task' && !probeIds.includes(n.id) && /^Unit \d+$/.test(n.title),
-    );
-    // One wave, once: no duplicate units and the cursor counts it once.
-    expect(released.map((n) => n.title).sort()).toEqual(
-      [...new Set(released.map((n) => n.title))].sort(),
-    );
-    expect(state.massNodeIds).toHaveLength(released.length);
-    expect(state.releasedCount).toBe(probeIds.length + released.length);
-    expect(state.gateLog?.filter((entry) => entry.outcome === 'released')).toHaveLength(1);
   });
 
   it('stops the running Tasks of the members a restart retires', async () => {

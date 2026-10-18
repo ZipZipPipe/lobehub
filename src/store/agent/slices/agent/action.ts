@@ -6,7 +6,7 @@ import {
   isChatGroupSessionId,
   type LobeAgentAgencyConfig,
 } from '@lobechat/types';
-import { toast } from '@lobehub/ui/base-ui';
+import { toast } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import { t } from 'i18next';
 import { produce } from 'immer';
@@ -27,12 +27,7 @@ import { agentConfigKeys } from '@/libs/swr/keys';
 import { getCacheScope } from '@/libs/swr/useCacheScope';
 import type { AvailableAgentItem, CreateAgentParams, CreateAgentResult } from '@/services/agent';
 import { agentService, AVAILABLE_AGENTS_CONTEXT_QUERY_LIMIT } from '@/services/agent';
-import {
-  type AgentDocumentListItem,
-  agentDocumentService,
-  agentDocumentSWRKeys,
-  resolveAgentDocumentsContext,
-} from '@/services/agentDocument';
+import { resolveAgentDocumentsContext } from '@/services/agentDocument';
 import { aiAgentService } from '@/services/aiAgent';
 import { useGlobalStore } from '@/store/global';
 import { globalGeneralSelectors } from '@/store/global/selectors';
@@ -607,16 +602,6 @@ export class AgentSliceActionImpl {
     });
 
     return this.#toAgentConfigSyncResult(sync, agentId);
-  };
-
-  useFetchAgentDocuments = (agentId?: string | null): SWRResponse<AgentDocumentListItem[]> => {
-    return useClientDataSWRWithSync<AgentDocumentListItem[]>(
-      agentId ? agentDocumentSWRKeys.documentsList(agentId) : null,
-      async () => agentDocumentService.listDocuments({ agentId: agentId! }),
-      {
-        revalidateOnFocus: false,
-      },
-    );
   };
 
   useFetchAvailableAgents = (enabled: boolean): SWRResponse<AvailableAgentItem[]> => {

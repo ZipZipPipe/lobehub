@@ -15,6 +15,8 @@ export default {
   'agentLabel.create': 'New label',
   'agentLabel.manage': 'Manage labels',
   'agentLabel.menuTitle': 'Labels',
+  'agentSkills.ensureFailed':
+    'Some skills this agent relies on could not be installed automatically: {{skills}}. You can add them manually in the Skill Store.',
   'agentViewAll.groupBy.author': 'Author',
   'agentViewAll.groupBy.label': 'Label',
   'agentViewAll.groupBy.noLabel': 'No label',
@@ -53,6 +55,7 @@ export default {
     'Current topic is not saved, please save it first to use subtopic feature',
   'forkRequiresSavedTopic': 'Current topic is not saved. Save it first to fork a new topic',
   'forkTopic': 'Continue in new topic',
+  'supportAgent.troubleshoot.question': 'This message failed. Please help me troubleshoot it.',
   'viewExecutionDetails': 'View execution details',
   'cancel': 'Cancel',
   'changelog': 'Changelog',
@@ -158,6 +161,7 @@ export default {
   'cmdk.newLibrary': 'Create New Library',
 
   'cmdk.newPage': 'Create New Page',
+  'cmdk.newTask': 'Create New Task',
 
   'cmdk.newTopic': 'New Topic in Current Agent',
 
@@ -214,6 +218,8 @@ export default {
   'cmdk.search.plugins': 'Skills',
   'cmdk.search.searchMore': 'Search more {{type}}',
   'cmdk.search.searching': 'Search Results',
+  'cmdk.search.task': 'Task',
+  'cmdk.search.tasks': 'Tasks',
   'cmdk.search.topic': 'Topic',
   'cmdk.search.topics': 'Topics',
   'cmdk.searchPlaceholder': 'Enter a command or search...',
@@ -502,13 +508,21 @@ export default {
   'supportAgent.error.unavailable':
     'The support assistant is unavailable right now. Try again later.',
   'supportAgent.feedback': 'Community & feedback',
+  'supportAgent.inspect.accessHint':
+    'For the next 10 minutes it can act as you in your account to investigate. It has been told to only read, and to change nothing unless you ask.',
   'supportAgent.inspect.allow': 'Allow',
   'supportAgent.inspect.declined': 'You declined the request',
   'supportAgent.inspect.deny': 'Decline',
+  'supportAgent.inspect.granted': 'Granted {{target}}',
   'supportAgent.inspect.hint':
     'It will be sent to the support assistant and kept with this support conversation.',
+  'supportAgent.inspect.reason': 'Why: {{reason}}',
   'supportAgent.inspect.request': 'The support assistant would like to look at {{target}}.',
+  'supportAgent.inspect.requestAccess': 'The support assistant is asking for {{target}}.',
   'supportAgent.inspect.shared': 'Shared {{target}}',
+  'supportAgent.inspect.target.access': 'temporary access to your account (10 minutes)',
+  'supportAgent.inspect.target.accessWithWorkspace':
+    'temporary access to your account in the workspace "{{title}}" (10 minutes)',
   'supportAgent.inspect.target.account': 'your plan, credit balance and budget usage',
   'supportAgent.inspect.target.accountWithWorkspace':
     'your plan, credit balance and budget usage, including the workspace "{{title}}"',

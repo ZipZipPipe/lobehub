@@ -17,6 +17,7 @@ import type {
   GoalTickResult,
   TaskItem,
 } from '@lobechat/types';
+import { isAgentOperationInFlight } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import { eq, sql } from 'drizzle-orm';
 import pMap from 'p-map';
@@ -186,10 +187,16 @@ export const goalPlanSchema = z.discriminatedUnion('action', [
     })
     .strict(),
   z.object({ action: z.literal('escalate'), reason, ask: goalAskSchema.optional() }).strict(),
+  /** Answers a batch release handed over by the coordinator: the next wave goes out. */
+  z.object({ action: z.literal('release'), reason }).strict(),
+  /**
+   * Answers a plan the owner sent back: the whole revised recipe the next probe
+   * round follows, rewritten from the owner's correction.
+   */
+  z.object({ action: z.literal('revise_plan'), reason, recipe: reason }).strict(),
 ]);
 type GoalPlan = z.infer<typeof goalPlanSchema>;
 const activeStatuses = new Set(['planning', 'running']);
-const terminalOperations = new Set(['done', 'error', 'interrupted']);
 const terminalNodes = new Set(['resolved', 'retired', 'rejected']);
 const TIMEOUT_MS = 20 * 60_000;
 /** Task comments listed in one planning turn's message; older ones are counted, not shown. */
@@ -226,6 +233,24 @@ const PLAN_REJECTION = {
   inactive: { message: 'Goal stopped or awaiting human decision', trpc: 'CONFLICT' },
   operation_mismatch: { message: 'Unrelated main Agent operation', trpc: 'FORBIDDEN' },
   pending_decision: { message: 'Goal stopped or awaiting human decision', trpc: 'CONFLICT' },
+  release_turn_only: {
+    message:
+      'This turn was handed a batch release; answer it with release, or escalate (without ask) for the owner to approve it',
+    trpc: 'BAD_REQUEST',
+  },
+  revise_turn_only: {
+    message:
+      'This turn was handed a plan the owner sent back; answer it with revise_plan carrying the full revised recipe',
+    trpc: 'BAD_REQUEST',
+  },
+  revise_unsolicited: {
+    message: 'revise_plan only answers a plan the owner sent back to this turn',
+    trpc: 'BAD_REQUEST',
+  },
+  release_unsolicited: {
+    message: 'release only answers a batch release the coordinator handed to this turn',
+    trpc: 'BAD_REQUEST',
+  },
   review_changed: {
     message:
       'Task review feedback changed; exit without a plan so the next bounded turn can read it',
@@ -394,8 +419,15 @@ const managerTurnToken = (goalId: string) => `${goalId}_${randomUUID()}`;
  */
 export const managerSnapshot = (graph: GoalGraphSnapshot) => {
   // Coordinator receipts are not planning input: arming a Task's quota wake while a
-  // turn runs must not make that turn's plan stale.
-  const { managerState: _state, quotaRetryWakeAt: _quotaWake, ...config } = graph.goal.config ?? {};
+  // turn runs must not make that turn's plan stale, and neither may the system
+  // planner's lease — a hand-over starts the turn while the lease is still held
+  // and releases it right after.
+  const {
+    managerState: _state,
+    planningCheckpoint: _lease,
+    quotaRetryWakeAt: _quotaWake,
+    ...config
+  } = graph.goal.config ?? {};
   return createHash('sha256')
     .update(
       JSON.stringify({
@@ -421,7 +453,15 @@ export const managerSnapshot = (graph: GoalGraphSnapshot) => {
  *  alone: "Task attempt budget was exhausted" is the same sentence for every task
  *  that reaches it, so a reason-only key makes the second task inherit the first
  *  one's answer. */
-export const problemKey = (problem: { reason: string; taskId?: string }) =>
+/** A problem the coordinator hands to the main Agent instead of stopping on a person. */
+export interface GoalTakeoverProblem {
+  /** `rollout_release`: a passed batch gate whose next wave the Agent releases or escalates. */
+  kind?: GoalManagerState['problemKind'];
+  reason: string;
+  taskId?: string;
+}
+
+export const problemKey = (problem: GoalTakeoverProblem) =>
   `${problem.taskId ?? 'goal'}::${problem.reason}`;
 
 /**
@@ -903,7 +943,7 @@ export class GoalManagerService {
         message:
           'Main Agent dispatch is unconfirmed; retain the Goal until its execution can be reconciled',
       });
-    if (terminalOperations.has(op.status)) return;
+    if (!isAgentOperationInFlight(op.status)) return;
     const result = await new AiAgentService(this.db, this.userId, {
       workspaceId: this.workspaceId,
     }).interruptTask({ operationId: op.id, topicId: state.topicId });
@@ -952,7 +992,7 @@ export class GoalManagerService {
    */
   takeOver = async (
     graph: GoalGraphSnapshot,
-    problem: { reason: string; taskId?: string },
+    problem: GoalTakeoverProblem,
   ): Promise<GoalTickResult | null> => {
     if (!this.eligible(graph)) return null;
     // Already answered: a takeover turn that ran for THIS problem has had its say,
@@ -963,6 +1003,28 @@ export class GoalManagerService {
     if (settled) return settled;
     return this.startTurn(graph, problem);
   };
+
+  /**
+   * Plan a goal the system planner handed over in its first pass — it failed, or
+   * judged one pass not enough. Nothing runs yet, so this is an ordinary first
+   * turn; the reason reaches the Agent as the turn's continuation.
+   */
+  async planInstead(graph: GoalGraphSnapshot, reason: string): Promise<GoalTickResult | null> {
+    if (!this.eligible(graph)) return null;
+    const settled = await this.settleInFlight(graph);
+    if (settled) return settled;
+    // An offer, not an obligation: with no turn or budget left the hand-over is
+    // declined, and the system planner's own plan runs. Left to `startTurn`, the
+    // limit would pause the goal instead and drop that plan.
+    const policy = graph.goal.config!.manager!;
+    if (
+      (graph.goal.config?.managerState?.turns ?? 0) >=
+        (policy.maxTurns ?? DEFAULT_MANAGER_MAX_TURNS) ||
+      (await this.budgetBlocked(graph))
+    )
+      return null;
+    return this.startTurn(graph, undefined, reason, { declineRefused: true });
+  }
 
   /** Return measured shortfalls to planning without weakening acceptance. */
   reconsiderAcceptance = async (
@@ -1041,7 +1103,7 @@ export class GoalManagerService {
       if (
         !settledLocally &&
         !neverStarted &&
-        (!operation || !terminalOperations.has(operation.status))
+        (!operation || isAgentOperationInFlight(operation.status))
       ) {
         if (operation?.status === 'waiting_for_human') {
           await this.wait(goal.id, 'Main Agent is waiting for a human decision');
@@ -1166,8 +1228,11 @@ export class GoalManagerService {
 
   private startTurn = async (
     graph: GoalGraphSnapshot,
-    problem?: { reason: string; taskId?: string },
+    problem?: GoalTakeoverProblem,
     continuation?: string,
+    // A hand-over has the system planner's plan to fall back on, so a dispatch
+    // proven never started declines instead of waiting out the turn.
+    { declineRefused = false }: { declineRefused?: boolean } = {},
   ): Promise<GoalTickResult | null> => {
     const { goal } = graph;
     const policy = goal.config!.manager!;
@@ -1287,6 +1352,7 @@ export class GoalManagerService {
         ...(problem
           ? {
               problem: problemKey(problem),
+              ...(problem.kind && { problemKind: problem.kind }),
               ...(problem.taskId && { problemTaskId: problem.taskId }),
             }
           : {}),
@@ -1354,6 +1420,7 @@ export class GoalManagerService {
           omittedFeedback: claimed.omittedFeedback,
           earlierFeedback: claimed.earlierFeedback,
           problem: problem?.reason,
+          problemKind: problem?.kind,
           continuation:
             continuation ??
             state?.replanReason ??
@@ -1381,10 +1448,17 @@ export class GoalManagerService {
       // call has returned. Any other failure may come after a run went live, so
       // it stays unconfirmed. Decided from the error, never from rows the owner
       // can edit or delete.
-      if (error instanceof TopicStartReservationError)
-        await this.recordUnstartedDispatch(goal.id, claimed.token).catch((saveError) =>
-          console.error('[goal:manager] failed to record the refused dispatch', saveError),
-        );
+      if (error instanceof TopicStartReservationError) {
+        const recorded = await this.recordUnstartedDispatch(
+          goal.id,
+          claimed.token,
+          declineRefused,
+        ).catch((saveError) => {
+          console.error('[goal:manager] failed to record the refused dispatch', saveError);
+          return false;
+        });
+        if (recorded && declineRefused) return null;
+      }
     }
     return this.wait(goal.id, 'Main Agent dispatched with CLI planning access');
   };
@@ -1405,7 +1479,7 @@ export class GoalManagerService {
         new AgentOperationModel(db, this.userId, this.workspaceId),
         state,
       );
-      if (operation && !terminalOperations.has(operation.status))
+      if (operation && isAgentOperationInFlight(operation.status))
         throw new TRPCError({
           code: 'CONFLICT',
           message: `The main Agent run ${operation.id} is still ${operation.status}; interrupt it before confirming its exit`,
@@ -1414,12 +1488,20 @@ export class GoalManagerService {
       return true;
     });
 
-  /** Mark a turn whose dispatch was refused its topic reservation as never started. */
-  private recordUnstartedDispatch = async (goalId: string, token: string) =>
+  /**
+   * Mark a turn whose dispatch was refused its topic reservation as never
+   * started; `settle` also consumes it, for a caller that will not wait it out.
+   */
+  private recordUnstartedDispatch = async (goalId: string, token: string, settle: boolean) =>
     this.db.transaction(async (db) => {
       const fresh = await new GoalModel(db, this.userId, this.workspaceId).lockById(goalId);
-      if (fresh?.config?.managerState?.token === token)
-        await this.save(db, goalId, { ...fresh.config.managerState, dispatchNeverStarted: true });
+      if (fresh?.config?.managerState?.token !== token) return false;
+      await this.save(db, goalId, {
+        ...fresh.config.managerState,
+        dispatchNeverStarted: true,
+        ...(settle && { consumed: true }),
+      });
+      return true;
     });
 
   /**
@@ -1480,6 +1562,26 @@ export class GoalManagerService {
     if ((await this.budgetFacts(graph, db)).blocked)
       return rejectPlan('budget_exhausted', op?.status);
     const unfinished = graph.nodes.filter((n) => n.kind === 'task' && !terminalNodes.has(n.status));
+    // A handed-over release has two answers: the Agent releases the wave, or a
+    // person approves it. New work or a question with buttons would leave the
+    // passed gate with nobody to release it.
+    const releaseTurn = state.problemKind === 'rollout_release';
+    if (plan?.action === 'release' && !releaseTurn)
+      return rejectPlan('release_unsolicited', op?.status);
+    if (
+      plan &&
+      releaseTurn &&
+      plan.action !== 'release' &&
+      (plan.action !== 'escalate' || plan.ask !== undefined)
+    )
+      return rejectPlan('release_turn_only', op?.status);
+    // A plan the owner sent back has one answer: the Agent rewrites it. The
+    // plan is the Agent's, so nobody else applies the correction in its place.
+    const reviseTurn = state.problemKind === 'rollout_revise';
+    if (plan?.action === 'revise_plan' && !reviseTurn)
+      return rejectPlan('revise_unsolicited', op?.status);
+    if (plan && reviseTurn && plan.action !== 'revise_plan')
+      return rejectPlan('revise_turn_only', op?.status);
     // A takeover of the terminal acceptance can only be answered with `escalate`.
     // The acceptance task is matched by TITLE regardless of status, so a corrective
     // task returns to that same failed node and `verify` sets `readyForAcceptance`
@@ -1852,6 +1954,43 @@ export class GoalManagerService {
           ))
         )
           throw new TRPCError({ code: 'CONFLICT', message: 'Task changed before retry' });
+      } else if (plan.action === 'release') {
+        // The approval lands with the plan, under the same lock; the coordinator
+        // releases the wave on its next advance. It names the round and wave the
+        // gate passed for, so it can never release a later one.
+        const rollout = goal.config?.rolloutState;
+        if (!rollout || rollout.phase === 'done' || rollout.phase === 'pattern_break')
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'The batch is no longer waiting on a release',
+          });
+        await model.updateRolloutState(goalId, {
+          ...rollout,
+          releaseApproval: {
+            at: new Date().toISOString(),
+            by: 'agent',
+            reason: plan.reason,
+            revision: rollout.templateRevision,
+            waveIndex: rollout.waveIndex,
+          },
+        });
+      } else if (plan.action === 'revise_plan') {
+        // The rewrite lands with the plan; the coordinator opens the new probe
+        // round from it on its next advance.
+        const rollout = goal.config?.rolloutState;
+        if (rollout?.phase !== 'plan_revision' || !rollout.pendingRevision)
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'The batch is no longer waiting on a plan revision',
+          });
+        await model.updateRolloutState(goalId, {
+          ...rollout,
+          pendingRevision: {
+            ...rollout.pendingRevision,
+            revisedReason: plan.reason,
+            revisedRecipe: plan.recipe,
+          },
+        });
       } else if (plan.action === 'escalate' && state.problem && plan.ask) {
         // A takeover question is answered on the failed Task's gate, so every
         // answer has to say what happens to that Task — an answer that leaves it

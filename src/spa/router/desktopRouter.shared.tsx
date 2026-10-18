@@ -44,7 +44,6 @@ import ProviderSettingsSkeleton, {
 import { createSettingsSectionsSkeleton } from '@/components/Skeleton/Settings/Sections';
 import { WORKSPACE_SETTINGS_SECTION_SHAPES } from '@/components/Skeleton/Settings/sectionShapes';
 import { createSurfaceSkeleton } from '@/components/Skeleton/Surface';
-import { acceptanceRouteMeta } from '@/features/Acceptance/routeMeta';
 import { agentDocumentRouteMeta } from '@/features/AgentDocumentPage/routeMeta';
 import { goalDetailRouteMeta, goalsRouteMeta } from '@/features/AgentGoals/routeMeta';
 import { taskRouteMeta, tasksRouteMeta } from '@/features/AgentTasks/routeMeta';
@@ -53,6 +52,7 @@ import { dashboardRouteMeta, dashboardsRouteMeta } from '@/features/Dashboard/ro
 import DevicesPageSkeleton from '@/features/DeviceManager/Skeleton';
 import { pageRouteMeta } from '@/features/Pages/routeMeta';
 import {
+  projectAcceptanceRouteMeta,
   projectConversationRouteMeta,
   projectDirectoriesRouteMeta,
   projectsRouteMeta,
@@ -81,9 +81,11 @@ import AppShellSkeleton, { APP_SHELL_FALLBACK_ID } from '@/spa/BootShell/AppShel
 import { loadRouteWithBuiltinToolSurfaces } from '@/spa/initialize/toolSurfaces';
 import { activityListLoader } from '@/spa/router/activityListLoader';
 import { agentChatTopicListLoader } from '@/spa/router/agentChatTopicListLoader';
+import { agentDocumentListLoader } from '@/spa/router/agentDocumentListLoader';
 import { channelDataLoader } from '@/spa/router/channelDataLoader';
 import { contextListLoader } from '@/spa/router/contextListLoader';
 import { identitiesListLoader } from '@/spa/router/identitiesListLoader';
+import { libraryTreeLoader } from '@/spa/router/libraryTreeLoader';
 import { pageListLoader } from '@/spa/router/pageListLoader';
 import { preferenceListLoader } from '@/spa/router/preferenceListLoader';
 import { NoRouteSkeleton, routeMeta } from '@/spa/router/routeMeta';
@@ -204,6 +206,8 @@ export const sharedMainAreaChildren: RouteObject[] = [
               () => import('@/routes/(main)/agent/docs/_layout'),
               'Desktop > Chat > DocumentLayout',
             ),
+            // Seed the persisted document list before the docs sidebar paints.
+            loader: agentDocumentListLoader,
             path: 'docs',
           },
           {
@@ -744,6 +748,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
           () => import('@/routes/(main)/resource/library/_layout'),
           'Desktop > Resource > Library > Layout',
         ),
+        loader: libraryTreeLoader,
         path: 'library/:id',
       },
     ],
@@ -1145,7 +1150,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
           () => import('@/routes/(main)/project/[projectId]/acceptance'),
           'Desktop > Project Acceptance',
         ),
-        handle: { meta: acceptanceRouteMeta },
+        handle: { meta: projectAcceptanceRouteMeta },
         path: 'acceptance',
       },
     ],

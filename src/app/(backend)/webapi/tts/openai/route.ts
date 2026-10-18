@@ -1,30 +1,37 @@
-import { type OpenAITTSPayload } from '@lobehub/tts';
-import { createOpenaiAudioSpeech } from '@lobehub/tts/server';
+import { z } from 'zod';
 
-import { createBizOpenAI } from '@/app/(backend)/_deprecated/createBizOpenAI';
+import { checkAuth } from '@/app/(backend)/middleware/auth';
+import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { createSpeechResponse } from '@/server/utils/createSpeechResponse';
 
-export const POST = async (req: Request) => {
-  const payload = (await req.json()) as OpenAITTSPayload;
+import { resolveValidWorkspaceIdFromRequest } from '../../_utils/workspace';
 
-  // need to be refactored with jwt auth mode
-  const openaiOrErrResponse = createBizOpenAI(req);
+const payloadSchema = z.object({
+  input: z.string().min(1),
+  options: z.object({
+    model: z.string().min(1),
+    speed: z.number().min(0.25).max(4).optional(),
+    voice: z.string().min(1),
+  }),
+});
 
-  // if resOrOpenAI is a Response, it means there is an error,just return it
-  if (openaiOrErrResponse instanceof Response) return openaiOrErrResponse;
+// Keep the chat player's payload while using the same runtime as tts.synthesize.
+export const POST = checkAuth(async (req, { serverDB, userId }) => {
+  const payload = payloadSchema.safeParse(await req.json());
+  if (!payload.success) return Response.json({ error: 'Invalid TTS payload' }, { status: 400 });
 
   return createSpeechResponse(
-    () =>
-      createOpenaiAudioSpeech({
-        openai: openaiOrErrResponse as any,
-        payload,
-      }),
-    {
-      logTag: 'webapi/tts/openai',
-      messages: {
-        failure: 'Failed to synthesize speech',
-        invalid: 'Unexpected payload from OpenAI TTS',
-      },
+    async () => {
+      const workspaceId = await resolveValidWorkspaceIdFromRequest({ req, serverDB, userId });
+      const runtime = await initModelRuntimeFromDB(serverDB, userId, 'openai', workspaceId);
+      const audio = await runtime.textToSpeech(
+        { input: payload.data.input, ...payload.data.options },
+        { signal: req.signal, user: userId },
+      );
+      if (!audio) return new Response('Text-to-speech is not supported', { status: 501 });
+
+      return new Response(audio, { headers: { 'Content-Type': 'audio/mpeg' } });
     },
+    { logTag: 'webapi/tts/openai' },
   );
-};
+});

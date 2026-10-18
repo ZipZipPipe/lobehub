@@ -1,10 +1,8 @@
 'use client';
 
 import { VoiceList } from '@lobehub/tts';
-import { type FormGroupItemType } from '@lobehub/ui';
-import { Form } from '@lobehub/ui';
-import { Select } from '@lobehub/ui/base-ui';
-import { Form as AntdForm, Switch } from 'antd';
+import { Select, Switch } from '@lobehub/ui';
+import { Form, type FormGroupItem, useForm, useWatch } from '@lobehub/ui/form';
 import isEqual from 'fast-deep-equal';
 import { Mic } from 'lucide-react';
 import { memo, useEffect, useMemo } from 'react';
@@ -38,15 +36,19 @@ const { openaiVoiceOptions } = VoiceList;
 
 const AgentTTS = memo(() => {
   const { t } = useTranslation('setting');
-  const [form] = Form.useForm();
   const locale = useGlobalStore(globalGeneralSelectors.currentLanguage);
   const config = useStore(selectors.currentTtsConfig, isEqual);
   const [disabled, updateConfig] = useStore((s) => [s.disabled, s.setAgentConfig]);
-  const selectedTTSService =
-    AntdForm.useWatch([TTS_SETTING_KEY, 'ttsService'], form) ?? config.ttsService;
-  const showAllLocaleVoice =
-    AntdForm.useWatch([TTS_SETTING_KEY, 'showAllLocaleVoice'], form) ?? config.showAllLocaleVoice;
-  const selectedElevenLabsVoice = AntdForm.useWatch([TTS_SETTING_KEY, 'voice', 'elevenlabs'], form);
+  const form = useForm({
+    initialValues: { [TTS_SETTING_KEY]: config },
+    values: { [TTS_SETTING_KEY]: config },
+    onSubmit: (values) => {
+      if (!disabled) updateConfig(values);
+    },
+  });
+  const selectedTTSService = useWatch(form, 'tts.ttsService') ?? config.ttsService;
+  const showAllLocaleVoice = useWatch(form, 'tts.showAllLocaleVoice') ?? config.showAllLocaleVoice;
+  const selectedElevenLabsVoice = useWatch(form, 'tts.voice.elevenlabs');
 
   const { edgeVoiceOptions, microsoftVoiceOptions } = useMemo(
     () => new VoiceList(showAllLocaleVoice ? undefined : locale),
@@ -54,63 +56,78 @@ const AgentTTS = memo(() => {
   );
 
   useEffect(() => {
-    form.setFieldsValue({ [TTS_SETTING_KEY]: config });
-  }, [config, form]);
-
-  useEffect(() => {
     if (selectedTTSService !== 'elevenlabs' || selectedElevenLabsVoice) return;
 
-    form.setFieldValue([TTS_SETTING_KEY, 'voice', 'elevenlabs'], DEFAULT_ELEVENLABS_VOICE);
+    form.setValue('tts.voice.elevenlabs', DEFAULT_ELEVENLABS_VOICE);
   }, [form, selectedElevenLabsVoice, selectedTTSService]);
 
-  const tts: FormGroupItemType = {
+  const tts: FormGroupItem = {
     children: [
       {
-        children: <Select options={ttsOptions} />,
+        children: <Select disabled={disabled} options={ttsOptions} />,
         desc: t('settingTTS.ttsService.desc'),
         label: t('settingTTS.ttsService.title'),
-        name: [TTS_SETTING_KEY, 'ttsService'],
+        name: 'tts.ttsService',
       },
       {
-        children: <Switch />,
+        children: <Switch disabled={disabled} />,
         desc: t('settingTTS.showAllLocaleVoice.desc'),
         hidden: selectedTTSService === 'openai' || selectedTTSService === 'elevenlabs',
         label: t('settingTTS.showAllLocaleVoice.title'),
         layout: 'horizontal',
         minWidth: undefined,
-        name: [TTS_SETTING_KEY, 'showAllLocaleVoice'],
-        valuePropName: 'checked',
+        name: 'tts.showAllLocaleVoice',
       },
       {
-        children: <SelectWithTTSPreview options={openaiVoiceOptions} server={'openai'} />,
+        children: (
+          <SelectWithTTSPreview
+            disabled={disabled}
+            options={openaiVoiceOptions}
+            server={'openai'}
+          />
+        ),
         desc: t('settingTTS.voice.desc'),
         hidden: selectedTTSService !== 'openai',
         label: t('settingTTS.voice.title'),
-        name: [TTS_SETTING_KEY, 'voice', 'openai'],
+        name: 'tts.voice.openai',
       },
       {
-        children: <SelectWithTTSPreview options={edgeVoiceOptions} server={'edge'} />,
+        children: (
+          <SelectWithTTSPreview disabled={disabled} options={edgeVoiceOptions} server={'edge'} />
+        ),
         desc: t('settingTTS.voice.desc'),
         divider: false,
         hidden: selectedTTSService !== 'edge',
         label: t('settingTTS.voice.title'),
-        name: [TTS_SETTING_KEY, 'voice', 'edge'],
+        name: 'tts.voice.edge',
       },
       {
-        children: <SelectWithTTSPreview options={microsoftVoiceOptions} server={'microsoft'} />,
+        children: (
+          <SelectWithTTSPreview
+            disabled={disabled}
+            options={microsoftVoiceOptions}
+            server={'microsoft'}
+          />
+        ),
         desc: t('settingTTS.voice.desc'),
         divider: false,
         hidden: selectedTTSService !== 'microsoft',
         label: t('settingTTS.voice.title'),
-        name: [TTS_SETTING_KEY, 'voice', 'microsoft'],
+        name: 'tts.voice.microsoft',
       },
       {
-        children: <SelectWithTTSPreview options={elevenLabsVoiceOptions} server={'elevenlabs'} />,
+        children: (
+          <SelectWithTTSPreview
+            disabled={disabled}
+            options={elevenLabsVoiceOptions}
+            server={'elevenlabs'}
+          />
+        ),
         desc: t('settingTTS.voice.desc'),
         divider: false,
         hidden: selectedTTSService !== 'elevenlabs',
         label: t('settingTTS.voice.title'),
-        name: [TTS_SETTING_KEY, 'voice', 'elevenlabs'],
+        name: 'tts.voice.elevenlabs',
       },
     ],
     icon: Mic,
@@ -119,20 +136,12 @@ const AgentTTS = memo(() => {
 
   return (
     <Form
-      disabled={disabled}
+      aria-disabled={disabled}
       footer={<Form.SubmitFooter />}
       form={form}
       items={[tts]}
       itemsType={'group'}
       variant={'borderless'}
-      initialValues={{
-        [TTS_SETTING_KEY]: config,
-      }}
-      onFinish={(values) => {
-        if (disabled) return;
-
-        updateConfig(values);
-      }}
       {...FORM_STYLE}
     />
   );
