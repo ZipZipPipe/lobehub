@@ -5,7 +5,7 @@ const KimiCodingPlan: ModelProviderCard = {
   chatModels: [],
   checkModel: 'kimi-k2.5',
   description:
-    'Kimi Code from Moonshot AI provides subscription access to Kimi models including K3 for coding tasks.',
+    'Kimi Code from Moonshot AI provides subscription access to Kimi models including K3.1 Pro and K3.1 Pro Highspeed for coding tasks.',
   disableBrowserRequest: true,
   id: 'kimicodingplan',
   modelList: { showModelFetcher: false },

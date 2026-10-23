@@ -2,12 +2,13 @@ import { MAX_GOAL_METRIC_CRITERIA } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+import { router } from '@/libs/trpc/lambda';
 import { scheduleGoalAdvance } from '@/server/services/goal/scheduler';
 
 import { assertWorkspaceRowManageable } from '../_helpers/assertWorkspaceRowManageable';
 import { goalWriteProcedure, idInput, mapGoalError } from '../goalProcedures';
 
-export const configurationProcedures = {
+export const configurationRouter = router({
   /** Declare or clear the numeric clauses gating this goal's acceptance. */
   setMetricCriteria: goalWriteProcedure
     .input(
@@ -42,6 +43,27 @@ export const configurationProcedures = {
         return { data, message: 'Metric criteria updated', success: true };
       } catch (error) {
         mapGoalError(error, 'setMetricCriteria');
+      }
+    }),
+  /** Drop declared clauses by key, against the server's current list. */
+  removeMetricCriteria: goalWriteProcedure
+    .input(idInput.extend({ keys: z.array(z.string().min(1).max(255)).min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const goal = await ctx.goalModel.findById(input.id);
+        if (!goal) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
+        assertWorkspaceRowManageable(ctx, goal.userId, 'goal');
+        const data = await ctx.goalService.removeMetricCriteria(input.id, input.keys);
+        // Dropping the last unmet clause frees a goal parked short of acceptance.
+        await scheduleGoalAdvance({
+          goalId: input.id,
+          trigger: 'observe',
+          userId: ctx.userId,
+          workspaceId: ctx.workspaceId ?? undefined,
+        });
+        return { data, message: 'Metric criteria removed', success: true };
+      } catch (error) {
+        mapGoalError(error, 'removeMetricCriteria');
       }
     }),
   /**
@@ -151,6 +173,50 @@ export const configurationProcedures = {
         mapGoalError(error, 'setTaskAgent');
       }
     }),
+  /**
+   * Pick the model the goal agent plans with (`null` falls back to the agent's
+   * own). Tasks keep their own model.
+   */
+  setModel: goalWriteProcedure
+    .input(
+      idInput.extend({
+        modelConfig: z.object({ model: z.string().min(1), provider: z.string().min(1) }).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input: { id, modelConfig } }) => {
+      try {
+        const goal = await ctx.goalModel.findById(id);
+        if (!goal) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
+        assertWorkspaceRowManageable(ctx, goal.userId, 'goal');
+
+        const data = await ctx.goalService.setModel(id, modelConfig);
+        return { data, message: 'Goal model updated', success: true };
+      } catch (error) {
+        mapGoalError(error, 'setModel');
+      }
+    }),
+  /**
+   * Pick the model the goal's Tasks run on (`null` falls back to their
+   * executor's own). Unfinished Tasks switch with it.
+   */
+  setTaskModel: goalWriteProcedure
+    .input(
+      idInput.extend({
+        modelConfig: z.object({ model: z.string().min(1), provider: z.string().min(1) }).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input: { id, modelConfig } }) => {
+      try {
+        const goal = await ctx.goalModel.findById(id);
+        if (!goal) throw new TRPCError({ code: 'NOT_FOUND', message: 'Goal not found' });
+        assertWorkspaceRowManageable(ctx, goal.userId, 'goal');
+
+        const data = await ctx.goalService.setTaskModel(id, modelConfig);
+        return { data, message: 'Goal task model updated', success: true };
+      } catch (error) {
+        mapGoalError(error, 'setTaskModel');
+      }
+    }),
   setBudget: goalWriteProcedure
     .input(
       idInput.extend({
@@ -193,4 +259,4 @@ export const configurationProcedures = {
         mapGoalError(error, 'updateRequirement');
       }
     }),
-};
+});

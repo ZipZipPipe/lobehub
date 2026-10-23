@@ -1,6 +1,5 @@
 import type { SFSymbol } from '@lobechat/electron-client-ipc';
 import { type ActionIconGroupItemType } from '@lobehub/ui';
-import { css, cx } from '@lobehub/ui';
 import {
   ArrowDownFromLine,
   Copy,
@@ -21,13 +20,6 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { localeOptions } from '@/locales/resources';
-
-const translateStyle = css`
-  .ant-dropdown-menu-sub {
-    overflow-y: scroll;
-    max-height: 400px;
-  }
-`;
 
 type ActionBarItem = ActionIconGroupItemType & { sfSymbol?: SFSymbol };
 
@@ -148,7 +140,6 @@ export const useChatListActionsBar = ({
         icon: LanguagesIcon,
         key: 'translate',
         label: t('translate.action', { ns: 'chat' }),
-        popupClassName: cx(translateStyle),
       },
       tts: {
         icon: Play,

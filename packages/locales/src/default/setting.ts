@@ -1,4 +1,7 @@
 export default {
+  'chatPreference.assist.desc':
+    'Personal preferences: they only apply to you, in your personal space and every workspace.',
+  'chatPreference.assist.title': 'Chat Assist',
   'devices.cliUpdate.restart': 'Restart CLI',
   'devices.cliUpdate.update': 'Update and restart',
   'devices.cliUpdate.confirmDesc':
@@ -74,7 +77,7 @@ export default {
     'Create an independent copy in a Workspace. The original Agent stays in your personal account.',
   'agentImport.failed': 'Failed to copy agent.',
   'agentImport.backgroundCopy':
-    'Chat history is large — it keeps copying in the background, and conversations light up one by one as they finish.',
+    'Chat history is large — it keeps copying in the background, and topics light up one by one as they finish.',
   'agentImport.modal.configIncluded': 'Agent configuration is copied by default.',
   'agentImport.modal.confirm': 'Copy',
   'agentImport.modal.includeHistory': 'Copy topics and messages',
@@ -533,6 +536,12 @@ export default {
   'heterogeneousStatus.cloud.tokenChange': 'Change',
   'heterogeneousStatus.cloud.tokenSave': 'Save',
   'heterogeneousStatus.cloud.tokenCancel': 'Cancel',
+  'heterogeneousStatus.cloud.tokenRemove': 'Remove',
+  'heterogeneousStatus.cloud.tokenRemoveTitle': 'Remove Claude Code token?',
+  'heterogeneousStatus.cloud.tokenRemoveConfirm':
+    'This deletes your Claude Code OAuth token from Credentials. Cloud runs of Claude Code agents will not be able to use it until you save a new token.',
+  'heterogeneousStatus.cloud.tokenRemoveError':
+    'Failed to remove the Claude Code token. Please try again.',
   'heterogeneousStatus.cloud.githubLabel': 'GitHub Connection',
   'heterogeneousStatus.cloud.githubDesc':
     'Select a GitHub OAuth credential to allow the sandbox to clone your private repositories.',
@@ -822,6 +831,7 @@ export default {
   'devices.share.visibilityTag.private': 'Private',
   'devices.share.visibilityTag.public': 'Workspace',
   'devices.status.offline': 'Offline',
+  'devices.status.checking': 'Checking status…',
   'devices.status.online': 'Online',
   'devices.status.onlineConnections_one': 'Online · {{count}} connection',
   'devices.status.onlineConnections_other': 'Online · {{count}} connections',
@@ -975,6 +985,10 @@ export default {
   'notification.channel.status.enabledCount': 'Enabled for {{num}} notification types',
   'notification.channel.status.notLinked': 'Not linked',
   'notification.channel.types.title': 'Notification types',
+  'notification.content.scheduledTaskSummary.desc':
+    'When a scheduled task succeeds, include a short summary of what the run did in the notification.',
+  'notification.content.scheduledTaskSummary.title': 'Include run summary for scheduled tasks',
+  'notification.content.title': 'Notification content',
   'notification.email.desc': 'Receive email notifications when important events occur',
   'notification.im.banner.platformUnlinked': '{{platform}} is not linked yet',
   'notification.im.desc':
@@ -1096,6 +1110,10 @@ export default {
   'settingAgent.artwork.uploadFailed': 'Could not upload the image. Try again.',
   'settingAgent.backgroundColor.title': 'Background Color',
   'settingAgent.description.desc': 'A brief introduction to your agent, not for character setting',
+  'settingAgent.description.hint': 'Other agents read this when they look up who to hand work to.',
+  'settingAgent.description.inputPlaceholder':
+    'What it handles and when to use it, e.g. Reviews pull requests and runs the test suite',
+  'settingAgent.description.label': 'Description',
   'settingAgent.description.placeholder': 'Enter agent description',
   'settingAgent.description.title': 'Agent Description',
   'settingAgent.export.dialogTitle': 'Export Agent Profile',
@@ -1467,6 +1485,8 @@ export default {
   'settingsSearch.tabKeywords.appearance':
     'appearance, theme, dark mode, light mode, font, language, color, background',
   'settingsSearch.tabKeywords.billing': 'billing, payment, invoice, card, transaction',
+  'settingsSearch.tabKeywords.chatPreference':
+    'chat preferences, follow-up suggestions, input suggestions, autocomplete',
   'settingsSearch.tabKeywords.connector': 'connectors, integrations, mcp',
   'settingsSearch.tabKeywords.credits': 'credits, balance, top up, recharge, buy credits',
   'settingsSearch.tabKeywords.creds': 'credentials, secrets, oauth',
@@ -1846,6 +1866,7 @@ When I am ___, I need ___
   'tab.apikey': 'API Keys',
   'tab.appearance': 'Appearance',
   'tab.chatAppearance': 'Chat Appearance',
+  'tab.chatPreference': 'Chat Preferences',
   'tab.common': 'Appearance',
   'tab.connector': 'Connectors',
   'tab.creds': 'Credentials',
@@ -1903,7 +1924,7 @@ When I am ___, I need ___
   'trash.desc':
     'Deleted items stay here for {{days}} days and can be restored. After that they are removed permanently.',
   'trash.empty.desc':
-    'Conversations, agents and messages you delete land here for {{days}} days before they are removed for good.',
+    'Topics, agents and messages you delete land here for {{days}} days before they are removed for good.',
   'trash.empty.title': 'Trash is empty',
   'trash.emptyConfirm.content': 'Permanently delete {{count}} item(s)? This cannot be undone.',
   'trash.emptyConfirm.filteredTitle': 'Empty filtered items',
@@ -2822,7 +2843,7 @@ When I am ___, I need ___
     'You will lose access to "{{name}}" immediately. You can rejoin only if you are invited again.',
   'workspace.general.transferAgents.modal.back': 'Back',
   'workspace.general.transferAgents.modal.backgroundMigration':
-    'Chat history is large, so it keeps migrating in the background. The agents are ready to use now; older conversations light up one by one as they finish.',
+    'Chat history is large, so it keeps migrating in the background. The agents are ready to use now; older topics light up one by one as they finish.',
   'workspace.general.transferAgents.modal.continue': 'Continue',
   'workspace.general.transferAgents.modal.done': 'Done',
   'workspace.general.transferAgents.modal.failed': 'Failed to move agents',
@@ -2878,7 +2899,7 @@ When I am ___, I need ___
   'workspace.general.transferTargetLabel': 'Move to',
   'workspace.general.transferAgentGroups.modal.back': 'Back',
   'workspace.general.transferAgentGroups.modal.backgroundMigration':
-    'Chat history is large, so it keeps migrating in the background. The agent group is ready to use now; older conversations light up one by one as they finish.',
+    'Chat history is large, so it keeps migrating in the background. The agent group is ready to use now; older topics light up one by one as they finish.',
   'workspace.general.transferAgentGroups.modal.continue': 'Continue',
   'workspace.general.transferAgentGroups.modal.done': 'Done',
   'workspace.general.transferAgentGroups.modal.failed': 'Failed to transfer agent groups',
@@ -2941,12 +2962,12 @@ When I am ___, I need ___
     'You can copy to personal or workspaces that have permission to create an agent.',
   'workspace.general.copyLobeAI.modal.success': '{{count}} agent(s) copied',
   'workspace.general.copyLobeAI.modal.backgroundCopy':
-    'Chat history is large, so it keeps copying in the background. The agents are ready to use now; conversations light up one by one as they finish.',
+    'Chat history is large, so it keeps copying in the background. The agents are ready to use now; topics light up one by one as they finish.',
   'workspace.general.copyLobeAI.modal.title': 'Copy Agents',
   'workspace.general.copyLobeAI.modal.untitledAgent': 'Untitled Agent',
   'workspace.general.copyAgentGroups.modal.back': 'Back',
   'workspace.general.copyAgentGroups.modal.backgroundCopy':
-    'Chat history is large, so it keeps copying in the background. The agent group is ready to use now; conversations light up one by one as they finish.',
+    'Chat history is large, so it keeps copying in the background. The agent group is ready to use now; topics light up one by one as they finish.',
   'workspace.general.copyAgentGroups.modal.continue': 'Continue',
   'workspace.general.copyAgentGroups.modal.copyOptions.config.desc':
     'Required. Copies group metadata, members, member roles, and Agent profiles.',
@@ -3100,6 +3121,8 @@ When I am ___, I need ___
     'This invitation has expired. Ask the team owner to send a new one.',
   'workspace.invitePage.expiredTitle': 'Invitation Expired',
   'workspace.invitePage.expiresLabel': 'Expires',
+  'workspace.invitePage.driveCleanupInProgress':
+    'Your previous personal drive in this workspace is being cleaned up. Try again in a few minutes.',
   'workspace.invitePage.featureNotEnabledNotice':
     'Workspaces are in a limited beta and not open to new members right now. Please try again later, or ask the person who invited you to reach out to support.',
   'workspace.invitePage.goHome': 'Go Home',
@@ -3456,6 +3479,7 @@ When I am ___, I need ___
     'You can always customize LobeAI and add agents later in Workspace settings.',
   'workspace.onboarding.skipConfirm.ok': 'Skip',
   'workspace.onboarding.skipConfirm.cancel': 'Continue setup',
+  'workspace.onboarding.skipFailed': "Couldn't skip setup. Please try again.",
   'workspace.onboarding.toast.saved': 'Saved',
   'workspace.onboarding.toast.failed': 'Could not save. Please try again.',
   'workspace.onboarding.toast.installAgentsFailed':
@@ -3549,6 +3573,26 @@ When I am ___, I need ___
   'workspace.onboarding.flow.connectApps.description':
     'Connect the apps your team uses so the assistant can learn its projects and who does what. Authorization applies to the whole workspace.',
   'workspace.onboarding.flow.connectApps.skip': 'Skip for now, connect later',
+  'workspace.onboarding.flow.connectApps.apps.github':
+    "Reads the team's repositories and collaboration to learn your stack and who works on what",
+  'workspace.onboarding.flow.connectApps.apps.notion':
+    "Reads the team's docs and wiki to learn your projects and ways of working",
+  'workspace.onboarding.flow.connectApps.apps.linear':
+    "Reads the team's projects, cycles and issues to learn how you plan work and who owns what",
+  'workspace.onboarding.flow.connectApps.apps.google-drive':
+    "Lets the assistant find and read the team's shared files",
+  'workspace.onboarding.flow.connectApps.apps.jira':
+    "Reads the team's projects and recent issues to learn what you build and who owns what",
+  'workspace.onboarding.flow.connectApps.apps.confluence':
+    "Reads the team's shared pages to learn your projects, processes and decisions",
+  'workspace.onboarding.flow.connectApps.apps.twitter':
+    "Reads the team account's posts and interactions to learn what you share and who you engage with",
+  'workspace.onboarding.flow.connectApps.privateSources.title':
+    'Include private content in the analysis',
+  'workspace.onboarding.flow.connectApps.privateSources.desc':
+    'Off: private Linear teams, private Jira projects and personal Confluence spaces are skipped. Anything else the connecting account can see may still be read, so connect with an account whose access fits the whole team. On: private and personal content can also appear in the team profile every member sees.',
+  'workspace.onboarding.flow.connectApps.privateSources.saveFailed':
+    "Couldn't save this setting. Try again.",
   'workspace.onboarding.flow.connectApps.more':
     'You can connect more apps anytime in Settings → Connectors.',
   'workspace.onboarding.flow.learnYourTeam.title': 'Get to know your team',
@@ -3557,6 +3601,11 @@ When I am ___, I need ___
     '💡 You can skip ahead; the analysis keeps running in the background',
   'workspace.onboarding.flow.learnYourTeam.error':
     "Couldn't finish the team analysis. Retry or skip for now.",
+  'workspace.onboarding.flow.learnYourTeam.budget.title':
+    'Not enough workspace credits for the team analysis',
+  'workspace.onboarding.flow.learnYourTeam.budget.desc':
+    "The team analysis uses this workspace's credits, and the balance can't cover it. Top up or upgrade the plan, then retry, or skip the analysis and finish the setup.",
+  'workspace.onboarding.flow.learnYourTeam.budget.skip': 'Skip analysis',
   'workspace.onboarding.flow.learnYourTeam.progress.review':
     'Reading team data from connected apps',
   'workspace.onboarding.flow.learnYourTeam.progress.build':
@@ -3591,20 +3640,76 @@ When I am ___, I need ___
   'workspace.onboarding.flow.starterTasks.empty':
     'No suggested tasks yet. You can finish setup now.',
   'workspace.onboarding.flow.starterTasks.addFailed': "Couldn't add the tasks. Please try again.",
+  'workspace.onboarding.flow.starterTasks.partialFailed':
+    "{{count}} tasks couldn't be added. Try again.",
   'workspace.onboarding.flow.channels.title': "Bring the assistant into your team's chats",
   'workspace.onboarding.flow.channels.description':
     'Connect a bot your team owns to {{name}}. Everyone in the group can @{{name}} to hand off work — nobody has to link an account.',
   'workspace.onboarding.flow.channels.quote': "Add me to your team's group chats,",
   'workspace.onboarding.flow.channels.highlight': 'and anyone can hand me work.',
+  'workspace.onboarding.flow.channels.showMore': 'More channels ({{count}})',
+  'workspace.onboarding.flow.channels.showLess': 'Show less',
   'workspace.onboarding.flow.channels.more': 'You can change channels anytime in Agent → Channels.',
-  'workspace.onboarding.flow.channels.configTitle': 'Connect {{platform}}',
-  'workspace.onboarding.flow.devices.title': 'Connect team devices',
-  'workspace.onboarding.flow.devices.subtitle':
-    'Enroll the team’s computers so the assistant can use Claude Code, Codex and other local agents on them.',
-  'workspace.onboarding.flow.devices.connect': 'Connect device',
+  'workspace.onboarding.flow.channels.connect.back': 'Back to list',
+  'workspace.onboarding.flow.channels.connect.category': 'Bot channel',
+  'workspace.onboarding.flow.channels.connect.description':
+    "Use your own {{platform}} app to bring {{name}} into your team's chats as a bot.",
+  'workspace.onboarding.flow.channels.connect.guide': 'Setup guide',
+  'workspace.onboarding.flow.channels.connect.section': 'Connect',
+  'workspace.onboarding.flow.channels.connect.status.idle': 'Not connected',
+  'workspace.onboarding.flow.channels.connect.status.verifying': 'Verifying',
+  'workspace.onboarding.flow.channels.connect.status.connected': 'Connected',
+  'workspace.onboarding.flow.channels.connect.status.failed': 'Failed',
+  'workspace.onboarding.flow.channels.connect.savedSecret': 'Saved — leave empty to keep it',
+  'workspace.onboarding.flow.channels.connect.submit': 'Verify and save',
+  'workspace.onboarding.flow.channels.connect.skip': 'Skip this one',
+  'workspace.onboarding.flow.channels.connect.verifying':
+    'Checking the credentials with the platform…',
+  'workspace.onboarding.flow.channels.connect.attempt': 'Attempt {{count}}',
+  'workspace.onboarding.flow.channels.connect.connectedTitle': '{{name}} connected',
+  'workspace.onboarding.flow.channels.connect.connectedDesc':
+    'Members can now @{{name}} in your group to hand off work. Change it anytime in Agent → Channels.',
+  'workspace.onboarding.flow.channels.connect.edit': 'Edit credentials',
+  'workspace.onboarding.flow.channels.connect.failedTitle': "Couldn't connect {{name}}",
+  'workspace.onboarding.flow.channels.connect.errorCode': 'Error code: {{code}}',
+  'workspace.onboarding.flow.channels.connect.retry': 'Retry',
+  'workspace.onboarding.flow.channels.connect.footer':
+    'Each one can be retried or skipped on its own',
+  'workspace.onboarding.flow.devices.title': "Put the team's computers to work",
+  'workspace.onboarding.flow.devices.quote': 'Lend me a computer, ',
+  'workspace.onboarding.flow.devices.toolSignIn':
+    'Then run <code>{{command}}</code> once to sign in to {{name}}.',
+  'workspace.onboarding.flow.devices.toolDocs': 'Install docs',
+  'workspace.onboarding.flow.devices.description':
+    'Once a team computer is connected, {{name}} can read and write files, run commands and use local tools on it to get work done for the team.',
+  'workspace.onboarding.flow.devices.highlight': "and I'll handle the busywork.",
+  'workspace.onboarding.flow.devices.installStep': 'Install and sign in to the LobeHub CLI',
+  'workspace.onboarding.flow.devices.connectStep':
+    'Connect the computer to the workspace for every member',
+  'workspace.onboarding.flow.devices.methodDesktop': 'Desktop app (recommended)',
+  'workspace.onboarding.flow.devices.methodCli': 'Command line',
+  'workspace.onboarding.flow.devices.desktopInstall':
+    'Download and install the LobeHub desktop app on a team computer',
+  'workspace.onboarding.flow.devices.desktopDownload': 'Download desktop app',
+  'workspace.onboarding.flow.devices.desktopShare':
+    'Sign in with your account, find this computer in your personal Settings → Devices, choose "Share to workspace…", then pick this workspace and make it visible to all members',
+  'workspace.onboarding.flow.devices.desktopHint':
+    "Share a member's own computer with the team. It stays theirs, and is only usable while they are signed in and online.",
+  'workspace.onboarding.flow.devices.cliHint':
+    'Connect a server or dedicated computer that belongs to the team and stays online.',
+  'workspace.onboarding.flow.devices.codingTitle': 'Install an AI coding tool',
+  'workspace.onboarding.flow.devices.codingHint':
+    'You connected GitHub. With Claude Code or Codex on the computer, {{name}} can write code and open pull requests.',
+  'workspace.onboarding.flow.devices.listTitle': 'Team devices',
   'workspace.onboarding.flow.devices.count': '{{online}} of {{count}} online',
-  'workspace.onboarding.flow.devices.empty':
-    'No team devices yet. Install the desktop app or run lh connect on a team computer to add one.',
+  'workspace.onboarding.flow.devices.viewAll': 'View all devices',
+  'workspace.onboarding.flow.devices.waiting': 'Waiting for a device to come online…',
+  'workspace.onboarding.flow.devices.waitingHint':
+    'Run the commands above and the device shows up here.',
+  'workspace.onboarding.flow.devices.agentsScanning': 'Detecting coding agents…',
+  'workspace.onboarding.flow.devices.agentsNone': 'No coding agents found',
+  'workspace.onboarding.flow.devices.skip': 'Skip for now',
+  'workspace.onboarding.flow.devices.later': 'You can connect devices later in Settings → Devices.',
   'workspace.onboarding.step4.heading': '{{name}} is ready!',
   'workspace.onboarding.step4.subtitle':
     'Your workspace is set up. Jump in and start collaborating with your team.',
@@ -4125,7 +4230,7 @@ When I am ___, I need ___
   'tools.title': 'Skills',
   'tab.environments': 'Environments',
   'environments.desc':
-    'What a sandbox run needs around it: a repository, its setup, its variables. Each copy built from one keeps its own files between sessions.',
+    "How to set up a project: the repository to check out, the setup command, the variables. Pick one from the environment menu under the chat input, and the conversation's working directory — a temporary sandbox or a folder on your drive — is initialized from it once.",
   'environments.create': 'New environment',
   'environments.cancel': 'Cancel',
   'environments.createFailed': 'Could not create the environment',
@@ -4141,34 +4246,39 @@ When I am ___, I need ___
   'environments.remove': 'Delete environment',
   'environments.removeConfirmTitle': 'Delete environment {{name}}?',
   'environments.removeConfirmContent':
-    "Its specification, variables, its copy's folder and the saved snapshot go with it, and cannot be recovered.",
+    'Its specification and variables are deleted and cannot be recovered. Folders it initialized keep their files; copies built by an earlier version are removed with it.',
   'environments.storage.used': '{{used}} of {{total}}',
   'environments.storage.unmeasured': 'Storage not measured yet · {{total}} available',
   'environments.storage.measuredAt': 'Measured {{time}}. Refresh to measure again.',
   'environments.storage.over':
     'Over the storage limit. Saving a file is refused until you delete something.',
   'environments.duplicateName': 'You already have an environment with this name',
+  'environments.inProject':
+    'A project still uses this environment — remove it from the project first',
   'environments.hasInstances': 'Remove its other copies first',
   'environments.loadFailed.title': 'Could not check your plan',
   'environments.loadFailed.desc':
     'We could not reach the service that says whether this account has a persistent workspace. Nothing is wrong with your environments.',
   'environments.loadFailed.retry': 'Try again',
-  'environments.unavailable.title': 'Persistent sandbox is not available here',
+  'environments.unavailable.title': 'Drive storage is not available here',
   'environments.unavailable.desc':
-    'Environments describe a persistent cloud workspace, and this deployment does not provide one.',
-  'environments.upgrade.title': 'Upgrade to Pro to unlock sandbox environments',
+    'Drives are persistent cloud storage for sandbox runs, and this deployment does not provide them.',
+  'environments.upgrade.title': 'Upgrade to Pro to unlock drive storage',
   'environments.upgrade.desc':
-    'Give cloud-sandbox runs a persistent working directory. An environment describes what the sandbox needs — repositories, setup, variables — and its copies keep everything between sessions.',
+    'Give cloud-sandbox runs a drive that outlives them: conversations working in a drive folder keep their files after the sandbox is recycled.',
   'environments.upgrade.cta': 'Upgrade to Pro',
-  'environments.upgrade.benefits.environments.title': 'Sandbox setup written once',
+  'environments.upgrade.benefits.environments.title': 'A public drive and your own',
   'environments.upgrade.benefits.environments.desc':
-    'Repositories, setup command and variables live in the environment; every sandbox built from it starts ready.',
+    'In a workspace every member shares the public drive, and each member also has a personal drive only they can reach.',
   'environments.upgrade.benefits.persist.title': 'Files survive the sandbox',
   'environments.upgrade.benefits.persist.desc':
-    'The working directory is kept when the sandbox is recycled; the next run continues where the last stopped.',
-  'environments.upgrade.benefits.instances.title': 'One copy per task',
+    'The folder is kept when the sandbox is recycled; the next run continues where the last one stopped.',
+  'environments.upgrade.benefits.instances.title': 'Folders initialized from code environments',
   'environments.upgrade.benefits.instances.desc':
-    'Parallel conversations each run in their own copy of the environment, so nothing overwrites anything else.',
+    'When creating a folder, pick a code environment to clone its repository and install what it needs.',
+  'environments.github.refreshFailed':
+    'Could not refresh GitHub repositories. Showing the previous list. Try again.',
+  'environments.github.loadFailed': 'Could not load GitHub repositories. Try again.',
   'environments.github.label': 'Repository',
   'environments.github.notConnected':
     'No GitHub connection yet — connect one to build an environment from a repository',
@@ -4187,7 +4297,7 @@ When I am ___, I need ___
   'environments.form.descriptionPlaceholder': 'What this environment is for',
   'environments.form.sources': 'Source code',
   'environments.form.sourcesHint':
-    'Cloned over HTTPS before anything else runs. Private repositories are not supported yet — a specification holds no credentials.',
+    'Cloned over HTTPS before anything else runs. A private repository clones through the GitHub App installation that grants it; the environment itself stores no credentials.',
   'environments.form.ref': 'Branch or tag',
   'environments.form.refDefault': 'Repository default branch',
   'environments.form.path': 'Folder',
@@ -4198,7 +4308,7 @@ When I am ___, I need ___
     'Runs once in the checkout, with network access, before the conversation starts.',
   'environments.form.env': 'Environment variables',
   'environments.form.envHint':
-    'Non-secret values only — these are stored as plain text and copied into every copy of this environment.',
+    'Non-secret values only — stored as plain text and exported while the repository is cloned and the setup command runs.',
   'environments.form.addEnv': 'New variable',
   'environments.form.envCount_one': '{{count}} variable',
   'environments.form.envCount_other': '{{count}} variables',
@@ -4207,6 +4317,13 @@ When I am ___, I need ___
   'environments.form.rawEditor': 'Raw editor',
   'environments.form.rawEditorHint':
     'One KEY=value per line, the way a .env file reads. Blank lines and # comments are ignored; saving replaces every variable.',
+  'environments.form.rawFormat': 'Detected format: {{format}}',
+  'environments.form.rawFormatsHint':
+    'Edit a JSON object with string values, or replace it with .env text (KEY=value per line). JSON decodes escapes; .env keeps backslashes literally. Saving replaces all variables.',
+  'environments.form.jsonSyntax':
+    'Invalid JSON. Check double quotes, commas and braces, then save again.',
+  'environments.form.jsonValues':
+    'Use a JSON object with a string value for every variable, such as {"NODE_ENV":"production"}.',
   'environments.form.rawInvalid': 'Line {{line}} is not KEY=value',
   'environments.form.removeEnv': 'Remove variable',
   'environments.form.internetAccess': 'Agent internet access',
@@ -4217,6 +4334,10 @@ When I am ___, I need ___
   'environments.form.changeRepository': 'Change repository',
   'environments.form.disconnect': 'Disconnect',
   'environments.detail.tabs.overview': 'Overview',
+  'environments.detail.initializerDesc':
+    'Applied once to a working directory picked for a conversation: the repository is cloned there and the setup command runs.',
+  'environments.detail.noRepository': 'No repository',
+  'environments.detail.noSetup': 'No setup command',
   'environments.instances.copy': 'Duplicate copy',
   'environments.instances.copyTitle': 'Duplicate {{name}}',
   'environments.instances.copyFailed': 'Could not duplicate this copy',
@@ -4228,7 +4349,7 @@ When I am ___, I need ___
     'This copy is being built, so it cannot be duplicated until the build finishes',
   'environments.instances.title': 'Copies',
   'environments.instances.desc':
-    'A copy is a working copy of this environment, with its own folder and its own installed packages. Conversations run inside a copy, and several can run side by side without touching each other.',
+    'Folders on your drive initialized from this environment. Each keeps its own files and installed packages, so conversations in different folders never overwrite each other.',
   'environments.instances.empty': 'No copies yet',
   'environments.instances.emptyHint':
     'Create one, then pick it under "Working Directory" in the chat input.',
@@ -4302,10 +4423,11 @@ When I am ___, I need ___
   'environments.sessions.reason.build_failed': 'Build failed',
   'environments.sessions.reason.build_timeout': 'Build timed out',
   'environments.sessions.reason.build_gone': 'Build interrupted',
-  'environments.form.desc':
-    'What a copy is built from — where the code comes from and what makes it usable.',
+  'environments.form.desc': 'Where the code comes from and what makes it usable.',
   'environments.form.appliesOnBuild':
     'Applied when a copy is created. Existing copies keep the definition they were made with — a rebuild replays that one, so use a new copy to pick this up.',
+  'environments.form.appliesOnInit':
+    'Takes effect the next time the environment is applied to a working directory. Folders it was already applied to keep what they have.',
   'environments.refresh': 'Refresh',
   'environments.emptyPublished': 'Nothing published to this workspace yet',
   'environments.visibility.tabs.workspace': 'Workspace',
@@ -4317,7 +4439,7 @@ When I am ___, I need ___
   'environments.visibility.publicTag': 'Published',
   'environments.visibility.changeFailed': "Could not change this environment's visibility",
   'environments.visibility.readonlyHint':
-    'Published to this workspace by its creator: you can run in this environment, but only they can change what it builds.',
+    'Published to this workspace by its creator: you can initialize with this environment, but only they can change it.',
   'environments.files.browse': 'Browse files',
   'environments.files.back': 'Back',
   'environments.files.empty': 'This directory is empty',
@@ -4388,4 +4510,96 @@ When I am ___, I need ___
   'environments.files.openHint': 'Double-click a folder to open it, or a file to view it',
   'environments.files.unusedInstance':
     'Nothing here yet. The code appears once the copy is built or a conversation runs in it.',
+  'environments.files.folderNotEmpty':
+    'This folder already has files in it. Only a new or empty folder can be initialized from an environment.',
+  'environments.files.folderTaken': 'An environment directory with this name already exists.',
+  'environments.files.readOnly':
+    'Environment directories are read-only: only their own sessions write to them.',
+  'environments.files.notFound': 'That folder doesn’t exist.',
+  'tab.drive': 'Storage',
+  'drive.tabs.public': 'Public drive',
+  'drive.tabs.personal': 'Personal drive',
+  'drive.scope.public': 'Visible to all members',
+  'drive.scope.personal': 'Only you',
+  'drive.usage.title': 'Storage usage',
+  'drive.usage.poolTitle': 'Workspace storage pool',
+  'drive.usage.used': '{{used}} of {{total}} used',
+  'drive.usage.unmeasured': 'Not measured yet · {{total}} in total',
+  'drive.usage.unmeasuredShort': 'Not measured yet',
+  'drive.usage.remaining': '{{size}} left · {{percent}}% used',
+  'drive.usage.overBy': '{{size}} over the quota',
+  'drive.usage.others': 'Other members',
+  'drive.usage.refresh': 'Measure again',
+  'drive.usage.membersTitle': "Members' personal drives",
+  'drive.usage.membersHint': 'Usage only — contents stay private',
+  'drive.usage.memberUnmeasured': 'Not measured',
+  'drive.usage.showAllMembers': 'Show all {{count}} members',
+  'drive.usage.showFewerMembers': 'Show fewer',
+  'drive.usage.over':
+    'Storage is over quota. Free up space or upgrade before more files can be saved.',
+  'drive.usage.enableOverage': 'Turn on pay-as-you-go',
+  'drive.usage.overageModalTitle': 'Keep saving past the quota',
+  'drive.usage.overageAskAdmin': 'Ask a workspace admin to turn on pay-as-you-go to keep saving.',
+  'drive.usage.overBilled':
+    'Over the quota. Files keep saving, and the extra is billed as pay-as-you-go overage.',
+  'drive.retained.title': "Departed members' personal drives",
+  'drive.retained.hint':
+    'Kept for 30 days after a member leaves, then deleted automatically. They count toward the workspace pool until then. Only the amount is shown, never the files.',
+  'drive.retained.expiresIn': 'Deleted in {{count}} days',
+  'drive.retained.expiresToday': 'Deleted today',
+  'drive.retained.lastError': 'Last attempt failed: {{error}}',
+  'drive.retained.move': 'Move to public drive',
+  'drive.retained.moveConfirm.title': "Move {{name}}'s drive to the public drive?",
+  'drive.retained.moveConfirm.desc':
+    'Its files are moved into departed-members on the public drive, where every member can open them, and the personal drive is emptied. Only text files up to 1 MB can be moved; a drive holding anything else is left untouched.',
+  'drive.retained.moved': 'Moved to {{path}} on the public drive',
+  'drive.retained.delete': 'Delete',
+  'drive.retained.deleteConfirm.title': "Delete {{name}}'s personal drive?",
+  'drive.retained.deleteConfirm.desc': 'Everything on it is deleted and cannot be recovered.',
+  'drive.retained.deleted': 'Drive deleted',
+  'drive.usage.manage': 'Manage in Storage',
+  'drive.explorer.newFolder': 'New folder',
+  'drive.explorer.columns.name': 'Name',
+  'drive.explorer.columns.modified': 'Date modified',
+  'drive.explorer.columns.size': 'Size',
+  'drive.explorer.columns.kind': 'Kind',
+  'drive.explorer.kind.folder': 'Folder',
+  'drive.explorer.kind.gitRepository': 'Git repository',
+  'drive.explorer.kind.file': 'File',
+  'drive.explorer.kind.fileWithExtension': '{{extension}} file',
+  'drive.explorer.rename': 'Rename',
+  'drive.explorer.delete': 'Delete',
+  'drive.explorer.moreActions': 'More actions',
+  'drive.explorer.deleteTitle': 'Delete “{{name}}”?',
+  'drive.explorer.deleteFolderContent':
+    'The folder and everything in it are removed from the drive. Conversations working in it switch to a temporary sandbox.',
+  'drive.explorer.deleteFileContent': 'The file is removed from the drive.',
+  'drive.explorer.readOnly': 'Environment directories are read-only',
+  'drive.explorer.readOnlyHint':
+    'Only its own sandbox sessions write to an environment directory, so you can browse it here but not change it.',
+  'drive.explorer.empty': 'This folder is empty',
+  'drive.explorer.emptyRoot.public':
+    'No folders on the public drive yet. Create one to work in it with your team.',
+  'drive.explorer.emptyRoot.personal':
+    'Your drive is empty. Create a folder, then pick it as a conversation’s working folder.',
+  'drive.explorer.loadFailed': 'Could not load this folder.',
+  'drive.loadFailed': 'Could not load storage. Check your connection and try again.',
+  'environments.instances.needsDrive':
+    'Copies are folders on a drive, and this account has no drive yet.',
+  'environments.instances.openDriveSettings': 'Go to Storage settings',
+  'environments.instances.rebuildPersonalDesc':
+    '{{names}} is still on the public drive and is hidden. Private environments now keep their folders on your personal drive.',
+  'environments.instances.rebuildPersonal': 'Rebuild on personal drive',
+  'environments.instances.publishPublic': 'Initialize on the public drive',
+  'environments.instances.publishPublicDesc':
+    'Published to the workspace, but its folders are on your personal drive, where members cannot reach them. Members can run it once it has a folder on the public drive.',
+  'environments.instances.publishPublicFailed': 'Could not create a copy on the public drive',
+  'environments.instances.publishPublicStarted': 'Building a copy on the public drive',
+  'environments.instances.rebuildPersonalStarted': 'Building a new copy on your personal drive',
+  'environments.instances.rebuildPersonalFailed':
+    'Could not create the copy on your personal drive',
+  'environments.instances.rebuildPersonalRequired':
+    'This directory is on the public drive. Rebuild it on your personal drive first.',
+  'environments.instances.rebuildPersonalTag': 'Needs rebuild on personal drive',
+  'environments.instances.rebuildPersonalTagHint': 'Hidden on the public drive and no longer used.',
 };

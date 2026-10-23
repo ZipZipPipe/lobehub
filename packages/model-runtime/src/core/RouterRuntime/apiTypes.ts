@@ -15,6 +15,7 @@ export type ApiType =
   | 'moonshot'
   | 'openai'
   | 'qwen'
+  | 'typesafe'
   | 'vertexai'
   | 'volcengine'
   | 'xai'

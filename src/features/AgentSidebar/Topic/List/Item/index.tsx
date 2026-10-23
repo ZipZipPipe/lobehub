@@ -47,6 +47,7 @@ import { useChatStore } from '@/store/chat';
 import { operationSelectors } from '@/store/chat/selectors';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 
+import { markSidebarTopicActivation } from '../../hooks/useScrollActiveTopicIntoView';
 import { useTopicNavigation } from '../../hooks/useTopicNavigation';
 import ThreadList from '../../TopicListContent/ThreadList';
 import { useTopicListScope } from '../../TopicListScope';
@@ -327,6 +328,7 @@ const TopicItemRow = memo<TopicItemRowProps>(
     const handleClick = useCallback(
       (event?: MouseEvent) => {
         if (event && event.detail > 1) return;
+        if (id) markSidebarTopicActivation(id);
         if (isDesktop && id) recordTopicClickOrigin(id);
         void navRef.current.navigateToTopic(id);
       },
@@ -335,6 +337,7 @@ const TopicItemRow = memo<TopicItemRowProps>(
 
     const handleDoubleClick = useCallback(async () => {
       if (!id || !activeAgentId || !isDesktop) return;
+      markSidebarTopicActivation(id);
       if (scope && href) {
         openTopicInNewTab(id, href);
         void navRef.current.navigateToTopic(id);
@@ -383,7 +386,9 @@ const TopicItemRow = memo<TopicItemRowProps>(
     // while the user is viewing the topic, like markTopicUnread's own guard.
     const isRunningTailUnread = isMaskedRunningTail && !isTopicActive;
 
-    const hasUnread = id && (isUnreadCompleted || isRunningTailUnread);
+    // `status` is the row's own copy: a project list keeps its topics outside
+    // the chat store, so `isUnreadCompleted` never sees them there.
+    const hasUnread = id && (isUnreadCompleted || status === 'unread' || isRunningTailUnread);
 
     useEffect(() => {
       if (!activeAgentId || !id || !isUnreadCompleted || hasLocalRunningRuntime) return;

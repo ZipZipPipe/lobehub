@@ -27,7 +27,7 @@ describe('mainAreaMetaRoutes (Electron adapter)', () => {
   });
 
   it('uses the active resource category for the tab title and icon', () => {
-    const { static: staticMeta } = matchRouteMeta(mainAreaMetaRoutes, '/resource/images');
+    const { static: staticMeta } = matchRouteMeta(mainAreaMetaRoutes, '/resource/drive/images');
 
     expect(staticMeta.titleKey).toBe('navigation.resourceImages');
     expect(staticMeta.icon).toBe(ImageIcon);
@@ -78,6 +78,14 @@ describe('mainAreaMetaRoutes (Electron adapter)', () => {
     expect(matched.static.titleKey).toBe('project:sections.acceptance');
     expect(matched.static.icon).toBeDefined();
     expect(matched.meta?.DynamicMeta).toBeUndefined();
+  });
+
+  it('resolves a project acceptance record with the acceptance title runner', () => {
+    const matched = matchRouteMeta(mainAreaMetaRoutes, '/project/prj_1/acceptance/acc_1');
+
+    expect(matched.static.titleKey).toBe('verify:acceptance.titleFallback');
+    expect(matched.meta?.DynamicMeta).toBeDefined();
+    expect(matched.params.acceptanceId).toBe('acc_1');
   });
 
   it('resolves project meta for workspace-scoped tab urls', () => {

@@ -189,6 +189,7 @@ export const TRPC_NAMESPACE_API_KEY_RULES: Record<string, TrpcNamespaceScopeRule
   agentShare: 'blocked',
   agentSignal: rw('agent:read', 'agent:write'),
   agentSkills: rw('agent:read', 'agent:write'),
+  agentSteerQueue: rw('agent:read', 'agent:write'),
   // a trace snapshot is the whole inside of a run — system role, injected user
   // memory, tool results — and `getSnapshotUrl` hands back a presigned URL that
   // needs no further auth, so a restricted key holding one would read past its
@@ -205,6 +206,8 @@ export const TRPC_NAMESPACE_API_KEY_RULES: Record<string, TrpcNamespaceScopeRule
   // decrypts stored bot/messenger credentials and calls external channel APIs
   botMessage: 'blocked',
   brief: rw('chat:read', 'chat:write'),
+  // publish opens a public site from stored files; no key-based client drives canvases
+  canvas: 'blocked',
   changelog: 'open',
   chunk: rw('knowledge:read', 'knowledge:write'),
   comfyui: rw('model:read', 'model:write'),
@@ -220,6 +223,10 @@ export const TRPC_NAMESPACE_API_KEY_RULES: Record<string, TrpcNamespaceScopeRule
   document: rw('knowledge:read', 'knowledge:write'),
   documentComment: rw('knowledge:read', 'knowledge:write'),
   documentLike: rw('knowledge:read', 'knowledge:write'),
+  // code environment definitions: the same agent domain as the project
+  // environments they are bound to; what is built from them on the drive stays
+  // behind `sandboxStorage`
+  environment: rw('agent:read', 'agent:write'),
   expertise: rw('agent:read', 'agent:write'),
   // whole-account backup dump (settings incl. market tokens, providers, agents)
   exporter: 'blocked',
@@ -239,6 +246,8 @@ export const TRPC_NAMESPACE_API_KEY_RULES: Record<string, TrpcNamespaceScopeRule
   klavis: 'blocked',
   knowledge: rw('knowledge:read', 'knowledge:write'),
   knowledgeBase: rw('knowledge:read', 'knowledge:write'),
+  // Linear OAuth connections hold workspace tokens and are managed from Settings
+  linear: 'blocked',
   llmGenerationTracing: 'blocked',
   market: rw('agent:read', 'agent:write'),
   // tool execution inside a chat run
@@ -349,6 +358,12 @@ export const TRPC_PROCEDURE_EXTRA_SCOPES: Record<string, ApiKeyScope[]> = {
   'aiAgent.execSubAgentTask': AGENT_RUN_SCOPES,
   'aiAgent.scheduleAgentRun': AGENT_RUN_SCOPES,
   'aiAgent.startExecution': AGENT_RUN_SCOPES,
+  // a queued follow-up is a deferred composer send: the run that drains it
+  // starts a model turn and writes the user message
+  'agentSteerQueue.append': AGENT_RUN_SCOPES,
+  'agentSteerQueue.remove': ['chat:write'],
+  // returns the queued prompts and attachments, i.e. conversation content
+  'agentSteerQueue.list': ['chat:read'],
   // thread/message state writes without starting a run
   'aiAgent.createClientGroupAgentTaskThread': ['chat:write'],
   'aiAgent.createClientTaskThread': ['chat:write'],
@@ -441,6 +456,15 @@ export const TRPC_BLOCKED_PATH_PREFIXES: string[] = [
   'market.creds.',
   // marketplace OIDC auth flows carry tokens
   'market.oidc.',
+  // the GitHub picker reads the user's connected GitHub account (private
+  // repositories and branches) through their OAuth grant — connector data
+  // outside the agent domain the rest of `environment` belongs to
+  'environment.listGithub',
+  // publishing decides who else can reach what an environment's directories
+  // captured on the drive (a private one's left on the public drive stops
+  // being hidden); that is drive state, which stays behind `sandboxStorage`
+  // and so out of a restricted key's reach
+  'environment.setEnvironmentVisibility',
 ];
 
 export type TrpcScopeDecision = { scopes: ApiKeyScope[] } | { open: true } | { blocked: true };

@@ -3,7 +3,7 @@ import { summarizeGoalSupervision } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import { heteroAuthedProcedure } from '@/libs/trpc/lambda';
+import { heteroAuthedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { GoalService } from '@/server/services/goal';
 import { graphForClient } from '@/server/services/goal/graphCompat';
@@ -152,7 +152,7 @@ const goalOperationReadProcedure = heteroAuthedProcedure.use(serverDatabase).use
   });
 });
 
-export const readProcedures = {
+export const readRouter = router({
   /** Clarifications still waiting on the user, grouped by goal. */
   pendingForIsland: goalProcedure.query(async ({ ctx }) => {
     try {
@@ -186,6 +186,17 @@ export const readProcedures = {
       }
     }),
   /**
+   * Each declared measured clause with the value the acceptance gate reads for
+   * it now. `lh goal show` / `lh goal metric list` render it.
+   */
+  metricState: goalProcedure.input(idInput).query(async ({ ctx, input }) => {
+    try {
+      return { data: await ctx.goalService.metricState(input.id), success: true };
+    } catch (error) {
+      mapGoalError(error, 'read the metrics of');
+    }
+  }),
+  /**
    * Why `submitPlan` would accept or refuse a plan right now, without writing.
    *
    * `lh goal state` renders it and a refused `lh goal plan` re-reads it, so the
@@ -216,7 +227,7 @@ export const readProcedures = {
     }
   }),
 
-  // The same three reads for a planning run that holds an operation token, which
+  // The same reads for a planning run that holds an operation token, which
   // the ordinary `goalProcedure` above refuses — see `goalOperationReadProcedure`.
   graphOperation: goalOperationReadProcedure.input(idInput).query(async ({ ctx, input }) => {
     try {
@@ -224,6 +235,14 @@ export const readProcedures = {
       return { data: await ctx.goalService.graph(input.id), success: true };
     } catch (error) {
       mapGoalError(error, 'graph');
+    }
+  }),
+  metricStateOperation: goalOperationReadProcedure.input(idInput).query(async ({ ctx, input }) => {
+    try {
+      await ctx.goalManager.assertOperationOwnsTurn(input.id, ctx.heteroOperationId);
+      return { data: await ctx.goalService.metricState(input.id), success: true };
+    } catch (error) {
+      mapGoalError(error, 'read the metrics of');
     }
   }),
   planContextOperation: goalOperationReadProcedure
@@ -273,4 +292,4 @@ export const readProcedures = {
       success: true,
     };
   }),
-};
+});

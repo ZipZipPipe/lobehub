@@ -9,6 +9,7 @@ import AcceptanceCheckInventory from './Checks/AcceptanceCheckInventory';
 import AcceptanceCheckOwnerToolbar from './Checks/AcceptanceCheckOwnerToolbar';
 import AcceptanceDiscussion from './Comments/AcceptanceDiscussion';
 import { commentIdFromHash } from './Comments/anchor';
+import CollaborationRequestBanner from './Comments/CollaborationRequestBanner';
 import { countDiscussionMessages } from './Comments/discussionTimeline';
 import { useAcceptanceComments } from './Comments/hooks';
 import ReviewerApprovalBar from './Comments/ReviewerApprovalBar';
@@ -21,6 +22,7 @@ import GateReview from './Gate/GateReview';
 import AcceptanceGoal from './Header/AcceptanceGoal';
 import AcceptanceGoalEdit from './Header/AcceptanceGoalEdit';
 import AcceptanceIdentity from './Header/AcceptanceIdentity';
+import AcceptanceShare from './Header/AcceptanceShare';
 import AcceptanceStatusControl from './Header/AcceptanceStatusControl';
 import type { AcceptanceTabKey } from './Header/AcceptanceTabs';
 import AcceptanceTabs from './Header/AcceptanceTabs';
@@ -93,12 +95,23 @@ export const AcceptanceOverview = ({
     <>
       <Flexbox className={styles.headerBand}>
         <Flexbox className={styles.column} gap={12}>
-          <AcceptanceIdentity
-            focusSlot={<AcceptanceEnterFocus />}
-            statusSlot={<AcceptanceStatusControl />}
-            topicSlot={<AcceptanceOriginTopic />}
-          />
+          {/* Sharing sits beside the identity, as on the workbench page. The
+              control gates itself on the server's review capability, so a
+              reader without it sees nothing here. */}
+          <Flexbox horizontal align={'flex-start'} gap={16} justify={'space-between'}>
+            <Flexbox flex={1} style={{ minWidth: 0 }}>
+              <AcceptanceIdentity
+                focusSlot={<AcceptanceEnterFocus />}
+                statusSlot={<AcceptanceStatusControl />}
+                topicSlot={<AcceptanceOriginTopic />}
+              />
+            </Flexbox>
+            <AcceptanceShare />
+          </Flexbox>
           {!gateDossier && <AcceptanceGoal editSlot={<AcceptanceGoalEdit />} />}
+          {/* About the delivery as a whole, not one tab's face of it — a reviewer
+              reading the discussion needs it as much as one on the checklist. */}
+          <CollaborationRequestBanner />
           {/* The requirement needs room to land before the tabs start a new
               thought — at the band's uniform gap it read as another row of
               the same list. */}

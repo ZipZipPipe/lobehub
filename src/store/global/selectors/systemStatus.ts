@@ -4,6 +4,7 @@ import type {
   AgentDocumentSort,
   GlobalState,
   ModelDetailPanelExpandedKey,
+  ProjectListSortBy,
   ProjectTopicSubGroupMode,
   SystemStatus,
   WorkspaceOverridableField,
@@ -194,6 +195,7 @@ export const SIDEBAR_SPACER_ID = '__spacer__';
 
 export const DEFAULT_SIDEBAR_ITEMS: string[] = [
   'tasks',
+  'goals',
   'dashboard',
   'resource',
   'recents',
@@ -445,6 +447,8 @@ const DEFAULT_AGENT_DOCUMENT_SORT: AgentDocumentSort = {
   foldersFirst: true,
   order: 'asc',
 };
+const projectListSortBy = (s: GlobalState): ProjectListSortBy =>
+  s.status.projectListSortBy ?? 'manual';
 const agentDocumentSort = (s: GlobalState): AgentDocumentSort =>
   s.status.agentDocumentSort ?? DEFAULT_AGENT_DOCUMENT_SORT;
 const agentListViewOptions = (s: GlobalState) => s.status.agentListViewOptions;
@@ -496,6 +500,7 @@ const homeSelectedAgentId = (s: GlobalState) => s.status.homeSelectedAgentId;
 export const systemStatusSelectors = {
   agentBuilderPanelWidth,
   agentDocumentSort,
+  projectListSortBy,
   agentListExpandedGroupKeys,
   agentListSidebarSectionCollapsed,
   agentListViewMode,

@@ -273,6 +273,64 @@ describe('LobeKimiCodingPlanAI', () => {
         expect(payload.thinking).toBeUndefined();
       });
 
+      it.each([
+        ['k3.1-pro', 'k3.1-pro'],
+        ['k3.1-pro-highspeed', 'k3.1-pro-highspeed'],
+        ['kimi-k3.1-pro', 'k3.1-pro'],
+        ['kimi-k3.1-pro-highspeed', 'k3.1-pro-highspeed'],
+      ])(
+        'routes %s to the official K3.1 deployment %s with thinking enabled',
+        async (model, deployed) => {
+          await instance.chat({
+            messages: [
+              { content: 'Hello', role: 'user' },
+              { content: 'Earlier reply', role: 'assistant' },
+              { content: 'Continue', role: 'user' },
+            ],
+            model,
+            reasoning_effort: 'low',
+            temperature: 0.5,
+            thinking: { budget_tokens: 0, type: 'disabled' },
+            top_p: 0.8,
+          });
+
+          const payload = getLastRequestPayload();
+          expect(payload.model).toBe(deployed);
+          expect(payload.reasoning_effort).toBe('low');
+          expect(payload.thinking).toBeUndefined();
+          expect(payload.temperature).toBeUndefined();
+          expect(payload.top_p).toBeUndefined();
+          expect(payload.output_config).toBeUndefined();
+          expect(payload.messages.find((m: any) => m.role === 'assistant').content).toContainEqual({
+            thinking: ' ',
+            type: 'thinking',
+          });
+        },
+      );
+
+      it.each(['low', 'high', 'max'] as const)(
+        'preserves official K3.1 effort %s',
+        async (effort) => {
+          await instance.chat({
+            messages: [{ content: 'Hello', role: 'user' }],
+            model: 'k3.1-pro',
+            reasoning_effort: effort,
+          });
+          expect(getLastRequestPayload().reasoning_effort).toBe(effort);
+        },
+      );
+
+      it.each(['k3.1-pro', 'k3.1-pro-highspeed'])(
+        'keeps the service default effort for %s',
+        async (model) => {
+          await instance.chat({ messages: [{ content: 'Hello', role: 'user' }], model });
+          const payload = getLastRequestPayload();
+          expect(payload.model).toBe(model);
+          expect(payload.thinking).toBeUndefined();
+          expect(payload.reasoning_effort).toBeUndefined();
+        },
+      );
+
       it('should use K3 reasoning effort without K2 thinking or sampling params', async () => {
         await instance.chat({
           messages: [{ content: 'Hello', role: 'user' }],

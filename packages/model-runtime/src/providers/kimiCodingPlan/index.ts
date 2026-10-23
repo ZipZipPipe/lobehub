@@ -23,13 +23,19 @@ const KIMI_MODEL_MAX_OUTPUT: Record<string, number> = {
 
 // Helpers for message normalization (shared with Moonshot provider)
 const KIMI_K3_DEPLOYMENT_NAMES = new Map([
+  ['kimi-k3.1-pro', 'k3.1-pro'],
+  ['kimi-k3.1-pro-highspeed', 'k3.1-pro-highspeed'],
   ['kimi-k3', 'k3'],
   ['kimi-k3-256k', 'k3-256k'],
 ]);
 
 const resolveKimiCodingModelId = (model: string) => KIMI_K3_DEPLOYMENT_NAMES.get(model) ?? model;
 const isKimiK3Model = (model: string) =>
-  model === 'k3' || model === 'k3-256k' || KIMI_K3_DEPLOYMENT_NAMES.has(model);
+  model === 'k3.1-pro' ||
+  model === 'k3.1-pro-highspeed' ||
+  model === 'k3' ||
+  model === 'k3-256k' ||
+  KIMI_K3_DEPLOYMENT_NAMES.has(model);
 const isKimiK25Model = (model: string) => model === 'kimi-k2.5' || model === 'k2p5';
 const isKimiNativeThinkingModel = (model: string) =>
   isKimiK3Model(model) || model.startsWith('kimi-k2-thinking');

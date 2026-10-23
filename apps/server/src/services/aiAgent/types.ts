@@ -6,6 +6,7 @@ import type {
   ExecAgentParams,
   ExternalOriginMetadata,
   LobeAgentChatConfig,
+  MessageMetadata,
   RuntimeMentionedAgent,
   UserInterventionConfig,
   WorkingDirConfig,
@@ -68,6 +69,13 @@ export interface ExecRunContext {
   trigger?: string;
   /** User turn row id; undefined when the run starts from history (resume). */
   userMessageId?: string;
+  /**
+   * Metadata the user turn row was persisted with (attached content, steer,
+   * trigger, …); undefined when no row was created. Stages read attached content
+   * from here rather than from request fields, so a field persisted on the row
+   * is also the field the run sees.
+   */
+  userMessageMetadata?: MessageMetadata;
 }
 
 /**
@@ -176,6 +184,8 @@ export interface InternalExecAgentParams extends ExecAgentParams {
   functionTools?: Array<{ description?: string; name: string; parameters?: Record<string, any> }>;
   /** External lifecycle hooks (auto-adapt to local/production mode) */
   hooks?: AgentHook[];
+  /** Initial LLM-call count offset for resumed operations (accumulated from previous runs) */
+  initialLlmCalls?: number;
   /** Initial step count offset for resumed operations (accumulated from previous runs) */
   initialStepCount?: number;
   /**

@@ -16,6 +16,7 @@ const webContext: SettingsSearchContext = {
   enableComposio: true,
   enableGatewayMode: true,
   enableSTT: true,
+  enableWorkspace: false,
   hasEmail: true,
   hideDocs: false,
   isDesktop: false,
@@ -38,7 +39,9 @@ describe('settings search index', () => {
 
     for (const feature of LAB_FEATURES) {
       const item = labsItems.find(({ anchor }) => anchor === `labs-${feature.flag}`)!;
-      expect(item.visible?.(webContext) ?? true).toBe(!feature.desktopOnly);
+      expect(item.visible?.(webContext) ?? true).toBe(
+        !feature.desktopOnly && !feature.workspaceOnly,
+      );
     }
   });
 

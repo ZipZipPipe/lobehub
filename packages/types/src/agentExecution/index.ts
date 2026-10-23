@@ -4,7 +4,7 @@ import type { LobeAgentChatConfig } from '../agent/chatConfig';
 import type { CreateThreadWithMessageParams } from '../aiChat';
 import type { DeviceUnavailableErrorData } from '../device';
 import { workingDirConfigSchema } from '../device';
-import type { TaskDetail, UIChatMessage } from '../message';
+import type { ComposerUserMessage, TaskDetail, UIChatMessage } from '../message';
 import type { ChatTopic } from '../topic';
 
 export * from './credentialFacts';
@@ -23,14 +23,19 @@ export * from './modelFacts';
 export const initialTopicMetadataSchema = z.object({
   repos: z.array(z.string()).optional(),
   /**
-   * Cloud-sandbox instance the composer chose before any topic existed. The
-   * choice is made on a conversation that has nothing to write to yet, so it
-   * travels with the first send instead — the server cannot read the client's
-   * pending selection, and without this the new topic would be born unbound and
-   * silently run at the workspace root.
+   * Cloud-sandbox placement the composer chose before any topic existed — an
+   * instance, or a folder on the drive. The choice is made on a conversation
+   * that has nothing to write to yet, so it travels with the first send
+   * instead — the server cannot read the client's pending selection, and
+   * without this the new topic would be born unbound and silently run in a
+   * temporary sandbox.
    */
+  /** Which workspace drive the placement is on; see `ChatTopicMetadata.sandboxDrive`. */
+  sandboxDrive: z.enum(['personal', 'public']).optional(),
+  /** The environment to initialize the sandbox from; see `ChatTopicMetadata.sandboxEnvironmentId`. */
+  sandboxEnvironmentId: z.string().max(255).optional(),
   sandboxInstanceId: z.string().optional(),
-  sandboxMode: z.enum(['ephemeral', 'persistent']).optional(),
+  sandboxWorkingDirectory: z.string().max(1024).optional(),
   workingDirectory: z.string().optional(),
   workingDirectoryConfig: workingDirConfigSchema.optional(),
 });
@@ -173,6 +178,14 @@ export interface ExecAgentAppContext {
    * `metadata.orchestrationRole` so the role snapshot persists for rendering.
    */
   orchestrationRole?: 'supervisor' | 'member';
+  /**
+   * Project the run belongs to. On a NEW topic it is written onto the row, so
+   * a conversation started from the project home is born inside the project
+   * even without a working directory. For an existing topic the server
+   * resolves it from the topic (or the run's task) and fills it in here, so
+   * every downstream stage reads one value.
+   */
+  projectId?: string;
   /**
    * Project working directory a NEW topic is born in — the blank conversation a
    * project group's "+" opened. The topic is bound to it and the run routes to
@@ -389,6 +402,13 @@ export interface ExecAgentParams {
    * input — derived from the request context.
    */
   userAgent?: string;
+  /**
+   * The composer-authored part of the user message this send creates: rich-text
+   * `editorData` and attached content (`metadata.contextSelections`, …). The
+   * same shape `aiChat.sendMessageInServer` persists, so a gateway send stores
+   * the row a client-runtime send would. See `ComposerUserMessageSchema`.
+   */
+  userMessage?: ComposerUserMessage;
 }
 
 /**

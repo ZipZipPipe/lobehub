@@ -1,13 +1,27 @@
 import { deriveWorktreePath } from '@lobechat/types';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import { requireWorkspaceRoleWhenScoped } from '@/business/server/trpc-middlewares/workspaceAuth';
+import { router } from '@/libs/trpc/lambda';
 import { deviceGateway } from '@/server/services/deviceGateway';
 
 import { assertWorkspaceRootApproved } from '../deviceWorkspaceGuard';
 import { deviceProcedure } from './procedures';
 
-export const gitProcedures = {
+/**
+ * A gateway read that resolved to `undefined` (gateway unconfigured, device
+ * offline, RPC failed). Thrown rather than mapped to `[]` or `null`: `[]` is
+ * indistinguishable from a real empty list, and released clients expect an
+ * array, so only a procedure error keeps both old and new clients correct.
+ */
+const requireDeviceAnswer = <T>(result: T | undefined, what: string): T => {
+  if (result === undefined)
+    throw new TRPCError({ code: 'BAD_GATEWAY', message: `The device could not list ${what}.` });
+  return result;
+};
+
+export const gitRouter = router({
   /**
    * Granular git reads for a directory on a remote device, each via its own
    * device RPC so the web/remote git status bar mirrors the local desktop's
@@ -155,7 +169,9 @@ export const gitProcedures = {
         userId: ctx.userId,
         workspaceId: ctx.workspaceId,
       });
-      return result ?? [];
+      // `[]` is a real answer (an unborn repo); a device that could not answer
+      // is an error, never an empty list a client could cache over its copy.
+      return requireDeviceAnswer(result, 'branches');
     }),
   /**
    * Checkout (or create) a branch in a directory on a remote device, via the
@@ -396,7 +412,8 @@ export const gitProcedures = {
         userId: ctx.userId,
         workspaceId: ctx.workspaceId,
       });
-      return result ?? [];
+      // `[]` is a real answer (no `origin`); a device that could not answer is an error.
+      return requireDeviceAnswer(result, 'remote branches');
     }),
   /**
    * Repo-relative paths of dirty working-tree files for a directory on a remote
@@ -429,4 +446,4 @@ export const gitProcedures = {
         workspaceId: ctx.workspaceId,
       }),
     ),
-};
+});

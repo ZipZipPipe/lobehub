@@ -2,13 +2,15 @@ import { toExecutionConfiguration } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+import { router } from '@/libs/trpc/lambda';
 import { resolveScmCloneCredential } from '@/server/services/scm/cloneCredential';
 
+import { assertNotLeftOnPublicDrive, resolveInstanceDrive } from './driveScope';
 import { isBuildable } from './instanceOperations';
 import { instanceProcedure, mapStorageError } from './procedures';
 import { idSchema, topicIdSchema } from './schemas';
 
-export const instanceBuildProcedures = {
+export const instanceBuildRouter = router({
   /**
    * Materialize an instance: clone the environment's sources and run its
    * bootstrap, into the instance's own stored generation.
@@ -26,6 +28,9 @@ export const instanceBuildProcedures = {
     .mutation(async ({ ctx, input }) => {
       const instance = await ctx.instanceModel.findOwnedById(input.id);
       if (!instance) throw new TRPCError({ code: 'NOT_FOUND', message: 'Instance not found' });
+      const instanceDrive = await resolveInstanceDrive(ctx, instance);
+      const { client } = instanceDrive;
+      await assertNotLeftOnPublicDrive(ctx, instance, instanceDrive);
 
       // The definition this instance was created from, not the environment's
       // current one: a build has to produce what the instance says it is, and
@@ -46,7 +51,7 @@ export const instanceBuildProcedures = {
       // now, so a held instance is refused before the row changes at all. A
       // lease store that did not answer is not read as "free" — the runtime's
       // own lease still stands behind this and refuses a second writer.
-      const occupancy = await ctx.client
+      const occupancy = await client
         .readOccupancy({ names: [input.id], topicId: input.topicId })
         .catch(() => ({ held: [], unavailable: true }));
       if (occupancy.held.some((entry) => entry.id === input.id)) {
@@ -76,7 +81,7 @@ export const instanceBuildProcedures = {
       });
 
       try {
-        const { buildId } = await ctx.client.buildInstance({
+        const { buildId } = await client.buildInstance({
           credentials: credential ? [credential] : undefined,
           // Where the checkout lands on the volume: the instance's own folder,
           // which is what its file browser opens.
@@ -136,7 +141,8 @@ export const instanceBuildProcedures = {
         };
       }
 
-      const status = await ctx.client
+      const { client } = await resolveInstanceDrive(ctx, instance);
+      const status = await client
         .buildStatus({
           buildId: instance.buildId,
           logOffset: input.logOffset,
@@ -160,4 +166,4 @@ export const instanceBuildProcedures = {
 
       return { chunk: status.chunk, logOffset: status.logOffset, state: status.state };
     }),
-};
+});

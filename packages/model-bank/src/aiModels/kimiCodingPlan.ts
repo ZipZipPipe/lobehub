@@ -7,6 +7,52 @@ const kimiCodingPlanChatModels: AIChatModelCard[] = [
     abilities: {
       functionCall: true,
       reasoning: true,
+      video: true,
+      vision: true,
+    },
+    contextWindowTokens: 1_048_576,
+    description:
+      'Kimi K3.1 Pro supports image and video input and up to 1M context depending on membership. Thinking is always enabled with low, high, or max effort (default max).',
+    displayName: 'Kimi K3.1 Pro',
+    enabled: true,
+    family: 'kimi',
+    generation: 'kimi-k3.1',
+    id: 'k3.1-pro',
+    organization: 'Moonshot',
+    releasedAt: '2026-10-23',
+    settings: {
+      disabledParams: ['frequency_penalty', 'presence_penalty', 'temperature', 'top_p'],
+      extendParams: ['kimiK3ReasoningEffort'],
+    },
+    type: 'chat',
+  },
+  {
+    abilities: {
+      functionCall: true,
+      reasoning: true,
+      video: true,
+      vision: true,
+    },
+    contextWindowTokens: 1_048_576,
+    description:
+      'Kimi K3.1 Pro Highspeed supports image and video input and up to 1M context depending on membership. Thinking is always enabled with low, high, or max effort (default max). Highspeed offers approximately 2-3x speed at about twice the quota consumption.',
+    displayName: 'Kimi K3.1 Pro Highspeed',
+    enabled: true,
+    family: 'kimi',
+    generation: 'kimi-k3.1',
+    id: 'k3.1-pro-highspeed',
+    organization: 'Moonshot',
+    releasedAt: '2026-10-23',
+    settings: {
+      disabledParams: ['frequency_penalty', 'presence_penalty', 'temperature', 'top_p'],
+      extendParams: ['kimiK3ReasoningEffort'],
+    },
+    type: 'chat',
+  },
+  {
+    abilities: {
+      functionCall: true,
+      reasoning: true,
       structuredOutput: true,
       video: true,
       vision: true,
