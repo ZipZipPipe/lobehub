@@ -84,3 +84,29 @@ describe('getPasskeyOrigins', () => {
     expect(getPasskeyOrigins()).toBeUndefined();
   });
 });
+
+describe('createSecondaryStorage', () => {
+  it('provides the atomic counter required by Better Auth rate limiting', async () => {
+    const { initializeRedis, isRedisEnabled } = await import('@/server/modules/Redis');
+    const { createSecondaryStorage } = await import('./config');
+    const evalCounter = vi.fn().mockResolvedValue(2);
+    vi.mocked(isRedisEnabled).mockReturnValue(true);
+    vi.mocked(initializeRedis).mockResolvedValue({ eval: evalCounter } as any);
+
+    try {
+      const storage = createSecondaryStorage();
+      expect(storage).toBeDefined();
+      expect(typeof storage?.increment).toBe('function');
+      await expect(storage!.increment('rate-limit-test', 60)).resolves.toBe(2);
+      expect(evalCounter).toHaveBeenCalledWith(
+        expect.any(String),
+        1,
+        'better-auth:rate-limit-test',
+        60,
+      );
+    } finally {
+      vi.mocked(isRedisEnabled).mockReturnValue(false);
+      vi.mocked(initializeRedis).mockReset();
+    }
+  });
+});

@@ -135,6 +135,26 @@ export const createSecondaryStorage = () => {
       const redisClient = await getRedisClient();
       await redisClient.del(buildKey(key));
     },
+    increment: async (key: string, ttl: number) => {
+      const redisClient = await getRedisClient();
+      // Older Better Auth versions stored JSON rate-limit snapshots at these keys.
+      // Convert them without extending their window, and keep INCR + EXPIRE atomic.
+      return redisClient.eval<number>(
+        `local value = redis.call('GET', KEYS[1])
+if value and not tonumber(value) then
+  local legacy = cjson.decode(value)
+  redis.call('SET', KEYS[1], legacy.count, 'KEEPTTL')
+end
+local count = redis.call('INCR', KEYS[1])
+if count == 1 or redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count`,
+        1,
+        buildKey(key),
+        ttl,
+      );
+    },
     get: async (key: string) => {
       const redisClient = await getRedisClient();
       return (await redisClient.get(buildKey(key))) ?? null;
