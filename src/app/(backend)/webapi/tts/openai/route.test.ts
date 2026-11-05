@@ -26,7 +26,7 @@ beforeEach(() => vi.clearAllMocks());
 describe('OpenAI chat TTS compatibility route', () => {
   it('passes nested player options to the user and workspace model runtime', async () => {
     const audio = new Uint8Array([73, 68, 51]).buffer;
-    const textToSpeech = vi.fn().mockResolvedValue(audio);
+    const textToSpeech = vi.fn().mockResolvedValue({ audio, format: 'mp3' });
     vi.mocked(initModelRuntimeFromDB).mockResolvedValue({ textToSpeech } as any);
     const response = await POST(
       request({ input: 'Hello', options: { model: 'tts-1', voice: 'alloy', speed: 1.25 } }),

@@ -24,13 +24,13 @@ export const POST = checkAuth(async (req, { serverDB, userId }) => {
     async () => {
       const workspaceId = await resolveValidWorkspaceIdFromRequest({ req, serverDB, userId });
       const runtime = await initModelRuntimeFromDB(serverDB, userId, 'openai', workspaceId);
-      const audio = await runtime.textToSpeech(
+      const speech = await runtime.textToSpeech(
         { input: payload.data.input, ...payload.data.options },
         { signal: req.signal, user: userId },
       );
-      if (!audio) return new Response('Text-to-speech is not supported', { status: 501 });
+      if (!speech) return new Response('Text-to-speech is not supported', { status: 501 });
 
-      return new Response(audio, { headers: { 'Content-Type': 'audio/mpeg' } });
+      return new Response(speech.audio, { headers: { 'Content-Type': 'audio/mpeg' } });
     },
     { logTag: 'webapi/tts/openai' },
   );
