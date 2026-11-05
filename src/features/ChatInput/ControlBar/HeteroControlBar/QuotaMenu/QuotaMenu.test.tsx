@@ -96,6 +96,8 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+const closePopoverMock = vi.hoisted(() => vi.fn());
+
 vi.mock('@lobehub/ui', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   const factories: ((original: typeof importOriginal) => unknown)[] = [
@@ -180,10 +182,13 @@ vi.mock('@lobehub/ui', async (importOriginal) => {
     const part = (await factory(importOriginal)) as Record<string, unknown>;
     for (const [key, value] of Object.entries(part)) if (value !== actual[key]) merged[key] = value;
   }
+  // The mocked Popover has no provider; the header switcher closes it before opening modals.
+  merged.usePopoverContext = () => ({ close: closePopoverMock });
   return merged;
 });
 
 beforeEach(() => {
+  closePopoverMock.mockReset();
   isolateQuotaReplica();
   confirmModalMock.mockReset();
   mockService.consumeCodexRateLimitResetCredit.mockReset();
@@ -369,6 +374,7 @@ describe('KimiCodeQuotaMenu', () => {
 
     fireEvent.click(await screen.findByTestId('calendar'));
 
+    expect(closePopoverMock).toHaveBeenCalledTimes(1);
     expect(openQuotaCalendarModal).toHaveBeenCalledWith({
       externalAccountId: 'kimi-ext-1',
       provider: 'kimi-code',
@@ -389,6 +395,7 @@ describe('CodexQuotaMenu', () => {
 
     fireEvent.click(await screen.findByTestId('calendar'));
 
+    expect(closePopoverMock).toHaveBeenCalledTimes(1);
     expect(openQuotaCalendarModal).toHaveBeenCalledWith({
       externalAccountId: 'codex-ext-1',
       provider: 'codex',
@@ -432,6 +439,13 @@ describe('CodexQuotaMenu', () => {
     ).toBe('low');
     expect(screen.getByText('heteroAgent.codexQuota.fiveHour')).toBeTruthy();
     expect(screen.getByText('heteroAgent.quota.weekly')).toBeTruthy();
+    // each bar fill is styled (height + color), and a low window paints differently
+    const fills = [...document.querySelectorAll<HTMLElement>('div[data-quota-level]')];
+    expect(fills.map((fill) => fill.style.width)).toEqual(['81%', '12%']);
+    const [normalFill, lowFill] = fills;
+    expect(normalFill.className).not.toBe('');
+    expect(lowFill.className).not.toBe('');
+    expect(lowFill.className).not.toBe(normalFill.className);
     // each row carries its reset as a bare short duration, not a resetsIn/resetAt sentence
     expect(
       screen.getAllByText((content) => content.startsWith('heteroAgent.quota.duration.')),

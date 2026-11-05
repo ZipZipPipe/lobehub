@@ -18,8 +18,10 @@ const log = debug('lobe-server:sandbox:market');
 const REDACTED_SANDBOX_PARAM = '[redacted]';
 // `GIT_CONFIG_VALUE_<n>` carries the clone credential an environment's
 // initializer exports for git; see `buildSandboxEnvironmentInitCommand`.
+// `LOBE_DRIVE_DOWNLOAD` carries a drive download's presigned upload URL; see
+// `buildDriveDownloadCommand`.
 const SANDBOX_AUTH_ENV_PATTERN =
-  /\b(LOBEHUB_JWT|GITHUB_TOKEN|GIT_CONFIG_VALUE_\d+)=("[^"]*"|'[^']*'|\S+)/g;
+  /\b(LOBEHUB_JWT|GITHUB_TOKEN|GIT_CONFIG_VALUE_\d+|LOBE_DRIVE_DOWNLOAD)=("[^"]*"|'[^']*'|\S+)/g;
 /**
  * Any command that writes into `~/.creds/env` (the path documented to the
  * model as where `injectCredsToSandbox` places credentials) carries
@@ -144,15 +146,34 @@ export class MarketSandboxProvider implements SandboxProvider {
     path,
     uploadUrl,
   }: SandboxProviderFileExportRequest): Promise<SandboxProviderFileExportResult> {
-    const { marketService, topicId, userId } = this.options;
+    const {
+      marketService,
+      sandboxCwd,
+      sandboxInstanceId,
+      sandboxMode,
+      sandboxSpecification,
+      sandboxWorkingDir,
+      topicId,
+      userId,
+    } = this.options;
 
     try {
-      const response = await marketService.exportFile({
-        path,
-        topicId,
-        uploadUrl,
-        userId,
-      });
+      const response = await marketService.exportFile(
+        { path, uploadUrl },
+        {
+          // Named one by one for the same reason callTool's context is — see
+          // the comment there: a dropped field silently runs the export in a
+          // throwaway sandbox that cannot see the persistent volume's file.
+          sandboxCwd,
+          sandboxInstanceId,
+          // Widened for `drive` like callTool's; remove with the SDK bump.
+          sandboxMode: sandboxMode as Exclude<SandboxMode, 'drive'> | undefined,
+          sandboxSpecification: sandboxSpecification as Record<string, unknown> | undefined,
+          sandboxWorkingDir,
+          topicId,
+          userId,
+        },
+      );
 
       log('Sandbox exportFile response: %O', response);
 

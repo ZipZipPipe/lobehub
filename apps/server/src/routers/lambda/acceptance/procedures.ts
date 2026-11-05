@@ -6,7 +6,6 @@ import {
   wsCompatProcedure,
 } from '@/business/server/trpc-middlewares/workspaceAuth';
 import { AcceptanceCommentModel } from '@/database/models/acceptanceComment';
-import { WorkspaceMemberModel } from '@/database/models/workspaceMember';
 import type { AcceptanceItem } from '@/database/schemas/verify';
 import { acceptances } from '@/database/schemas/verify';
 import type { LobeChatDatabase } from '@/database/type';
@@ -15,10 +14,11 @@ import { publicProcedure } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { AcceptanceService } from '@/server/services/verify';
 
+import { canReadAcceptance } from '../_helpers/acceptanceReadScope';
 import { canManageAcceptance } from '../_helpers/acceptanceWriteScope';
 
 export const ACCEPTANCE_DECISION_FORBIDDEN =
-  'Only the creator, a workspace owner or a workspace admin can change this acceptance';
+  'Only the creator or a workspace member with edit access can change this acceptance';
 
 /** Reads addressed purely by acceptance id — visibility is checked in the handler. */
 export const publicAcceptanceProcedure = publicProcedure.use(serverDatabase);
@@ -116,6 +116,7 @@ export const resolveAcceptanceForReject = async (
     });
     const granted =
       acceptance &&
+      acceptance.subjectType !== 'site' &&
       (await new AcceptanceCommentModel(ctx.serverDB).hasAccessGrant(
         acceptance.id,
         ctx.userId,
@@ -133,20 +134,4 @@ export const resolveAcceptanceForReject = async (
       ),
     };
   }
-};
-
-export const canReadAcceptance = async (
-  ctx: { serverDB: LobeChatDatabase; userId?: string | null },
-  acceptance: AcceptanceItem,
-) => {
-  if (ctx.userId && ctx.userId === acceptance.userId) return true;
-  if (acceptance.visibility === 'public') return true;
-  if (!ctx.userId || !acceptance.workspaceId) return false;
-  // Membership in the acceptance's OWN workspace — not the viewer's currently
-  // active one, which may be a different workspace entirely.
-  const member = await new WorkspaceMemberModel(ctx.serverDB, ctx.userId).getMember(
-    acceptance.workspaceId,
-    ctx.userId,
-  );
-  return Boolean(member);
 };

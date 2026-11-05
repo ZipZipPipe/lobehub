@@ -3,6 +3,7 @@
  */
 import { accountDeletionRouter } from '@/business/server/lambda-routers/accountDeletion';
 import { artifactShareRouter } from '@/business/server/lambda-routers/artifactShare';
+import { fileShareRouter } from '@/business/server/lambda-routers/fileShare';
 import { pageShareRouter } from '@/business/server/lambda-routers/pageShare';
 import { referralRouter } from '@/business/server/lambda-routers/referral';
 import { spendRouter } from '@/business/server/lambda-routers/spend';
@@ -25,6 +26,7 @@ import { acceptanceRouter } from './acceptance';
 import { acceptanceCommentRouter } from './acceptanceComment';
 import { agentRouter } from './agent';
 import { agentBotProviderRouter } from './agentBotProvider';
+import { agentBotWakeRouter } from './agentBotWake';
 import { agentDocumentRouter } from './agentDocument';
 import { agentEvalRouter } from './agentEval';
 import { agentEvalExternalRouter } from './agentEvalExternal';
@@ -43,10 +45,12 @@ import { aiModelRouter } from './aiModel';
 import { aiProviderRouter } from './aiProvider';
 import { apiKeyRouter } from './apiKey';
 import { asrRouter } from './asr';
+import { authRouter } from './auth';
 import { botMessageRouter } from './botMessage';
 import { briefRouter } from './brief';
 import { canvasRouter } from './canvas';
 import { changelogRouter } from './changelog';
+import { channelRouter } from './channel';
 import { chunkRouter } from './chunk';
 import { comfyuiRouter } from './comfyui';
 import { composioRouter } from './composio';
@@ -61,6 +65,7 @@ import { documentLikeRouter } from './documentLike';
 import { environmentRouter } from './environment';
 import { expertiseRouter } from './expertise';
 import { exporterRouter } from './exporter';
+import { favoriteRouter } from './favorite';
 import { fileRouter } from './file';
 import { followUpActionRouter } from './followUpAction';
 import { generationRouter } from './generation';
@@ -85,6 +90,7 @@ import { oauthAppRouter } from './oauthApp';
 import { oauthDeviceFlowRouter } from './oauthDeviceFlow';
 import { pluginRouter } from './plugin';
 import { projectRouter } from './project';
+import { projectReviewRouter } from './projectReview';
 import { projectWorkingDirectoryRouter } from './projectWorkingDirectory';
 import { pushTokenRouter } from './pushToken';
 import { ragEvalRouter } from './ragEval';
@@ -122,6 +128,7 @@ export const lambdaRouter = router({
   acceptanceComment: acceptanceCommentRouter,
   agent: agentRouter,
   agentBotProvider: agentBotProviderRouter,
+  agentBotWake: agentBotWakeRouter,
   agentNotify: agentNotifyRouter,
   botMessage: botMessageRouter,
   agentDocument: agentDocumentRouter,
@@ -130,6 +137,7 @@ export const lambdaRouter = router({
   agentLabel: agentLabelRouter,
   agentSkills: agentSkillsRouter,
   environment: environmentRouter,
+  favorite: favoriteRouter,
   sandboxStorage: sandboxStorageRouter,
   agentTrace: agentTraceRouter,
   expertise: expertiseRouter,
@@ -137,6 +145,7 @@ export const lambdaRouter = router({
   agentSteerQueue: agentSteerQueueRouter,
   canvas: canvasRouter,
   changelog: changelogRouter,
+  channel: channelRouter,
   brief: briefRouter,
   aiAgent: aiAgentRouter,
   aiChat: aiChatRouter,
@@ -146,6 +155,7 @@ export const lambdaRouter = router({
   aiProvider: aiProviderRouter,
   apiKey: apiKeyRouter,
   asr: asrRouter,
+  auth: authRouter,
   tts: ttsRouter,
   chunk: chunkRouter,
   comfyui: comfyuiRouter,
@@ -186,6 +196,7 @@ export const lambdaRouter = router({
   oauthDeviceFlow: oauthDeviceFlowRouter,
   plugin: pluginRouter,
   project: projectRouter,
+  projectReview: projectReviewRouter,
   projectWorkingDirectory: projectWorkingDirectoryRouter,
   pushToken: pushTokenRouter,
   ragEval: ragEvalRouter,
@@ -225,6 +236,7 @@ export const lambdaRouter = router({
   workspaceUserSettings: workspaceUserSettingsRouter,
   accountDeletion: accountDeletionRouter,
   artifactShare: artifactShareRouter,
+  fileShare: fileShareRouter,
   pageShare: pageShareRouter,
   referral: referralRouter,
   spend: spendRouter,

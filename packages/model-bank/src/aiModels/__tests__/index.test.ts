@@ -73,8 +73,8 @@ describe('xAI models', () => {
           aspectRatio: expect.objectContaining({
             enum: expect.arrayContaining(['21:9', '5:2']),
           }),
-          imageUrls: expect.objectContaining({ maxCount: 3 }),
-          quality: expect.objectContaining({ default: 'medium', enum: ['low', 'medium'] }),
+          imageUrls: expect.objectContaining({ maxCount: 5 }),
+          quality: expect.objectContaining({ default: 'low', enum: ['low', 'medium'] }),
           resolution: expect.objectContaining({ default: '1k', enum: ['1k', '2k'] }),
         }),
         providerId: ModelProvider.XAI,
@@ -259,7 +259,10 @@ describe('OpenAI image models', () => {
       (model) => model.providerId === ModelProvider.OpenAI && model.id.startsWith('gpt-image-2.5-'),
     );
 
-    expect(models.map(({ id }) => id)).toEqual(['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']);
+    expect(models.map(({ id }) => id).sort()).toEqual([
+      'gpt-image-2.5-flare',
+      'gpt-image-2.5-sunburst',
+    ]);
     expect(
       models.every(
         (model) =>

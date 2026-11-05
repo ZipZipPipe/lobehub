@@ -1,13 +1,13 @@
 'use client';
 
-import { type DropdownItem, Flexbox, Icon } from '@lobehub/ui';
-import { createStaticStyles } from '@lobehub/ui';
+import { createStaticStyles, type DropdownItem, Flexbox, Icon } from '@lobehub/ui';
 import { Crown, Sparkles, Users, UsersRound } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 
 import AddGroupMemberModal from '@/features/AddAgentMemberModal';
+import MobileHeaderNav from '@/features/NavHeader/MobileHeaderNav';
 import ToggleLeftPanelButton from '@/features/NavPanel/ToggleLeftPanelButton';
 import { usePermission } from '@/hooks/usePermission';
 import { parseAsString, useQueryState } from '@/hooks/useQueryParam';
@@ -15,10 +15,11 @@ import { useAgentGroupStore } from '@/store/agentGroup';
 import { agentGroupSelectors } from '@/store/agentGroup/selectors';
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
+import { isMobileSurface } from '@/utils/mobileSurface';
 
 import AgentBuilderToggle from './AgentBuilderToggle';
-import { type ChromeTabItem } from './ChromeTabs';
 import ChromeTabs from './ChromeTabs';
+import { type ChromeTabItem } from './ChromeTabs';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   header: css`
@@ -129,7 +130,7 @@ const Header = memo(() => {
   return (
     <>
       <Flexbox horizontal align="center" className={styles.header} gap={4} justify="space-between">
-        {!showLeftPanel && <ToggleLeftPanelButton />}
+        {isMobileSurface() ? <MobileHeaderNav /> : !showLeftPanel && <ToggleLeftPanelButton />}
         <div className={styles.tabsWrapper}>
           <ChromeTabs
             activeId={selectedTabId}

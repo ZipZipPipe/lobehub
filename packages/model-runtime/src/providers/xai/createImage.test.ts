@@ -308,7 +308,7 @@ describe('createXAIImage', () => {
       });
     });
 
-    it('should send Image 2.0 quality and aspect ratio for image editing', async () => {
+    it('should send Image 2.0 quality, aspect ratio, and up to five reference images', async () => {
       const mockImageUrl = 'https://xai-cdn.com/images/generated/edited-image-2.jpg';
 
       global.fetch = vi.fn().mockResolvedValueOnce({
@@ -326,6 +326,9 @@ describe('createXAIImage', () => {
             'https://example.com/image1.jpg',
             'https://example.com/image2.jpg',
             'https://example.com/image3.jpg',
+            'https://example.com/image4.jpg',
+            'https://example.com/image5.jpg',
+            'https://example.com/image6.jpg',
           ],
           prompt: 'Edit with Image 2.0',
           quality: 'medium',
@@ -349,6 +352,8 @@ describe('createXAIImage', () => {
               { type: 'image_url', url: 'https://example.com/image1.jpg' },
               { type: 'image_url', url: 'https://example.com/image2.jpg' },
               { type: 'image_url', url: 'https://example.com/image3.jpg' },
+              { type: 'image_url', url: 'https://example.com/image4.jpg' },
+              { type: 'image_url', url: 'https://example.com/image5.jpg' },
             ],
           }),
         }),

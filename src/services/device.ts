@@ -5,7 +5,7 @@ import type {
   DeviceScope,
 } from '@lobechat/types';
 
-import { lambdaClient } from '@/libs/trpc/client';
+import { createWorkspaceLambdaClient, lambdaClient } from '@/libs/trpc/client';
 import { type TopicListItem } from '@/services/topic';
 
 type DeviceClient = typeof lambdaClient.device;
@@ -27,7 +27,8 @@ class DeviceService {
 
   /** Update user-editable device fields (defaultCwd / friendlyName / workingDirs). */
   updateDevice(input: Parameters<DeviceClient['updateDevice']['mutate']>[0]) {
-    return lambdaClient.device.updateDevice.mutate(input);
+    // Personal devices remain editable while the UI has an active workspace.
+    return createWorkspaceLambdaClient(null).device.updateDevice.mutate(input);
   }
 
   /** Update user-editable fields of a workspace-enrolled device (workspace-scoped write). */
@@ -92,6 +93,15 @@ class DeviceService {
     return lambdaClient.device.getDeviceActivity.query(input) as any;
   }
 
+  /**
+   * The device each agent runs on for the caller, resolved server-side in one
+   * read. Agents that route to no device (sandbox, none, auto, unbound) are
+   * absent from the result.
+   */
+  getAgentDeviceBindings(agentIds: string[]): Promise<Record<string, string>> {
+    return lambdaClient.device.getAgentDeviceBindings.query({ agentIds });
+  }
+
   /** Running-topic count and the members behind it, for every device in the list. */
   getRunningSummary(): Promise<DeviceRunningSummary[]> {
     return lambdaClient.device.getRunningSummary.query();
@@ -118,6 +128,11 @@ class DeviceService {
   /** Ports the device is listening on; `null` when it can't answer. */
   listListeningPorts(input: Parameters<DeviceClient['listListeningPorts']['query']>[0]) {
     return lambdaClient.device.listListeningPorts.query(input);
+  }
+
+  /** The device's reported paths and runtime info (home, desktop, shell, ...). */
+  getDeviceSystemInfo(input: Parameters<DeviceClient['getDeviceSystemInfo']['query']>[0]) {
+    return lambdaClient.device.getDeviceSystemInfo.query(input);
   }
 
   /** Where the device's desktop app update stands; never starts a check. */

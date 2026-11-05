@@ -1,5 +1,6 @@
 import debug from 'debug';
 
+import { releaseAgentRunSlot } from '@/business/server/agent-run/runConcurrency';
 import {
   AgentOperationModel,
   type RecordOperationStartParams,
@@ -32,6 +33,7 @@ import type {
   CompletionLifecycleDeps,
   OperationCompletionInput,
   SignalEvent,
+  TopicRunSettledHandler,
 } from './types';
 
 export { CriticalAgentInterventionPersistenceError } from './intervention';
@@ -42,7 +44,11 @@ export {
   normalizeCompletionMessages,
 } from './messageContent';
 export { isAgentShareRun } from './signals';
-export type { CompleteOperationOptions, OperationCompletionInput } from './types';
+export type {
+  CompleteOperationOptions,
+  OperationCompletionInput,
+  TopicRunSettledHandler,
+} from './types';
 
 const log = debug('lobe-server:completion-lifecycle');
 
@@ -54,6 +60,10 @@ const log = debug('lobe-server:completion-lifecycle');
  * file-Work registration) must cover the capped reasons too — gating them on
  * `reason === 'done'` alone silently drops capped runs' artifacts.
  */
+/** Terminal reasons after which the topic's agent may be woken again. */
+const isTopicRunSettledReason = (reason: string) =>
+  reason !== 'interrupted' && reason !== 'waiting_for_human' && reason !== 'waiting_for_async_tool';
+
 export const isSuccessLikeCompletionReason = (reason: string): boolean =>
   reason === 'done' ||
   reason === 'max_steps' ||
@@ -81,6 +91,7 @@ export class CompletionLifecycle {
    * (instantiation is fire-and-forget at start and may not have settled yet).
    */
   private readonly verifyPlanInstantiations = new Map<string, Promise<void>>();
+  private readonly onTopicRunSettled?: TopicRunSettledHandler;
 
   constructor(
     private readonly serverDB: LobeChatDatabase,
@@ -93,10 +104,13 @@ export class CompletionLifecycle {
        * creator's identity.
        */
       includeShareVisitor?: boolean;
+      /** See {@link TopicRunSettledHandler}. */
+      onTopicRunSettled?: TopicRunSettledHandler;
     },
   ) {
     this.workspaceId = workspaceId;
     this.includeShareVisitor = options?.includeShareVisitor ?? false;
+    this.onTopicRunSettled = options?.onTopicRunSettled;
     this.messageModel = new MessageModel(serverDB, userId, workspaceId, undefined, {
       includeShareVisitor: this.includeShareVisitor,
     });
@@ -349,6 +363,11 @@ export class CompletionLifecycle {
 
       if (isAsyncToolPark) return;
 
+      // The run tree no longer works, so its concurrency slot frees now rather
+      // than when the lease lapses. A run parked on a human decision frees it
+      // too; its continuation takes a slot of its own.
+      await releaseAgentRunSlot(runOrigin.userId || this.userId, operationId);
+
       // `lastAssistantContent` comes off the Redis-backed `state.messages`,
       // while the assistant message row is persisted through a separate
       // `messageModel.update` path. When the two diverge (state entry empty
@@ -405,6 +424,21 @@ export class CompletionLifecycle {
         void this.recallUserOnCompletion(operationId, event, runOrigin).catch((error) =>
           log('[%s] Completion notification failed (non-fatal): %O', operationId, error),
         );
+      }
+
+      const settledTopicId = typeof runOrigin.topicId === 'string' ? runOrigin.topicId : undefined;
+      if (
+        this.onTopicRunSettled &&
+        settledTopicId &&
+        isTopicRunSettledReason(reason) &&
+        !runOrigin.lineage?.parentOperationId &&
+        runOrigin.lineage?.isSubAgent !== true &&
+        runOrigin.lineage?.orchestrationRole !== 'member' &&
+        !runOrigin.signal &&
+        !isAgentShareRun(state)
+      ) {
+        const onTopicRunSettled = this.onTopicRunSettled;
+        after(() => onTopicRunSettled({ operationId, topicId: settledTopicId }));
       }
 
       // Delivery checker: on a successful completion, run the confirmed verify

@@ -2,23 +2,19 @@ export const getProjectAgentPath = (agentId: string) => `/agent/${agentId}`;
 
 export const getProjectHomePath = (projectId: string) => `/project/${projectId}`;
 
-export const getProjectConversationPath = (projectId: string, topicId?: string) =>
-  topicId ? `/project/${projectId}/conversation/${topicId}` : `/project/${projectId}/conversation`;
+export const getProjectTopicPath = (projectId: string, topicId?: string) =>
+  topicId ? `/project/${projectId}/topic/${topicId}` : `/project/${projectId}/topic`;
 
 /**
- * A blank project conversation a sidebar "+" opened for one agent on one
- * directory. The draft lives in the route so it stays with its own pane (and
- * survives a reload); nothing is created until its first message.
+ * A blank project conversation a sidebar "+" opened for one agent, on one
+ * directory when the agent can run in one (else conversation-only). The draft
+ * lives in the route so it stays with its own pane (and survives a reload);
+ * nothing is created until its first message.
  */
-export const getProjectDraftPath = (projectId: string, agentId: string, directoryId: string) =>
-  `${getProjectConversationPath(projectId)}?${new URLSearchParams({ agent: agentId, dir: directoryId })}`;
-
-/** Open a project conversation and send `message` in it once it has loaded. */
-export const getProjectConversationStartPath = (
-  projectId: string,
-  topicId: string,
-  message: string,
-) => `${getProjectConversationPath(projectId, topicId)}?message=${encodeURIComponent(message)}`;
+export const getProjectDraftPath = (projectId: string, agentId: string, directoryId?: string) =>
+  `${getProjectTopicPath(projectId)}?${new URLSearchParams(
+    directoryId ? { agent: agentId, dir: directoryId } : { agent: agentId },
+  )}`;
 
 export const getProjectLibraryPath = (projectId: string, libraryId: string) =>
   `/project/${projectId}/library/${libraryId}`;

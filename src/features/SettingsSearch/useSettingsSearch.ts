@@ -126,6 +126,7 @@ export const useSettingsSearch = (
   } = scope;
   const { enableSTT, hideDocs, showAiImage } = useServerConfigStore(featureFlagsSelectors);
   const enableBusinessFeatures = useServerConfigStore(serverConfigSelectors.enableBusinessFeatures);
+  const enableChannels = useServerConfigStore(serverConfigSelectors.enableChannels);
   const enableGatewayMode = useServerConfigStore(serverConfigSelectors.enableGatewayMode);
   const enableComposio = useServerConfigStore(serverConfigSelectors.enableComposio);
   const enableWorkspace = useServerConfigStore(serverConfigSelectors.enableWorkspace);
@@ -143,6 +144,7 @@ export const useSettingsSearch = (
     const ctx: SettingsSearchContext = {
       disableEmailPassword: !!disableEmailPassword,
       enableBusinessFeatures: !!enableBusinessFeatures,
+      enableChannels,
       enableComposio: !!enableComposio,
       enableGatewayMode: !!enableGatewayMode,
       enableSTT: !!enableSTT,
@@ -308,6 +310,7 @@ export const useSettingsSearch = (
     t,
     disableEmailPassword,
     enableBusinessFeatures,
+    enableChannels,
     enableComposio,
     enableGatewayMode,
     enableSTT,

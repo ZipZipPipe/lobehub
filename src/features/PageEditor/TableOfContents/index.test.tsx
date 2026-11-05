@@ -7,6 +7,21 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
+// Records the panel's motion targets and renders a plain div, so the panel
+// still unmounts as soon as it collapses.
+const panelMotion = vi.hoisted(() => ({
+  exit: undefined as unknown,
+  initial: undefined as unknown,
+}));
+
+vi.mock('motion/react-m', () => ({
+  div: ({ animate: _animate, children, exit, initial, transition: _transition, ...rest }: any) => {
+    panelMotion.exit = exit;
+    panelMotion.initial = initial;
+    return <div {...rest}>{children}</div>;
+  },
+}));
+
 // jsdom has no layout: keep the first heading at the pane top and the rest
 // below the active threshold.
 const setBody = (content: HTMLElement, html: string) => {
@@ -22,7 +37,7 @@ const flush = async () => {
   });
 };
 
-const setup = () => {
+const setup = (onVisibleChange?: (visible: boolean) => void) => {
   const pane = document.createElement('div');
   const content = document.createElement('div');
   pane.append(content);
@@ -31,8 +46,14 @@ const setup = () => {
   Object.defineProperty(pane, 'scrollHeight', { configurable: true, value: 2000 });
   setBody(content, '<h1>Intro</h1><h2>Usage</h2><h2>FAQ</h2>');
 
-  render(<TableOfContents contentRef={{ current: content }} scrollRef={{ current: pane }} />);
-  return { content, pane };
+  const view = render(
+    <TableOfContents
+      contentRef={{ current: content }}
+      scrollRef={{ current: pane }}
+      onVisibleChange={onVisibleChange}
+    />,
+  );
+  return { content, pane, view };
 };
 
 const activeText = () =>
@@ -122,6 +143,29 @@ describe('TableOfContents', () => {
     expect(pane.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'auto' }));
   });
 
+  it('grows the panel out of the rail and folds it back', async () => {
+    setup();
+    await flush();
+
+    fireEvent.focus(screen.getByRole('button'));
+
+    expect(panelMotion.initial).toMatchObject({ opacity: 0, scale: 0.9 });
+    expect(panelMotion.exit).toMatchObject({ opacity: 0, pointerEvents: 'none', scale: 0.9 });
+  });
+
+  it('fades the panel without scaling when reduced motion is preferred', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+    }));
+    setup();
+    await flush();
+
+    fireEvent.focus(screen.getByRole('button'));
+
+    expect(panelMotion.initial).toMatchObject({ opacity: 0, scale: 1 });
+    expect(panelMotion.exit).toMatchObject({ opacity: 0, scale: 1 });
+  });
+
   it('keeps the first heading active when the page fits without scrolling', async () => {
     const { pane } = setup();
     Object.defineProperty(pane, 'scrollHeight', { configurable: true, value: 0 });
@@ -148,5 +192,25 @@ describe('TableOfContents', () => {
     });
 
     expect(activeText()).toBe('Usage');
+  });
+
+  // The editor reserves room for the rail only while it is shown, so wide
+  // tables stop short of it instead of running underneath.
+  it('reports whether the rail is shown', async () => {
+    const onVisibleChange = vi.fn();
+    const { content, view } = setup(onVisibleChange);
+    await flush();
+    expect(onVisibleChange).toHaveBeenLastCalledWith(true);
+
+    setBody(content, '<h1>Only one heading</h1>');
+    await flush();
+    expect(onVisibleChange).toHaveBeenLastCalledWith(false);
+
+    setBody(content, '<h1>Intro</h1><h2>Usage</h2>');
+    await flush();
+    expect(onVisibleChange).toHaveBeenLastCalledWith(true);
+
+    view.unmount();
+    expect(onVisibleChange).toHaveBeenLastCalledWith(false);
   });
 });

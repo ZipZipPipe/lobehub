@@ -1,4 +1,10 @@
 import { gptImage1Schema, gptImage2Schema, gptImage25Schema } from '../../const/imageParameters';
+import {
+  openaiGpt4oMiniTTSSchema,
+  openaiGpt4oTTSVoices,
+  openaiTTS1Schema,
+  openaiTTS1Voices,
+} from '../../const/ttsParameters';
 import type {
   AIASRModelCard,
   AIEmbeddingModelCard,
@@ -30,6 +36,7 @@ export const openaiEmbeddingModels: AIEmbeddingModelCard[] = [
       'An efficient, cost-effective next-generation embedding model for retrieval and RAG scenarios.',
     displayName: 'Text Embedding 3 Small',
     id: 'text-embedding-3-small',
+    isOfficial: true,
     maxDimension: 1536,
     pricing: {
       currency: 'USD',
@@ -43,28 +50,38 @@ export const openaiEmbeddingModels: AIEmbeddingModelCard[] = [
 // Text-to-speech models
 export const openaiTTSModels: AITTSModelCard[] = [
   {
-    description: 'The latest text-to-speech model optimized for real-time speed.',
+    description:
+      'Legacy text-to-speech model optimized for real-time speed. OpenAI has deprecated it and shuts it down on 2027-01-06.',
     displayName: 'TTS-1',
     id: 'tts-1',
+    legacy: true,
+    parameters: openaiTTS1Schema,
     pricing: {
       units: [{ name: 'textInput', rate: 15, strategy: 'fixed', unit: 'millionCharacters' }],
     },
     type: 'tts',
+    voices: openaiTTS1Voices,
   },
   {
-    description: 'The latest text-to-speech model optimized for quality.',
+    description:
+      'Legacy text-to-speech model optimized for quality. OpenAI has deprecated it and shuts it down on 2027-01-06.',
     displayName: 'TTS-1 HD',
     id: 'tts-1-hd',
+    legacy: true,
+    parameters: openaiTTS1Schema,
     pricing: {
       units: [{ name: 'textInput', rate: 30, strategy: 'fixed', unit: 'millionCharacters' }],
     },
     type: 'tts',
+    voices: openaiTTS1Voices,
   },
   {
     description:
-      'GPT-4o mini TTS is a text-to-speech model built on GPT-4o mini, converting text into natural-sounding speech with a max input of 2000 tokens.',
+      'GPT-4o mini TTS is a text-to-speech model built on GPT-4o mini, converting text into natural-sounding speech with a max input of 2000 tokens. OpenAI has deprecated it and shuts it down on 2027-01-06.',
     displayName: 'GPT-4o Mini TTS',
     id: 'gpt-4o-mini-tts',
+    legacy: true,
+    parameters: openaiGpt4oMiniTTSSchema,
     pricing: {
       units: [
         { name: 'textInput', rate: 0.6, strategy: 'fixed', unit: 'millionTokens' },
@@ -72,6 +89,7 @@ export const openaiTTSModels: AITTSModelCard[] = [
       ],
     },
     type: 'tts',
+    voices: openaiGpt4oTTSVoices,
   },
 ];
 
@@ -101,6 +119,7 @@ export const openaiASRModels: AIASRModelCard[] = [
       'GPT-4o Transcribe is a speech-to-text model that transcribes audio with GPT-4o, improving word error rate, language ID, and accuracy over the original Whisper model.',
     displayName: 'GPT-4o Transcribe',
     id: 'gpt-4o-transcribe',
+    isOfficial: true,
     maxOutput: 2000,
     pricing: {
       units: [
@@ -118,6 +137,7 @@ export const openaiASRModels: AIASRModelCard[] = [
     displayName: 'GPT-4o Mini Transcribe',
     enabled: true,
     id: 'gpt-4o-mini-transcribe',
+    isOfficial: true,
     maxOutput: 2000,
     pricing: {
       units: [
@@ -134,12 +154,16 @@ export const openaiASRModels: AIASRModelCard[] = [
 export const openaiImageModels: AIImageModelCard[] = [
   {
     description:
-      'Fast, high-quality everyday image generation and editing with improved detail, consistency, and instruction following.',
-    displayName: 'GPT Image 2.5 Flare',
+      "OpenAI's most capable image generation and editing model, built for workflows where editing precision matters most, with quality up to max and up to 4K output.",
+    displayName: 'GPT Image 2.5 Sunburst',
     enabled: true,
-    id: 'gpt-image-2.5-flare',
+    id: 'gpt-image-2.5-sunburst',
+    isOfficial: true,
     parameters: gptImage25Schema,
     pricing: {
+      // Token rates match GPT Image 2; OpenAI publishes no per-image estimate for GPT Image 2.5,
+      // so there is no `approximatePricePerImage`.
+      // https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst
       units: [
         { name: 'textInput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
         { name: 'textInput_cacheRead', rate: 1.25, strategy: 'fixed', unit: 'millionTokens' },
@@ -153,12 +177,16 @@ export const openaiImageModels: AIImageModelCard[] = [
   },
   {
     description:
-      'OpenAI’s most capable image generation and editing model, optimized for precise, production-ready creative work.',
-    displayName: 'GPT Image 2.5 Sunburst',
+      "OpenAI's fastest model for high-quality everyday image generation and editing, with quality up to max and up to 4K output.",
+    displayName: 'GPT Image 2.5 Flare',
     enabled: true,
-    id: 'gpt-image-2.5-sunburst',
+    id: 'gpt-image-2.5-flare',
+    isOfficial: true,
     parameters: gptImage25Schema,
     pricing: {
+      // Token rates match GPT Image 2; OpenAI publishes no per-image estimate for GPT Image 2.5,
+      // so there is no `approximatePricePerImage`.
+      // https://developers.openai.com/api/docs/models/gpt-image-2.5-flare
       units: [
         { name: 'textInput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
         { name: 'textInput_cacheRead', rate: 1.25, strategy: 'fixed', unit: 'millionTokens' },
@@ -176,6 +204,7 @@ export const openaiImageModels: AIImageModelCard[] = [
     displayName: 'GPT Image 2',
     enabled: true,
     id: 'gpt-image-2',
+    isOfficial: true,
     parameters: gptImage2Schema,
     pricing: {
       // Medium quality at 1024x1024: ~1767 output tokens * $30/M = $0.053 per image.
@@ -197,6 +226,7 @@ export const openaiImageModels: AIImageModelCard[] = [
       'An enhanced GPT Image 1 model with 4× faster generation, more precise editing, and improved text rendering.',
     displayName: 'GPT Image 1.5',
     id: 'gpt-image-1.5',
+    isOfficial: true,
     parameters: gptImage1Schema,
     pricing: {
       approximatePricePerImage: 0.034,
@@ -216,6 +246,7 @@ export const openaiImageModels: AIImageModelCard[] = [
     description: 'ChatGPT native multimodal image generation model.',
     displayName: 'GPT Image 1',
     id: 'gpt-image-1',
+    isOfficial: true,
     parameters: gptImage1Schema,
     pricing: {
       approximatePricePerImage: 0.042,

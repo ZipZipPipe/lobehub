@@ -114,10 +114,12 @@ export async function createXAIImage(
           url: inputImages[0],
         };
       } else {
-        requestBody.images = inputImages.slice(0, 3).map((url) => ({
-          type: 'image_url',
-          url,
-        }));
+        requestBody.images = inputImages
+          .slice(0, model === 'grok-imagine-image-2.0' ? 5 : 3)
+          .map((url) => ({
+            type: 'image_url',
+            url,
+          }));
       }
     }
 

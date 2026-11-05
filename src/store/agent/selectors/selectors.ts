@@ -12,17 +12,15 @@ import {
   agentDisplayName,
   type AgentMode,
   type AgentProfile,
+  getActivePluginIds,
+  getDisabledPluginIds,
+  getWorkingDirEffectivePath,
   type KnowledgeItem,
+  KnowledgeType,
   type LobeAgentConfig,
   type LobeAgentTTSConfig,
   type MetaData,
   type RuntimeEnvConfig,
-} from '@lobechat/types';
-import {
-  getActivePluginIds,
-  getDisabledPluginIds,
-  getWorkingDirEffectivePath,
-  KnowledgeType,
 } from '@lobechat/types';
 import { VoiceList } from '@lobehub/tts';
 

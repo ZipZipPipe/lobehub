@@ -7,7 +7,7 @@ import type {
   AcceptanceCommentList,
   AcceptanceCommentReaction,
 } from '@lobechat/types';
-import { acceptanceCommentTimeSchema, reviewAnchorSchema } from '@lobechat/types';
+import { acceptanceCommentTimeSchema, acceptanceReviewAnchorSchema } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -68,7 +68,7 @@ const createSchema = z
     editorData: z.unknown().optional(),
     kind: z.enum(['approval', 'comment', 'proposal']).optional(),
     parentCommentId: z.string().trim().min(1).max(64).optional(),
-    source: reviewAnchorSchema.optional(),
+    source: acceptanceReviewAnchorSchema.optional(),
   })
   .refine(
     (value) =>
@@ -579,7 +579,7 @@ export const acceptanceCommentRouter = router({
           message: 'A goal gate cannot hand out reject access',
         });
       // The owner already holds everything a grant hands out. A workspace
-      // admin who may decide still cannot talk to the owner's agent, so they
+      // member who may decide still cannot talk to the owner's agent, so they
       // may ask like anyone else.
       if (access.isOwner)
         throw new TRPCError({
@@ -653,7 +653,7 @@ export const acceptanceCommentRouter = router({
       if (!(await canManageAcceptance(ctx, access.acceptance)))
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only the creator, a workspace owner or a workspace admin can answer this',
+          message: 'Only the creator or a workspace member with edit access can answer this',
         });
 
       const transition = ACCESS_TRANSITIONS[input.decision];

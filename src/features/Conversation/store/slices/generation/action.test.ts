@@ -488,6 +488,9 @@ describe('Generation Actions', () => {
         type: 'execServerAgentRuntime',
       };
       vi.mocked(useChatStore.getState).mockReturnValue({
+        dbMessagesMap: {},
+        messagesMap: {},
+        topicDataMap: {},
         operations: { 'active-run': runningOperation },
         operationsByMessage: { 'msg-2': ['active-run'] },
         deleteMessage: mockDeleteMessage,

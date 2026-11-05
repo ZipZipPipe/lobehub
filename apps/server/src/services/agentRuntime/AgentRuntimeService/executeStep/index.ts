@@ -1,4 +1,4 @@
-import { getLlmCallCount } from '@lobechat/agent-runtime';
+import { type AgentRuntimeContext, getLlmCallCount } from '@lobechat/agent-runtime';
 import { context as otelContext, trace as otelTrace } from '@lobechat/observability-otel/api';
 import {
   buildInvokeAgentAttributes,
@@ -14,20 +14,24 @@ import {
   type AgentStepContinuation,
 } from '../../types';
 import { STEP_LOCK_TTL_SECONDS } from '../constants';
+import { isShareRunRevoked } from '../shareRunGate';
 import type { AgentRuntimeServiceContext } from '../types';
 import { createStepLockOwner } from '../utils';
 import { startStepAbortPoll, type StepAbortPoll } from './abortPoll';
 import { finishOperation } from './completion';
 import { scheduleNextStep } from './continuation';
+import { runPendingInit } from './deferredInit';
 import { failStep } from './failure';
 import {
   handleStepLockConflict,
   replayPendingInterventionLifecycle,
   runLockFreeDelivery,
+  settleSkippedStep,
   skipUnrunnableStep,
 } from './guards';
 import { dispatchAfterStepHooks, dispatchBeforeStepHooks, persistStepTracking } from './hooks';
 import { prepareStepInput } from './prepare';
+import { startRunSlotLease } from './runSlotLease';
 import { runAndReconcileStep, saveAndPublishStep } from './runStep';
 
 const log = debug('lobe-server:agent-runtime-service');
@@ -109,6 +113,7 @@ export async function executeStep(
   // Hoisted so the shared `finally` can stop it on every exit path — an
   // orphaned poll would keep reading Redis for a step that is long gone.
   let abortPoll: StepAbortPoll | undefined;
+  let stopRunSlotLease: (() => void) | undefined;
 
   // Hoisted so the error-path snapshot finalize can record an
   // approximate startedAt for the failing step. The inner `startAt` at the
@@ -144,6 +149,32 @@ export async function executeStep(
 
       if (!agentState) {
         throw new Error(`Agent state not found for operation ${operationId}`);
+      }
+      stopRunSlotLease = startRunSlotLease(deps.userId, agentState);
+
+      // A run created without its init still carries the turn's request: run
+      // that init here, after the step claim and before anything is published.
+      let deferredInitContext: AgentRuntimeContext | undefined;
+      if (agentState.request) {
+        const init = await runPendingInit(
+          {
+            abortShareRun: (state) => deps.buildShareAbortResult(operationId, state),
+            agentOperationModel: deps.agentOperationModel,
+            coordinator: deps.coordinator,
+            isShareRunRevoked: (state) =>
+              isShareRunRevoked(
+                deps.delegate.verifyShareRunStillAuthorized,
+                operationId,
+                stepIndex,
+                state,
+              ),
+            runDeferredInit: deps.delegate.runDeferredInit,
+            settleSkippedStep: (state) => settleSkippedStep(deps, operationId, state),
+          },
+          { agentState, operationId, request: agentState.request, stepIndex },
+        );
+        if (init.result) return init.result;
+        deferredInitContext = init.context;
       }
 
       const replayed = await replayPendingInterventionLifecycle(deps, {
@@ -234,7 +265,12 @@ export async function executeStep(
         },
       });
 
-      const input = await prepareStepInput(deps, { agentState, params, stepEntryMessages });
+      const input = await prepareStepInput(deps, {
+        agentState,
+        deferredInitContext,
+        params,
+        stepEntryMessages,
+      });
       const { currentContext } = input;
 
       const { startAt, stepResult } = await runAndReconcileStep(deps, {
@@ -335,6 +371,7 @@ export async function executeStep(
   } finally {
     invokeAgentSpan.end();
     abortPoll?.stop();
+    stopRunSlotLease?.();
     stopStepLockHeartbeat();
     // Parked runs (human input, async tools) and finished ones are read back
     // by a different invocation, so the partial cannot stay in memory only.
