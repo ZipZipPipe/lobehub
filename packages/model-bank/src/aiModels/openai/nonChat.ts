@@ -1,4 +1,9 @@
-import { gptImage1Schema, gptImage2Schema, gptImage25Schema } from '../../const/imageParameters';
+import {
+  gptImage1Schema,
+  gptImage2Schema,
+  gptImage25Schema,
+  gptImage26Schema,
+} from '../../const/imageParameters';
 import {
   openaiGpt4oMiniTTSSchema,
   openaiGpt4oTTSVoices,
@@ -152,6 +157,52 @@ export const openaiASRModels: AIASRModelCard[] = [
 
 // Image generation models
 export const openaiImageModels: AIImageModelCard[] = [
+  {
+    description:
+      "OpenAI's most capable image generation and editing model, built for workflows where editing precision matters most, with native animated GIF output and up to 4K still images.",
+    displayName: 'GPT Image 2.6 Sunburst',
+    enabled: true,
+    id: 'gpt-image-2.6-sunburst',
+    isOfficial: true,
+    parameters: gptImage26Schema,
+    pricing: {
+      // Token rates match GPT Image 2; OpenAI publishes no per-image estimate for GPT Image 2.6,
+      // so there is no `approximatePricePerImage`.
+      // https://developers.openai.com/api/docs/models/gpt-image-2.6-sunburst
+      units: [
+        { name: 'textInput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput_cacheRead', rate: 1.25, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput', rate: 8, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput_cacheRead', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageOutput', rate: 30, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+    releasedAt: '2026-11-04',
+    type: 'image',
+  },
+  {
+    description:
+      "OpenAI's fastest model for high-quality everyday image generation and editing, with native animated GIF output and up to 4K still images.",
+    displayName: 'GPT Image 2.6 Flare',
+    enabled: true,
+    id: 'gpt-image-2.6-flare',
+    isOfficial: true,
+    parameters: gptImage26Schema,
+    pricing: {
+      // Token rates match GPT Image 2; OpenAI publishes no per-image estimate for GPT Image 2.6,
+      // so there is no `approximatePricePerImage`.
+      // https://developers.openai.com/api/docs/models/gpt-image-2.6-flare
+      units: [
+        { name: 'textInput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput_cacheRead', rate: 1.25, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput', rate: 8, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageInput_cacheRead', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'imageOutput', rate: 30, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+    releasedAt: '2026-11-04',
+    type: 'image',
+  },
   {
     description:
       "OpenAI's most capable image generation and editing model, built for workflows where editing precision matters most, with quality up to max and up to 4K output.",

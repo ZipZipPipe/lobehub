@@ -281,6 +281,30 @@ export const ModelParamsMetaSchema = z.object({
     })
     .optional(),
 
+  /** Number of frames in an animated output; only sent when `outputFormat` is `gif`. */
+  frameCount: z
+    .object({
+      default: z.number(),
+      description: z.string().optional(),
+      max: z.number(),
+      min: z.number(),
+      step: z.number().optional().default(1),
+      type: z.literal('number').optional(),
+    })
+    .optional(),
+
+  /** Milliseconds each animated frame is shown; only sent when `outputFormat` is `gif`. */
+  frameDurationMs: z
+    .object({
+      default: z.number(),
+      description: z.string().optional(),
+      max: z.number(),
+      min: z.number(),
+      step: z.number().optional().default(1),
+      type: z.literal('number').optional(),
+    })
+    .optional(),
+
   outputCompression: z
     .object({
       default: z.number(),

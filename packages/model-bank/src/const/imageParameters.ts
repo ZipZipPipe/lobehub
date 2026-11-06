@@ -95,6 +95,14 @@ export const gptImage25Schema: ModelParamsSchema = {
   },
 };
 
+/** GPT Image 2.6 adds native animated GIF output to the raster image controls. */
+export const gptImage26Schema: ModelParamsSchema = {
+  ...gptImage25Schema,
+  frameCount: { default: 9, max: 16, min: 2, step: 1 },
+  frameDurationMs: { default: 200, max: 2000, min: 20, step: 10 },
+  outputFormat: { default: 'png', enum: ['png', 'jpeg', 'webp', 'gif'] },
+};
+
 export const nanoBananaParameters: ModelParamsSchema = {
   aspectRatio: {
     default: 'auto',
