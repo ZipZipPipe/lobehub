@@ -506,6 +506,9 @@ describe('recent direct-provider models', () => {
     ['openai', 'gpt-6-astra', 'gpt6ReasoningEffort'],
     ['google', 'gemini-3.8-flash', 'thinkingLevel3'],
     ['vertexai', 'gemini-3.8-flash', 'thinkingLevel3'],
+    ['google', 'gemini-4-carbon', 'thinkingLevel3'],
+    ['vertexai', 'gemini-4-carbon', 'thinkingLevel3'],
+    ['openrouter', 'google/gemini-4-carbon', 'thinkingLevel3'],
     ['xai', 'grok-4.6', 'grok4_6ReasoningEffort'],
     ['qwen', 'qwen3.8-max', 'qwen38ReasoningEffort'],
     ['qwen', 'qwen3.8-max-0902', 'qwen38ReasoningEffort'],
@@ -534,6 +537,24 @@ describe('Gemini 3.8 introductory pricing', () => {
       strategy: 'fixed',
       unit: 'millionTokens',
     });
+  });
+});
+
+describe('Gemini 4 Carbon introductory pricing', () => {
+  it.each([
+    ['google', 'gemini-4-carbon'],
+    ['vertexai', 'gemini-4-carbon'],
+    ['openrouter', 'google/gemini-4-carbon'],
+  ])('bills %s/%s at $2 input and $10 output', (providerId, id) => {
+    const model = LOBE_DEFAULT_MODEL_LIST.find(
+      (entry) => entry.providerId === providerId && entry.id === id,
+    );
+    expect(model?.pricing?.units).toEqual(
+      expect.arrayContaining([
+        { name: 'textInput', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 10, strategy: 'fixed', unit: 'millionTokens' },
+      ]),
+    );
   });
 });
 

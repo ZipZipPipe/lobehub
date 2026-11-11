@@ -119,6 +119,14 @@ vi.mock('../lobeAgentPlan', () => ({
 
 const { lobeAgentRuntime } = await import('../lobeAgent');
 
+const previousImageMessage = () => ({
+  id: 'msg-previous',
+  imageList: [
+    { alt: 'previous.png', id: 'file-previous', url: 'https://example.com/previous.png' },
+  ],
+  role: 'user',
+});
+
 describe('lobeAgentRuntime', () => {
   const baseContext: ToolExecutionContext = {
     messageId: 'msg-1',
@@ -707,13 +715,7 @@ describe('lobeAgentRuntime', () => {
       },
     ]);
     mockMessageModelQuery.mockResolvedValue([
-      {
-        id: 'msg-previous',
-        imageList: [
-          { alt: 'previous.png', id: 'file-previous', url: 'https://example.com/previous.png' },
-        ],
-        role: 'user',
-      },
+      previousImageMessage(),
       {
         id: 'msg-1',
         imageList: [
@@ -769,15 +771,7 @@ describe('lobeAgentRuntime', () => {
         topicId: 'topic-1',
       },
     ]);
-    mockMessageModelQuery.mockResolvedValue([
-      {
-        id: 'msg-previous',
-        imageList: [
-          { alt: 'previous.png', id: 'file-previous', url: 'https://example.com/previous.png' },
-        ],
-        role: 'user',
-      },
-    ]);
+    mockMessageModelQuery.mockResolvedValue([previousImageMessage()]);
     const runtime = lobeAgentRuntime.factory({ ...baseContext, topicId: 'topic-1' });
 
     const result = await runtime.analyzeMedia({
@@ -825,15 +819,7 @@ describe('lobeAgentRuntime', () => {
     for (const { expectedQuery, sourceMessage } of cases) {
       vi.clearAllMocks();
       mockMessageModelQueryByIds.mockResolvedValue([sourceMessage]);
-      mockMessageModelQuery.mockResolvedValue([
-        {
-          id: 'msg-previous',
-          imageList: [
-            { alt: 'previous.png', id: 'file-previous', url: 'https://example.com/previous.png' },
-          ],
-          role: 'user',
-        },
-      ]);
+      mockMessageModelQuery.mockResolvedValue([previousImageMessage()]);
       mockInitModelRuntimeFromDB.mockResolvedValue({ chat: mockChat });
       mockConsumeStreamUntilDone.mockResolvedValue(undefined);
 

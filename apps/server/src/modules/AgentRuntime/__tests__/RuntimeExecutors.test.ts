@@ -2,6 +2,7 @@ import { type AgentState } from '@lobechat/agent-runtime';
 import { BRANDING_PROVIDER } from '@lobechat/business-const';
 import { type AgentGroupConfig, ToolNameResolver } from '@lobechat/context-engine';
 import { consumeStreamUntilDone, ModelEmptyError } from '@lobechat/model-runtime';
+import type { ChatToolPayload } from '@lobechat/types';
 import type * as ModelBank from 'model-bank';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -352,6 +353,36 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
     type: 'compress_context' as const,
   });
 
+  const createSearchToolCall = () => ({
+    apiName: 'search',
+    arguments: '{}',
+    id: 'tool-call-1',
+    identifier: 'web-search',
+    type: 'default' as const,
+  });
+
+  const createCrawlToolCall = () => ({
+    apiName: 'crawl',
+    arguments: '{}',
+    id: 'tool-call-2',
+    identifier: 'web-browsing',
+    type: 'default' as const,
+  });
+
+  const createCallLlmInstruction = () => ({
+    payload: {
+      messages: [{ content: 'Hello', role: 'user' }],
+      model: 'gpt-4',
+      provider: 'openai',
+    },
+    type: 'call_llm' as const,
+  });
+
+  const createBatchToolInstruction = (toolsCalling: ChatToolPayload[]) => ({
+    payload: { parentMessageId: 'assistant-msg-123', toolsCalling },
+    type: 'call_tools_batch' as const,
+  });
+
   describe('call_llm executor', () => {
     const createMockState = (overrides?: Partial<AgentState>): AgentState => ({
       cost: createMockCost(),
@@ -620,17 +651,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         },
       });
 
-      await executors.call_llm!(
-        {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        },
-        state,
-      );
+      await executors.call_llm!(createCallLlmInstruction(), state);
 
       expect(
         mockChat.mock.calls[0][0].tools.map((tool: { function: { name: string } }) => {
@@ -953,14 +974,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         const executors = createRuntimeExecutors(ctx);
         const state = createMockState();
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         const result = await executors.call_llm!(instruction, state);
         const assistant = result.newState.messages.at(-1) as any;
@@ -1192,14 +1206,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           },
         });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         const result = await executors.call_llm!(instruction, state);
         const assistant = result.newState.messages.at(-1) as any;
@@ -2129,14 +2136,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         ];
         const state = createMockState({ tools: tools as any });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -2156,14 +2156,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         ];
         const state = createMockState({ tools: stateTools as any });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -2185,14 +2178,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           ] as any,
         });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -2523,14 +2509,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           },
         });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -2606,14 +2585,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           },
         });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -2930,14 +2902,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           forceFinish: true,
         });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -2965,14 +2930,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           world: { agent: { plugins: [], systemRole: 'test' }, eval: evalContext as any },
         });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -3035,14 +2993,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           },
         });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -3056,14 +3007,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         const executors = createRuntimeExecutors(ctxWithConfig);
         const state = createMockState({ world: { agent: { plugins: [], systemRole: 'test' } } });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -3161,14 +3105,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           },
         });
 
-        const instruction = {
-          payload: {
-            messages: [{ content: 'Hello', role: 'user' }],
-            model: 'gpt-4',
-            provider: 'openai',
-          },
-          type: 'call_llm' as const,
-        };
+        const instruction = createCallLlmInstruction();
 
         await executors.call_llm!(instruction, state);
 
@@ -3443,13 +3380,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'assistant-msg-123',
-          toolCalling: {
-            apiName: 'search',
-            arguments: '{}',
-            id: 'tool-call-1',
-            identifier: 'web-search',
-            type: 'default' as const,
-          },
+          toolCalling: createSearchToolCall(),
         },
         type: 'call_tool' as const,
       };
@@ -3621,13 +3552,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'assistant-msg-123',
-          toolCalling: {
-            apiName: 'search',
-            arguments: '{}',
-            id: 'tool-call-1',
-            identifier: 'web-search',
-            type: 'default' as const,
-          },
+          toolCalling: createSearchToolCall(),
         },
         type: 'call_tool' as const,
       };
@@ -3652,13 +3577,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'deleted-parent',
-          toolCalling: {
-            apiName: 'search',
-            arguments: '{}',
-            id: 'tool-call-1',
-            identifier: 'web-search',
-            type: 'default' as const,
-          },
+          toolCalling: createSearchToolCall(),
         },
         type: 'call_tool' as const,
       };
@@ -3869,13 +3788,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           payload: {
             parentMessageId: 'pending-tool-msg-1',
             skipCreateToolMessage: true,
-            toolCalling: {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
+            toolCalling: createSearchToolCall(),
           },
           type: 'call_tool' as const,
         };
@@ -4190,28 +4103,22 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{"query": "test1"}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{"url": "https://example.com"}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
+      const instruction = createBatchToolInstruction([
+        {
+          apiName: 'search',
+          arguments: '{"query": "test1"}',
+          id: 'tool-call-1',
+          identifier: 'web-search',
+          type: 'default' as const,
         },
-        type: 'call_tools_batch' as const,
-      };
+        {
+          apiName: 'crawl',
+          arguments: '{"url": "https://example.com"}',
+          id: 'tool-call-2',
+          identifier: 'web-browsing',
+          type: 'default' as const,
+        },
+      ]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -4273,28 +4180,22 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'createTask',
-              arguments: '{"name":"A"}',
-              id: 'tool-call-1',
-              identifier: 'lobe-task',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'updateTask',
-              arguments: '{"name":"B"}',
-              id: 'tool-call-2',
-              identifier: 'lobe-task',
-              type: 'default' as const,
-            },
-          ],
+      const instruction = createBatchToolInstruction([
+        {
+          apiName: 'createTask',
+          arguments: '{"name":"A"}',
+          id: 'tool-call-1',
+          identifier: 'lobe-task',
+          type: 'default' as const,
         },
-        type: 'call_tools_batch' as const,
-      };
+        {
+          apiName: 'updateTask',
+          arguments: '{"name":"B"}',
+          id: 'tool-call-2',
+          identifier: 'lobe-task',
+          type: 'default' as const,
+        },
+      ]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -4361,28 +4262,22 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-retry-batch',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-stop-batch',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
+      const instruction = createBatchToolInstruction([
+        {
+          apiName: 'search',
+          arguments: '{}',
+          id: 'tool-call-retry-batch',
+          identifier: 'web-search',
+          type: 'default' as const,
         },
-        type: 'call_tools_batch' as const,
-      };
+        {
+          apiName: 'search',
+          arguments: '{}',
+          id: 'tool-call-stop-batch',
+          identifier: 'web-search',
+          type: 'default' as const,
+        },
+      ]);
 
       const result = await executors.call_tools_batch!(instruction, state);
 
@@ -4399,21 +4294,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState({ messages: [{ content: 'old', role: 'user' }] });
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([createSearchToolCall()]);
 
       const result = await executors.call_tools_batch!(instruction, state);
 
@@ -4435,21 +4316,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([createSearchToolCall()]);
 
       const result = await executors.call_tools_batch!(instruction, state);
 
@@ -4474,28 +4341,10 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([
+        createSearchToolCall(),
+        createCrawlToolCall(),
+      ]);
 
       const result = await executors.call_tools_batch!(instruction, state);
 
@@ -4521,15 +4370,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'original-parent-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
+          toolsCalling: [createSearchToolCall()],
         },
         type: 'call_tools_batch' as const,
       };
@@ -4555,15 +4396,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'deleted-parent',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
+          toolsCalling: [createSearchToolCall()],
         },
         type: 'call_tools_batch' as const,
       };
@@ -4589,28 +4422,10 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([
+        createSearchToolCall(),
+        createCrawlToolCall(),
+      ]);
 
       const result = await executors.call_tools_batch!(instruction, state);
 
@@ -4636,28 +4451,10 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([
+        createSearchToolCall(),
+        createCrawlToolCall(),
+      ]);
 
       await expect(executors.call_tools_batch!(instruction, state)).rejects.toThrow(
         'Database error',
@@ -4668,28 +4465,10 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([
+        createSearchToolCall(),
+        createCrawlToolCall(),
+      ]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -4713,28 +4492,10 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([
+        createSearchToolCall(),
+        createCrawlToolCall(),
+      ]);
 
       const result = await executors.call_tools_batch!(instruction, state);
 
@@ -4763,21 +4524,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         },
       });
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([createSearchToolCall()]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -4831,15 +4578,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'msg-2',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
+          toolsCalling: [createSearchToolCall()],
         },
         type: 'call_tools_batch' as const,
       };
@@ -4906,21 +4645,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         },
       });
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([createSearchToolCall()]);
 
       const result = await executors.call_tools_batch!(instruction, state);
 
@@ -4959,28 +4684,22 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{"query": "test"}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{"url": "https://example.com"}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
+      const instruction = createBatchToolInstruction([
+        {
+          apiName: 'search',
+          arguments: '{"query": "test"}',
+          id: 'tool-call-1',
+          identifier: 'web-search',
+          type: 'default' as const,
         },
-        type: 'call_tools_batch' as const,
-      };
+        {
+          apiName: 'crawl',
+          arguments: '{"url": "https://example.com"}',
+          id: 'tool-call-2',
+          identifier: 'web-browsing',
+          type: 'default' as const,
+        },
+      ]);
 
       const result = await executors.call_tools_batch!(instruction, state);
 
@@ -5025,28 +4744,22 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const executors = createRuntimeExecutors(ctx);
       const state = createMockState();
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{"query": "test"}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{"url": "https://example.com"}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
+      const instruction = createBatchToolInstruction([
+        {
+          apiName: 'search',
+          arguments: '{"query": "test"}',
+          id: 'tool-call-1',
+          identifier: 'web-search',
+          type: 'default' as const,
         },
-        type: 'call_tools_batch' as const,
-      };
+        {
+          apiName: 'crawl',
+          arguments: '{"url": "https://example.com"}',
+          id: 'tool-call-2',
+          identifier: 'web-browsing',
+          type: 'default' as const,
+        },
+      ]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -5081,21 +4794,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         },
       });
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
-        },
-        type: 'call_tools_batch' as const,
-      };
+      const instruction = createBatchToolInstruction([createSearchToolCall()]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -5118,21 +4817,15 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         },
       });
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'createDocument',
-              arguments: '{"title":"Test","content":"Hello"}',
-              id: 'tool-call-1',
-              identifier: 'lobe-agent-documents',
-              type: 'builtin' as const,
-            },
-          ],
+      const instruction = createBatchToolInstruction([
+        {
+          apiName: 'createDocument',
+          arguments: '{"title":"Test","content":"Hello"}',
+          id: 'tool-call-1',
+          identifier: 'lobe-agent-documents',
+          type: 'builtin' as const,
         },
-        type: 'call_tools_batch' as const,
-      };
+      ]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -5159,21 +4852,15 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         },
       });
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'generateImage',
-              arguments: '{"prompt":"A lighthouse"}',
-              id: 'tool-call-1',
-              identifier: 'lobe-image-generation',
-              type: 'builtin' as const,
-            },
-          ],
+      const instruction = createBatchToolInstruction([
+        {
+          apiName: 'generateImage',
+          arguments: '{"prompt":"A lighthouse"}',
+          id: 'tool-call-1',
+          identifier: 'lobe-image-generation',
+          type: 'builtin' as const,
         },
-        type: 'call_tools_batch' as const,
-      };
+      ]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -5196,21 +4883,15 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         },
       });
 
-      const instruction = {
-        payload: {
-          parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'createDocument',
-              arguments: '{"title":"Test","content":"Hello"}',
-              id: 'tool-call-1',
-              identifier: 'lobe-agent-documents',
-              type: 'builtin' as const,
-            },
-          ],
+      const instruction = createBatchToolInstruction([
+        {
+          apiName: 'createDocument',
+          arguments: '{"title":"Test","content":"Hello"}',
+          id: 'tool-call-1',
+          identifier: 'lobe-agent-documents',
+          type: 'builtin' as const,
         },
-        type: 'call_tools_batch' as const,
-      };
+      ]);
 
       await executors.call_tools_batch!(instruction, state);
 
@@ -5381,15 +5062,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
+          toolsCalling: [createSearchToolCall()],
         },
         type: 'resolve_aborted_tools' as const,
       };
@@ -5406,15 +5079,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
+          toolsCalling: [createSearchToolCall()],
         },
         type: 'resolve_aborted_tools' as const,
       };
@@ -5437,15 +5102,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-          ],
+          toolsCalling: [createSearchToolCall()],
         },
         type: 'resolve_aborted_tools' as const,
       };
@@ -5483,22 +5140,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
+          toolsCalling: [createSearchToolCall(), createCrawlToolCall()],
         },
         type: 'resolve_aborted_tools' as const,
       };
@@ -5534,22 +5176,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       const instruction = {
         payload: {
           parentMessageId: 'assistant-msg-123',
-          toolsCalling: [
-            {
-              apiName: 'search',
-              arguments: '{}',
-              id: 'tool-call-1',
-              identifier: 'web-search',
-              type: 'default' as const,
-            },
-            {
-              apiName: 'crawl',
-              arguments: '{}',
-              id: 'tool-call-2',
-              identifier: 'web-browsing',
-              type: 'default' as const,
-            },
-          ],
+          toolsCalling: [createSearchToolCall(), createCrawlToolCall()],
         },
         type: 'resolve_aborted_tools' as const,
       };
@@ -6154,6 +5781,16 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
   });
 
   describe('hooks integration', () => {
+    const createMockDispatcher = () => ({
+      dispatch: vi.fn().mockResolvedValue(undefined),
+      hasAfterToolCallControl: vi.fn().mockReturnValue(false),
+      evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
+      evaluateToolCall: vi.fn().mockResolvedValue({
+        status: 'allow',
+      }),
+      dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
+    });
+
     const createToolState = (overrides?: Partial<AgentState>): AgentState => ({
       cost: createMockCost(),
       createdAt: new Date().toISOString(),
@@ -6257,15 +5894,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it.each([false, true])(
         'keeps runtime owner identity in shared-session tool hooks (throws: %s)',
         async (throws) => {
-          const mockDispatcher = {
-            dispatch: vi.fn().mockResolvedValue(undefined),
-            hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-            evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-            evaluateToolCall: vi.fn().mockResolvedValue({
-              status: 'allow',
-            }),
-            dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-          };
+          const mockDispatcher = createMockDispatcher();
           if (throws)
             mockToolExecutionService.executeTool.mockRejectedValue(new Error('Tool failed'));
           const state = createToolState({
@@ -6310,15 +5939,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       );
 
       it('should preserve native identity and structured results across tool notifications', async () => {
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
         const toolResult = {
           content: 'device output',
           deviceExecutionTime: 17,
@@ -6398,15 +6019,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       });
 
       it('should report structured blocked results as unsuccessful notifications, not exceptions', async () => {
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
         const toolResult = {
           content: 'Tool unavailable in this scope',
           executionTime: 0,
@@ -6439,15 +6052,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       });
 
       it('should correlate repeated tool names in a batch by native call ids', async () => {
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
         const tool = createToolInstruction().payload.toolCalling;
         await createRuntimeExecutors({ ...ctx, hookDispatcher: mockDispatcher as any })
           .call_tools_batch!(
@@ -6482,15 +6087,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       });
 
       it('should retain client routing and structured client results in notifications', async () => {
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
         const result = {
           content: 'client result',
           executionTime: 11,
@@ -6529,15 +6126,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       });
 
       it('should dispatch beforeToolCall and afterToolCall hooks', async () => {
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
 
         const ctxWithHooks = { ...ctx, hookDispatcher: mockDispatcher as any };
         const executors = createRuntimeExecutors(ctxWithHooks);
@@ -6608,15 +6197,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         // time it lands, `executeStep` has emitted the terminal hooks and the
         // operation is unregistered, so a local consumer drops it silently and a
         // webhook consumer would see `afterToolCall` after `onComplete`.
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
 
         const controller = new AbortController();
         mockToolExecutionService.executeTool.mockImplementationOnce(async () => {
@@ -6728,15 +6309,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       it('should dispatch onToolCallError when tool throws', async () => {
         mockToolExecutionService.executeTool.mockRejectedValue(new Error('Connection refused'));
 
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
 
         const ctxWithHooks = { ...ctx, hookDispatcher: mockDispatcher as any };
         const executors = createRuntimeExecutors(ctxWithHooks);
@@ -6759,15 +6332,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       });
 
       it('should derive callIndex from state.usage.tools.byTool', async () => {
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
 
         const ctxWithHooks = { ...ctx, hookDispatcher: mockDispatcher as any };
         const executors = createRuntimeExecutors(ctxWithHooks);
@@ -6813,15 +6378,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
 
     describe('compress_context hooks', () => {
       it('should dispatch beforeCompact and afterCompact hooks', async () => {
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
 
         const ctxWithHooks = {
           ...ctx,
@@ -6896,15 +6453,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
       });
 
       it('should dispatch beforeHumanIntervention hook', async () => {
-        const mockDispatcher = {
-          dispatch: vi.fn().mockResolvedValue(undefined),
-          hasAfterToolCallControl: vi.fn().mockReturnValue(false),
-          evaluateAfterToolCall: vi.fn().mockResolvedValue({ status: 'allow' }),
-          evaluateToolCall: vi.fn().mockResolvedValue({
-            status: 'allow',
-          }),
-          dispatchBeforeToolCall: vi.fn().mockResolvedValue(null),
-        };
+        const mockDispatcher = createMockDispatcher();
 
         const ctxWithHooks = { ...ctx, hookDispatcher: mockDispatcher as any };
         const executors = createRuntimeExecutors(ctxWithHooks);

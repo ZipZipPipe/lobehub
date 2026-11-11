@@ -82,6 +82,31 @@ vi.mock('@/store/chat', () => ({
   },
 }));
 
+const createContext = (topicId: string | null): ConversationContext => ({
+  agentId: 'session-1',
+  topicId,
+  threadId: null,
+});
+
+const createRegenerationChatState = () => ({
+  dbMessagesMap: {},
+  messagesMap: {},
+  operations: {},
+  operationsByMessage: {},
+  topicDataMap: {},
+
+  cancelOperations: mockCancelOperations,
+  cancelOperation: mockCancelOperation,
+  deleteMessage: mockDeleteMessage,
+  switchMessageBranch: mockSwitchMessageBranch,
+  startOperation: mockStartOperation,
+  associateMessageWithOperation: mockAssociateMessageWithOperation,
+  completeOperation: mockCompleteOperation,
+  failOperation: mockFailOperation,
+  executeClientAgent: mockExecuteClientAgent,
+  isGatewayModeEnabled: mockIsGatewayModeEnabled,
+});
+
 describe('Generation Actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -155,11 +180,7 @@ describe('Generation Actions', () => {
 
   describe('stopGenerating', () => {
     it('should cancel all running execAgentRuntime operations', () => {
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
@@ -214,11 +235,7 @@ describe('Generation Actions', () => {
 
     it('should call onGenerationStop hook', () => {
       const onGenerationStop = vi.fn();
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: null,
-        threadId: null,
-      };
+      const context: ConversationContext = createContext(null);
       const hooks: ConversationHooks = { onGenerationStop };
 
       const store = createStore({ context, hooks });
@@ -233,11 +250,7 @@ describe('Generation Actions', () => {
 
   describe('cancelOperation', () => {
     it('should cancel specific operation via ChatStore', () => {
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: null,
-        threadId: null,
-      };
+      const context: ConversationContext = createContext(null);
 
       const store = createStore({ context });
 
@@ -250,11 +263,7 @@ describe('Generation Actions', () => {
 
     it('should call onOperationCancelled hook', () => {
       const onOperationCancelled = vi.fn();
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: null,
-        threadId: null,
-      };
+      const context: ConversationContext = createContext(null);
       const hooks: ConversationHooks = { onOperationCancelled };
 
       const store = createStore({ context, hooks });
@@ -269,11 +278,7 @@ describe('Generation Actions', () => {
 
   describe('clearOperations', () => {
     it('should be a no-op since operations are managed by ChatStore', () => {
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: null,
-        threadId: null,
-      };
+      const context: ConversationContext = createContext(null);
 
       const store = createStore({ context });
 
@@ -287,11 +292,7 @@ describe('Generation Actions', () => {
   });
 
   describe('retryFailedAssistantStep', () => {
-    const context: ConversationContext = {
-      agentId: 'session-1',
-      topicId: 'topic-1',
-      threadId: null,
-    };
+    const context: ConversationContext = createContext('topic-1');
 
     const mockChatStore = async () => {
       const { useChatStore } = await import('@/store/chat');
@@ -516,24 +517,7 @@ describe('Generation Actions', () => {
     it('should create operation with context and pass operationId to deleteMessage', async () => {
       // Re-setup mock to ensure all required functions are available
       const { useChatStore } = await import('@/store/chat');
-      vi.mocked(useChatStore.getState).mockReturnValue({
-        dbMessagesMap: {},
-        messagesMap: {},
-        operations: {},
-        operationsByMessage: {},
-        topicDataMap: {},
-
-        cancelOperations: mockCancelOperations,
-        cancelOperation: mockCancelOperation,
-        deleteMessage: mockDeleteMessage,
-        switchMessageBranch: mockSwitchMessageBranch,
-        startOperation: mockStartOperation,
-        associateMessageWithOperation: mockAssociateMessageWithOperation,
-        completeOperation: mockCompleteOperation,
-        failOperation: mockFailOperation,
-        executeClientAgent: mockExecuteClientAgent,
-        isGatewayModeEnabled: mockIsGatewayModeEnabled,
-      } as any);
+      vi.mocked(useChatStore.getState).mockReturnValue(createRegenerationChatState() as any);
 
       const context: ConversationContext = {
         agentId: 'session-1',
@@ -670,11 +654,7 @@ describe('Generation Actions', () => {
         deleteMessage: mockDeleteMessage,
       } as any);
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: null,
-        threadId: null,
-      };
+      const context: ConversationContext = createContext(null);
 
       const store = createStore({ context });
 
@@ -971,24 +951,7 @@ describe('Generation Actions', () => {
     it('should pass operationId to switchMessageBranch for correct context', async () => {
       // Re-setup mock with all required properties
       const { useChatStore } = await import('@/store/chat');
-      vi.mocked(useChatStore.getState).mockReturnValue({
-        dbMessagesMap: {},
-        messagesMap: {},
-        operations: {},
-        operationsByMessage: {},
-        topicDataMap: {},
-
-        cancelOperations: mockCancelOperations,
-        cancelOperation: mockCancelOperation,
-        deleteMessage: mockDeleteMessage,
-        switchMessageBranch: mockSwitchMessageBranch,
-        startOperation: mockStartOperation,
-        associateMessageWithOperation: mockAssociateMessageWithOperation,
-        completeOperation: mockCompleteOperation,
-        failOperation: mockFailOperation,
-        executeClientAgent: mockExecuteClientAgent,
-        isGatewayModeEnabled: mockIsGatewayModeEnabled,
-      } as any);
+      vi.mocked(useChatStore.getState).mockReturnValue(createRegenerationChatState() as any);
 
       const context: ConversationContext = {
         agentId: 'session-1',
@@ -1032,24 +995,7 @@ describe('Generation Actions', () => {
     it('should pass context to executeClientAgent', async () => {
       // Re-setup mock with all required properties
       const { useChatStore } = await import('@/store/chat');
-      vi.mocked(useChatStore.getState).mockReturnValue({
-        dbMessagesMap: {},
-        messagesMap: {},
-        operations: {},
-        operationsByMessage: {},
-        topicDataMap: {},
-
-        cancelOperations: mockCancelOperations,
-        cancelOperation: mockCancelOperation,
-        deleteMessage: mockDeleteMessage,
-        switchMessageBranch: mockSwitchMessageBranch,
-        startOperation: mockStartOperation,
-        associateMessageWithOperation: mockAssociateMessageWithOperation,
-        completeOperation: mockCompleteOperation,
-        failOperation: mockFailOperation,
-        executeClientAgent: mockExecuteClientAgent,
-        isGatewayModeEnabled: mockIsGatewayModeEnabled,
-      } as any);
+      vi.mocked(useChatStore.getState).mockReturnValue(createRegenerationChatState() as any);
 
       const context: ConversationContext = {
         agentId: 'session-1',
@@ -1105,11 +1051,7 @@ describe('Generation Actions', () => {
         isGatewayModeEnabled: mockIsGatewayModeEnabled,
       } as any);
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
@@ -1161,11 +1103,7 @@ describe('Generation Actions', () => {
       });
       vi.mocked(useChatStore.getState).mockReturnValue(chatState);
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
@@ -1188,30 +1126,9 @@ describe('Generation Actions', () => {
 
     it('should restore mention-based initialContext when regenerating a user message', async () => {
       const { useChatStore } = await import('@/store/chat');
-      vi.mocked(useChatStore.getState).mockReturnValue({
-        dbMessagesMap: {},
-        messagesMap: {},
-        operations: {},
-        operationsByMessage: {},
-        topicDataMap: {},
+      vi.mocked(useChatStore.getState).mockReturnValue(createRegenerationChatState() as any);
 
-        cancelOperations: mockCancelOperations,
-        cancelOperation: mockCancelOperation,
-        deleteMessage: mockDeleteMessage,
-        switchMessageBranch: mockSwitchMessageBranch,
-        startOperation: mockStartOperation,
-        associateMessageWithOperation: mockAssociateMessageWithOperation,
-        completeOperation: mockCompleteOperation,
-        failOperation: mockFailOperation,
-        executeClientAgent: mockExecuteClientAgent,
-        isGatewayModeEnabled: mockIsGatewayModeEnabled,
-      } as any);
-
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
@@ -1281,11 +1198,7 @@ describe('Generation Actions', () => {
         switchMessageBranch: mockSwitchMessageBranch,
       } as any);
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
@@ -1354,11 +1267,7 @@ describe('Generation Actions', () => {
       } as any);
 
       const onRegenerateComplete = vi.fn();
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context, hooks: { onRegenerateComplete } });
 
@@ -1400,11 +1309,7 @@ describe('Generation Actions', () => {
         switchMessageBranch: mockSwitchMessageBranch,
       } as any);
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
@@ -1443,11 +1348,7 @@ describe('Generation Actions', () => {
         associateMessageWithOperation: mockAssociateMessageWithOperation,
       } as any);
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: null,
-        threadId: null,
-      };
+      const context: ConversationContext = createContext(null);
 
       const store = createStore({ context });
 
@@ -1494,11 +1395,7 @@ describe('Generation Actions', () => {
         isGatewayModeEnabled: mockIsGatewayModeEnabled,
       } as any);
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: null,
-        threadId: null,
-      };
+      const context: ConversationContext = createContext(null);
 
       const store = createStore({ context });
 
@@ -1596,11 +1493,7 @@ describe('Generation Actions', () => {
     it('routes regenerateUserMessage through executeHeterogeneousAgent with imageList + parentOperationId', async () => {
       const { mockRefreshMessages } = await setupHeteroChatStore();
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
@@ -1883,11 +1776,7 @@ describe('Generation Actions', () => {
       const { mockHeteroStartOperation, mockAssociateMessageWithOperation } =
         await setupHeteroChatStore();
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
@@ -1935,11 +1824,7 @@ describe('Generation Actions', () => {
       void mockHeteroStartOperation;
 
       const onRegenerateComplete = vi.fn();
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context, hooks: { onRegenerateComplete } });
 
@@ -1991,11 +1876,7 @@ describe('Generation Actions', () => {
         isGatewayModeEnabled: vi.fn(() => false),
       } as any);
 
-      const context: ConversationContext = {
-        agentId: 'session-1',
-        topicId: 'topic-1',
-        threadId: null,
-      };
+      const context: ConversationContext = createContext('topic-1');
 
       const store = createStore({ context });
 
