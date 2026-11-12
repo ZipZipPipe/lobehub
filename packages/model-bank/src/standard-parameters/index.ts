@@ -192,6 +192,15 @@ export const ModelParamsMetaSchema = z.object({
 
   size: z
     .object({
+      presets: z
+        .array(
+          z.object({
+            aspectRatio: z.string(),
+            resolution: z.string(),
+            value: z.string(),
+          }),
+        )
+        .optional(),
       custom: z
         .object({
           aspectRatioMax: z.number(),
@@ -269,6 +278,60 @@ export const ModelParamsMetaSchema = z.object({
       description: z.string().optional(),
       enum: z.array(z.string()),
       type: z.literal('string').optional(),
+    })
+    .optional(),
+
+  complexity: z
+    .object({
+      default: z.string(),
+      enum: z.array(z.string()),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+  svgModel: z
+    .object({
+      default: z.string(),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+  svgReasoningEffort: z
+    .object({
+      default: z.string(),
+      enum: z.array(z.string()),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+  maskUrl: z
+    .object({
+      default: z.string(),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+  markupUrl: z
+    .object({
+      default: z.string(),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+  safetyIdentifier: z
+    .object({
+      default: z.string(),
+      type: z.literal('string').optional(),
+    })
+    .optional(),
+  stream: z
+    .object({
+      default: z.boolean(),
+      type: z.literal('boolean').optional(),
+    })
+    .optional(),
+  partialImages: z
+    .object({
+      default: z.number(),
+      min: z.number(),
+      max: z.number(),
+      step: z.number(),
+      type: z.literal('number').optional(),
     })
     .optional(),
 

@@ -71,6 +71,7 @@ export function useGenerationConfigParam<
   return {
     value: paramValue as V,
     setValue,
+    presets: paramConfig && 'presets' in paramConfig ? paramConfig.presets : undefined,
     ...paramConstraints,
   };
 }

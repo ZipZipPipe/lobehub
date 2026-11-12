@@ -3,10 +3,11 @@ import { ModelProvider } from 'model-bank';
 import type OpenAI from 'openai';
 import { AzureOpenAI } from 'openai';
 
-import { pruneReasoningPayload } from '../../core/contextBuilders/openai';
+import { convertImageUrlToFile, pruneReasoningPayload } from '../../core/contextBuilders/openai';
 import { createOpenAICompatibleRuntime } from '../../core/openaiCompatible';
 import {
   applyImageOutputParams,
+  collectImageResponse,
   resolveImageOutputMimeType,
 } from '../../core/openaiCompatible/imageOutputParams';
 import { refineErrorCode } from '../../errors';
@@ -308,6 +309,18 @@ export class LobeAzureOpenAI extends BaseAzureOpenAI {
       if (userInput.size === 'auto') delete userInput.size;
 
       applyImageOutputParams(userInput, { isImageEdit });
+      for (const [param, field] of [
+        ['maskUrl', 'mask'],
+        ['markupUrl', 'markup'],
+      ] as const) {
+        if (isImageEdit && userInput[param]) {
+          userInput[field] = await convertImageUrlToFile(userInput[param]);
+          if (userInput[field].type && userInput[field].type !== 'image/png') {
+            throw new Error('Masks and markup overlays must be transparent PNG images.');
+          }
+        }
+        delete userInput[param];
+      }
 
       // gpt-image-2 rejects input_fidelity because it is always high fidelity by default.
       // Keep the parameter limited to the gpt-image-1 family, matching OpenAI-compatible runtime.
@@ -326,7 +339,7 @@ export class LobeAzureOpenAI extends BaseAzureOpenAI {
         ? await this.client.images.edit(azureImageOptions as any)
         : await this.client.images.generate(azureImageOptions as any);
 
-      let result: any = imageResponse;
+      let result: any = await collectImageResponse(imageResponse);
       if (typeof result === 'string') {
         result = JSON.parse(result);
       } else if (result && typeof result === 'object') {

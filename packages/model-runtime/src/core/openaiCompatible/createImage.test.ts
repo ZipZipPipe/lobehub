@@ -956,7 +956,7 @@ describe('createOpenAICompatibleImage', () => {
       expect(result.imageUrl).toBe('data:image/png;base64,png');
     });
 
-    it('rejects GIF output with reference images before downloading them', async () => {
+    it('rejects SVG output with reference images before downloading them', async () => {
       global.fetch = vi.fn();
 
       await expect(
@@ -964,11 +964,11 @@ describe('createOpenAICompatibleImage', () => {
           mockClient,
           {
             model: 'gpt-image-2.6-flare',
-            params: { imageUrls: ['https://example.com/a.png'], outputFormat: 'gif', prompt: 'p' },
+            params: { imageUrls: ['https://example.com/a.png'], outputFormat: 'svg', prompt: 'p' },
           },
           'openai',
         ),
-      ).rejects.toThrow('Animated GIF output does not support reference images');
+      ).rejects.toThrow('SVG output does not support reference images');
       expect(global.fetch).not.toHaveBeenCalled();
       expect(mockClient.images.edit).not.toHaveBeenCalled();
     });

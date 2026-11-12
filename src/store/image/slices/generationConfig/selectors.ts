@@ -16,10 +16,7 @@ const isSupportedParam = (paramName: RuntimeImageGenParamsKeys) => {
   };
 };
 
-/**
- * Whether the current model will produce an animated GIF. GIF output is generation-only (the
- * OpenAI edit endpoint rejects it), so it excludes reference images.
- */
+/** Whether the current model will produce an animated GIF. */
 const isAnimatedOutput = (s: GenerationConfigState) =>
   isSupportedParam('outputFormat')(s) && s.parameters?.outputFormat === 'gif';
 

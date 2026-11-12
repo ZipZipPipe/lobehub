@@ -1,4 +1,11 @@
-import { ActionIcon, Button, Flexbox, InputNumber, Text } from '@lobehub/ui';
+import {
+  ActionIcon,
+  Button,
+  Flexbox,
+  InputNumber,
+  Select as PresetSelect,
+  Text,
+} from '@lobehub/ui';
 import { Check, Plus, X } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -49,13 +56,19 @@ const parseSize = (size: string | undefined): [number, number] | undefined => {
 
 const SizeSelect = memo(() => {
   const { t } = useTranslation('image');
-  const { value, setValue, enumValues, custom } = useGenerationConfigParam('size');
+  const { value, setValue, enumValues, custom, presets } = useGenerationConfigParam('size');
   const parsedSize = parseSize(value);
   const [isEditing, setIsEditing] = useState(false);
   const [width, setWidth] = useState<number | null>(parsedSize?.[0] ?? 1024);
   const [height, setHeight] = useState<number | null>(parsedSize?.[1] ?? 1024);
   const options = enumValues!.map((size) => ({
-    label: size,
+    label:
+      size === 'auto'
+        ? t('config.background.options.auto')
+        : (() => {
+            const preset = presets?.find((item) => item.value === size);
+            return preset ? `${preset.aspectRatio} · ${preset.resolution} · ${size}` : size;
+          })(),
     value: size,
   }));
   const constraints = custom as CustomSizeConstraints | undefined;
@@ -83,7 +96,22 @@ const SizeSelect = memo(() => {
 
   return (
     <Flexbox gap={8}>
-      <Select options={options} value={isCustomValue ? undefined : value} onChange={setValue} />
+      {presets?.length ? (
+        <PresetSelect
+          showSearch
+          options={options}
+          style={{ width: '100%' }}
+          value={isCustomValue ? undefined : value}
+          onChange={setValue}
+        />
+      ) : (
+        <Select options={options} value={isCustomValue ? undefined : value} onChange={setValue} />
+      )}
+      {!!presets?.length && (
+        <Text fontSize={12} type="secondary">
+          {t('config.size.preset.hint')}
+        </Text>
+      )}
       {isEditing ? (
         <Flexbox gap={6}>
           <Flexbox horizontal align="center" gap={8}>

@@ -31,10 +31,9 @@ export const useImageReferenceUpload = () => {
 
   const isSupportImageUrl = useImageStore(isSupportedParamSelector('imageUrl'));
   const isSupportImageUrls = useImageStore(isSupportedParamSelector('imageUrls'));
-  // GIF output and reference images exclude each other; block new references while GIF is
-  // selected, but keep removal available.
-  const isAnimatedOutput = useImageStore(imageGenerationConfigSelectors.isAnimatedOutput);
-  const canAddReference = canCreate && !isAnimatedOutput;
+  // SVG is generation-only. GIF supports still references on the edit endpoint.
+  const isSvgOutput = useImageStore((s) => s.parameters?.outputFormat === 'svg');
+  const canAddReference = canCreate && !isSvgOutput;
 
   const {
     value: imageUrl,

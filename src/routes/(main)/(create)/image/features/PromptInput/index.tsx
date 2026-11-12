@@ -40,6 +40,7 @@ import {
   SizeSelect,
   StepsSliderInput,
 } from '@/routes/(main)/(create)/image/features/ConfigPanel';
+import { Image26Options } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/Image26Options';
 import ImageModelItem from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ModelSelect/ImageModelItem';
 import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useImageStore } from '@/store/image';
@@ -176,6 +177,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
   const isInit = useImageStore((s) => s.isInit);
   const isSupportBackground = useImageStore(isSupportedParamSelector('background'));
   const isSupportQuality = useImageStore(isSupportedParamSelector('quality'));
+  const isSupportComplexity = useImageStore(isSupportedParamSelector('complexity'));
   const isSupportModeration = useImageStore(isSupportedParamSelector('moderation'));
   const isSupportOutputCompression = useImageStore(isSupportedParamSelector('outputCompression'));
   const isSupportOutputFormat = useImageStore(isSupportedParamSelector('outputFormat'));
@@ -283,7 +285,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
     createImage,
   ]);
 
-  // `canDropImage` is false while GIF output is selected (see `useImageReferenceUpload`).
+  // SVG output disables reference uploads (see `useImageReferenceUpload`).
   const showInlineRef = canDropImage;
   const hasRefImages = imagePreviewUrls.length > 0;
   const displayVisibility = activeGenerationTopic
@@ -358,7 +360,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
             <ConfigAction
               title={t('config.title', { defaultValue: 'Config' })}
               content={
-                <Flexbox gap={12}>
+                <Flexbox gap={12} style={{ maxHeight: '65vh', overflowY: 'auto' }}>
                   {isSupportBackground && (
                     <Flexbox gap={6}>
                       <Text fontSize={12}>{t('config.background.label')}</Text>
@@ -371,12 +373,13 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                       <QualitySelect />
                     </Flexbox>
                   )}
+                  {isSupportComplexity && <Image26Options hasReferenceImages={hasRefImages} />}
                   {isSupportOutputFormat && (
                     <Flexbox gap={6}>
                       <Text fontSize={12}>{t('config.outputFormat.label')}</Text>
                       <OutputFormatSelect
                         // In-flight uploads count too: they land as references after finishing.
-                        disableAnimated={hasRefImages || uploadingPreviews.length > 0}
+                        disableSvg={hasRefImages || uploadingPreviews.length > 0}
                       />
                     </Flexbox>
                   )}
@@ -399,7 +402,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                         <OutputCompressionSlider />
                       </Flexbox>
                     )}
-                  {isSupportModeration && !hasRefImages && (
+                  {isSupportModeration && (isSupportComplexity || !hasRefImages) && (
                     <Flexbox gap={6}>
                       <Text fontSize={12}>{t('config.moderation.label')}</Text>
                       <ModerationSelect />

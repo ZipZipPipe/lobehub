@@ -13,7 +13,11 @@ import { referenceImageUrlToBase64 } from '../../utils/referenceImageCache';
 import { parseDataUri } from '../../utils/uriParser';
 import { convertImageUrlToFile } from '../contextBuilders/openai';
 import { convertOpenAIImageUsage } from '../usageConverters/openai';
-import { applyImageOutputParams, resolveImageOutputMimeType } from './imageOutputParams';
+import {
+  applyImageOutputParams,
+  collectImageResponse,
+  resolveImageOutputMimeType,
+} from './imageOutputParams';
 
 const log = createDebug('lobe-image:openai-compatible');
 
@@ -68,6 +72,18 @@ async function generateByImageMode(
   log('isImageEdit: %O, userInput.image: %O', isImageEdit, userInput.image);
   // Validate output controls before downloading reference images: GIF + edit fails anyway.
   applyImageOutputParams(userInput, { isImageEdit });
+  for (const [param, field] of [
+    ['maskUrl', 'mask'],
+    ['markupUrl', 'markup'],
+  ] as const) {
+    if (isImageEdit && userInput[param]) {
+      userInput[field] = await convertImageUrlToFile(userInput[param]);
+      if (userInput[field].type && userInput[field].type !== 'image/png') {
+        throw new Error('Masks and markup overlays must be transparent PNG images.');
+      }
+    }
+    delete userInput[param];
+  }
   // If there are imageUrls parameters, convert them to File objects
   if (isImageEdit) {
     try {
@@ -85,8 +101,8 @@ async function generateByImageMode(
     delete userInput.image;
   }
 
-  // The moderation parameter is supported by image generation, but not image editing.
-  if (isImageEdit) {
+  // GPT Image 2.6 adds moderation to the edit endpoint too.
+  if (isImageEdit && !/(?:^|\/)gpt-image-2\.6-/.test(routingModel)) {
     delete userInput.moderation;
   }
 
@@ -132,9 +148,10 @@ async function generateByImageMode(
   log('options: %O', options);
 
   // Determine if it's an image editing operation
-  const img = isImageEdit
+  const response = isImageEdit
     ? await client.images.edit(options as any)
     : await client.images.generate(options as any);
+  const img = await collectImageResponse(response);
 
   // Check the integrity of response data
   if (!img || !img.data || !Array.isArray(img.data) || img.data.length === 0) {

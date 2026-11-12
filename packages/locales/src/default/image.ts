@@ -1,4 +1,25 @@
 export default {
+  'config.advanced.label': 'More options',
+  'config.complexity.label': 'Planning Complexity',
+  'config.svgModel.label': 'SVG Author Model (optional)',
+  'config.svgModel.placeholder': 'Use provider default',
+  'config.svgModel.hint':
+    'Set only if your provider enables SVG author selection. Reasoning levels depend on that model.',
+  'config.svgReasoningEffort.label': 'SVG Author Reasoning',
+  'config.stream.label': 'Streaming Transfer',
+  'config.stream.hint':
+    'Receives intermediate frames from the provider; this page displays the completed image.',
+  'config.partialImages.label': 'Intermediate Images (0–3)',
+  'config.safetyIdentifier.label': 'Safety Identifier (optional)',
+  'config.safetyIdentifier.placeholder': 'Opaque identifier, up to 128 characters',
+  'config.mask.label': 'Edit Mask',
+  'config.markup.label': 'Markup Overlay',
+  'config.editOverlay.hint':
+    'Upload a transparent PNG matching the first reference image. Choose either a mask or markup overlay.',
+  'config.outputFormat.svgRefUnsupported': 'Remove reference images first',
+  'config.outputFormat.options.svg': 'Vector (SVG)',
+  'config.size.preset.hint':
+    '4K presets adapt each ratio to the model’s pixel and edge limits. Custom sizes remain available.',
   'config.aspectRatio.label': 'Aspect Ratio',
   'config.aspectRatio.lock': 'Lock Aspect Ratio',
   'config.aspectRatio.unlock': 'Unlock Aspect Ratio',
@@ -21,9 +42,7 @@ export default {
   'config.moderation.options.auto': 'Standard',
   'config.moderation.options.low': 'Less Restrictive',
   'config.outputCompression.label': 'Output Compression',
-  'config.outputFormat.label': 'Output Format',
   'config.outputFormat.options.jpeg': 'JPEG',
-  'config.outputFormat.options.png': 'PNG',
   'config.outputFormat.options.webp': 'WebP',
   'config.promptExtend.label': 'Prompt Extend',
   'config.promptExtend.options.fast': 'Fast',

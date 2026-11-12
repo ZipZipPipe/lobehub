@@ -10,7 +10,7 @@ describe('GPT Image 2.6', () => {
       const model = openaiImageModels.find((card) => card.id === id)!;
       expect(model).toMatchObject({ enabled: true, isOfficial: true, type: 'image' });
       expect(ModelParamsMetaSchema.safeParse(model.parameters).success).toBe(true);
-      expect(model.parameters.outputFormat?.enum).toEqual(['png', 'jpeg', 'webp', 'gif']);
+      expect(model.parameters.outputFormat?.enum).toEqual(['png', 'jpeg', 'webp', 'gif', 'svg']);
       expect(model.parameters.frameCount).toMatchObject({ max: 16, min: 2 });
       expect(model.parameters.frameDurationMs).toMatchObject({ max: 2000, min: 20, step: 10 });
       expect(extractDefaultValues(model.parameters)).toMatchObject({

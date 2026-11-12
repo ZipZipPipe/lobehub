@@ -23,7 +23,7 @@ const BackgroundSelect = () => {
       onChange={(background) => {
         setValue(background);
 
-        if (background === 'transparent' && outputFormat === 'jpeg') {
+        if (background === 'transparent' && (outputFormat === 'jpeg' || outputFormat === 'gif')) {
           setOutputFormat('png');
         }
       }}

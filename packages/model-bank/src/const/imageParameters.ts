@@ -95,12 +95,65 @@ export const gptImage25Schema: ModelParamsSchema = {
   },
 };
 
-/** GPT Image 2.6 adds native animated GIF output to the raster image controls. */
+// 4K presets fit OpenAI's 8,294,400-pixel budget and 3840px edge limit.
+// Non-16:9 ratios use the largest exact ratio on the 16px grid within those limits.
+export const GPT_IMAGE_26_SIZE_PRESETS = [
+  ['9:16', '2K', '1152x2048'],
+  ['9:16', '4K', '2160x3840'],
+  ['16:9', '2K', '2048x1152'],
+  ['16:9', '4K', '3840x2160'],
+  ['4:3', '2K', '2048x1536'],
+  ['4:3', '4K', '3264x2448'],
+  ['3:4', '2K', '1536x2048'],
+  ['3:4', '4K', '2448x3264'],
+  ['1:1', '2K', '2048x2048'],
+  ['1:1', '4K', '2880x2880'],
+  ['3:2', '2K', '2016x1344'],
+  ['3:2', '4K', '3504x2336'],
+  ['2:3', '2K', '1344x2016'],
+  ['2:3', '4K', '2336x3504'],
+  ['21:9', '2K', '2016x864'],
+  ['21:9', '4K', '3808x1632'],
+  ['9:21', '2K', '864x2016'],
+  ['9:21', '4K', '1632x3808'],
+  ['5:4', '2K', '2080x1664'],
+  ['5:4', '4K', '3200x2560'],
+  ['4:5', '2K', '1664x2080'],
+  ['4:5', '4K', '2560x3200'],
+  ['2:1', '2K', '2048x1024'],
+  ['2:1', '4K', '3840x1920'],
+  ['1:2', '2K', '1024x2048'],
+  ['1:2', '4K', '1920x3840'],
+].map(([aspectRatio, resolution, value]) => ({ aspectRatio, resolution, value }));
+
+/** All current GPT Image 2.6 generation/edit controls. */
 export const gptImage26Schema: ModelParamsSchema = {
   ...gptImage25Schema,
+  complexity: { default: 'high', enum: ['low', 'medium', 'high'] },
   frameCount: { default: 9, max: 16, min: 2, step: 1 },
   frameDurationMs: { default: 200, max: 2000, min: 20, step: 10 },
-  outputFormat: { default: 'png', enum: ['png', 'jpeg', 'webp', 'gif'] },
+  markupUrl: { default: '' },
+  maskUrl: { default: '' },
+  outputFormat: { default: 'png', enum: ['png', 'jpeg', 'webp', 'gif', 'svg'] },
+  partialImages: { default: 0, min: 0, max: 3, step: 1 },
+  safetyIdentifier: { default: '' },
+  size: {
+    ...gptImage25Schema.size!,
+    enum: [
+      'auto',
+      '1024x1024',
+      '1536x1024',
+      '1024x1536',
+      ...GPT_IMAGE_26_SIZE_PRESETS.map(({ value }) => value),
+    ],
+    presets: GPT_IMAGE_26_SIZE_PRESETS,
+  },
+  stream: { default: false },
+  svgModel: { default: '' },
+  svgReasoningEffort: {
+    default: 'auto',
+    enum: ['auto', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+  },
 };
 
 export const nanoBananaParameters: ModelParamsSchema = {

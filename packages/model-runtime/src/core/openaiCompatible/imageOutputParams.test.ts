@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyImageOutputParams,
-  GIF_EDIT_UNSUPPORTED_MESSAGE,
   resolveImageOutputMimeType,
+  SVG_EDIT_UNSUPPORTED_MESSAGE,
 } from './imageOutputParams';
 
 describe('applyImageOutputParams', () => {
@@ -41,10 +41,10 @@ describe('applyImageOutputParams', () => {
     expect(input).toEqual({ prompt: 'p' });
   });
 
-  it('rejects GIF output on the edit endpoint', () => {
+  it('rejects SVG output on the edit endpoint', () => {
     expect(() =>
-      applyImageOutputParams({ outputFormat: 'gif' }, { isImageEdit: true }),
-    ).toThrowError(GIF_EDIT_UNSUPPORTED_MESSAGE);
+      applyImageOutputParams({ outputFormat: 'svg' }, { isImageEdit: true }),
+    ).toThrowError(SVG_EDIT_UNSUPPORTED_MESSAGE);
   });
 });
 
