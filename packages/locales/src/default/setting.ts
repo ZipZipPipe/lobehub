@@ -1358,6 +1358,24 @@ export default {
   'settingAgent.tag.placeholder': 'Enter tag',
   'settingAgent.tag.title': 'Tag',
   'settingAgent.title': 'Agent info',
+  'settingAbout.debugLogs.desc':
+    'Also record detailed debug logs. Turn on while reproducing an issue, then turn off: debug logs use more disk space and may include file paths and URLs.',
+  'settingAbout.debugLogs.devDesc': 'Development builds always record debug logs.',
+  'settingAbout.debugLogs.directory': 'Log Files',
+  'settingAbout.debugLogs.openDirectory': 'Open Folder',
+  'settingAbout.debugLogs.openDirectoryDesc': 'Attach these files when you report an issue.',
+  'settingAbout.debugLogs.title': 'Debug Logs',
+  'settingAbout.diagnostics.title': 'Diagnostics',
+  'settingAbout.remoteDebugging.confirm.content':
+    'After you restart LobeHub, programs on this computer can connect to port {{port}}, control LobeHub windows, and read your signed-in session and data. The port opens on every launch until you turn this off. Turn it on only while debugging.',
+  'settingAbout.remoteDebugging.confirm.ok': 'Allow',
+  'settingAbout.remoteDebugging.confirm.title': 'Allow remote debugging?',
+  'settingAbout.remoteDebugging.desc':
+    'Let developer tools on this computer connect to LobeHub on port {{port}} and read app state.',
+  'settingAbout.remoteDebugging.launchOptionDesc':
+    'Remote debugging was turned on by a launch option for this session.',
+  'settingAbout.remoteDebugging.restartToApply': 'Restart LobeHub to apply this change.',
+  'settingAbout.remoteDebugging.title': 'Remote Debugging',
   'settingAppearance.appTray.desc':
     'Show the LobeHub icon in the system tray or macOS menu bar. Disabling it also removes tray menu access.',
   'settingAppearance.appTray.title': 'Show App Tray',
@@ -4832,6 +4850,12 @@ When I am ___, I need ___
   'drive.usage.overBy': '{{size}} over the quota',
   'drive.usage.others': 'Other members',
   'drive.usage.refresh': 'Measure again',
+  'drive.usage.measuring': 'Measuring · {{size}} counted so far',
+  'drive.usage.measuringHint':
+    'This drive is large, so it is measured in several passes. The figure shown is the last finished measurement. Measuring carries on in the background — measure again later to see the new figure.',
+  'drive.usage.measuringShort': 'Measuring…',
+  'drive.usage.refreshFailed':
+    'Could not measure the drive right now. The figure shown is still the last measurement — try again in a moment.',
   'drive.usage.membersTitle': "Members' personal drives",
   'drive.usage.membersHint': 'Usage only — contents stay private',
   'drive.usage.memberUnmeasured': 'Not measured',
@@ -4977,6 +5001,15 @@ When I am ___, I need ___
   'subscriptionAccounts.calendar.tomorrowDay': 'Tomorrow',
   'subscriptionAccounts.summary': '{{inRotation}} of {{count}} in rotation',
   'subscriptionAccounts.updateFailed': "Couldn't update the account. Try again.",
+  'subscriptionAccounts.visibility.private': 'Private',
+  'subscriptionAccounts.visibility.privateAction': 'Make private',
+  'subscriptionAccounts.visibility.privateConfirm.desc':
+    "Only you will see it. Other members' agents stop drawing on its quota.",
+  'subscriptionAccounts.visibility.privateConfirm.title': 'Make this account private?',
+  'subscriptionAccounts.visibility.publicAction': 'Share with workspace',
+  'subscriptionAccounts.visibility.publicConfirm.desc':
+    'Every member will see it, and their agents can draw on its quota. You can make it private again from the same menu.',
+  'subscriptionAccounts.visibility.publicConfirm.title': 'Share this account with the workspace?',
   'tab.subscriptionAccounts': 'Subscription Accounts',
   'taskLabels.actions.addToGroup': 'Add label to group',
   'taskLabels.actions.create': 'New label',

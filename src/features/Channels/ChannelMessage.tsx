@@ -37,10 +37,11 @@ import { userProfileSelectors } from '@/store/user/selectors';
 import { authorAvatar, isCurrentUserAuthor, memberName } from './memberName';
 import { CHANNEL_MENTION_TAG, remarkChannelMentions } from './mentionMarkdown';
 import { MessageAttachments } from './MessageAttachments';
-import { channelTimeFormatters } from './messagePresentation';
+import { channelMessageTime, channelTimeFormatters } from './messagePresentation';
 import { MessageFailureMark, MessageRoutingStatus } from './MessageReceipts';
 import { showsReplyQuote } from './replyQuote';
 import type { ReplyTopic } from './ReplyTopicPanel';
+import { ReplyWorks } from './ReplyWorks';
 import { styles } from './styles';
 import type { ChannelThreadDraft } from './threadDraft';
 import type { ChannelReplyTarget } from './useReplyTarget';
@@ -113,13 +114,16 @@ export const ChannelMessage = ({
     !isRoot &&
     message.routingStatus !== 'unassigned' &&
     !detail.jobs.some((job) => job.messageId === message.id && job.status === 'failed');
+  // A continuation sits under its header, so its hover stamp only needs the clock.
   const timestamp = (
     <time
       dateTime={date.toISOString()}
       title={timeFormats.full.format(date)}
       {...stylex.props(styles.messageTime)}
     >
-      {timeFormats.time.format(date)}
+      {compact
+        ? timeFormats.time.format(date)
+        : channelMessageTime(date, { locale: i18n.language, yesterday: t('date.yesterday') })}
     </time>
   );
   const isOwnMessage = useUserStore((s) =>
@@ -209,6 +213,7 @@ export const ChannelMessage = ({
     >
       {compact && <span {...stylex.props(styles.continuationTime)}>{timestamp}</span>}
       <ChatItem
+        quietHeader
         showAvatar
         showTitle
         agentId={message.author.type === 'agent' ? message.author.id : undefined}
@@ -310,6 +315,7 @@ export const ChannelMessage = ({
               ) : (
                 <MessageText content={message.content} names={mentionNames} />
               ))}
+            {!!message.works?.length && <ReplyWorks works={message.works} />}
           </Flexbox>
         }
         titleAddon={

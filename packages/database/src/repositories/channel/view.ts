@@ -16,6 +16,7 @@ import { notTrashed } from '../../utils/softDelete';
 import { fileIdsByMessage } from './attachments';
 import { activeMembers } from './delivery';
 import { ChannelError } from './error';
+import { externalWorksByMessage } from './works';
 
 const publicMessageColumns = {
   ...getTableColumns(channelMessages),
@@ -158,6 +159,7 @@ export const readChannelView = async (
         errorMessage: sql<string | null>`CASE WHEN ${channelJobs.status} = 'failed'
           THEN left(${agentOperations.error}->>'message', 2000) ELSE NULL END`,
         writerHeld: channelJobs.writerHeld,
+        worktreeBranch: sql<string | null>`${channelJobs.executionConfig}->>'worktreeBranch'`,
         operationStatus: agentOperations.status,
         createdAt: channelJobs.createdAt,
         publicationRevoked: channelJobs.publicationRevoked,
@@ -217,14 +219,13 @@ export const readChannelView = async (
     ...page.map((message) => message.id),
     ...(rootMessage ? [rootMessage.id] : []),
   ]);
-  const sourceTopics = await sourceTopicsByMessage(
-    tx,
-    channelId,
-    [...page, ...(rootMessage ? [rootMessage] : [])].flatMap((message) =>
-      message.routingStatus === 'reply' ? [message.id] : [],
-    ),
-    viewerUserId,
+  const replyIds = [...page, ...(rootMessage ? [rootMessage] : [])].flatMap((message) =>
+    message.routingStatus === 'reply' ? [message.id] : [],
   );
+  const [sourceTopics, works] = await Promise.all([
+    sourceTopicsByMessage(tx, channelId, replyIds, viewerUserId),
+    externalWorksByMessage(tx, channelId, replyIds),
+  ]);
   const ids = [...new Set([...files.values()].flat())];
   const attachments = ids.length
     ? await tx
@@ -243,12 +244,16 @@ export const readChannelView = async (
     hasMore: reversed.length > limit,
     jobs,
     members,
-    threads,
+    threads: threads.map((thread) => {
+      const title = thread.metadata?.title;
+      return typeof title === 'string' && title ? { ...thread, title } : thread;
+    }),
     rootMessage: rootMessage
       ? {
           ...publicMessage(rootMessage, files.get(rootMessage.id) ?? []),
           sourceTopicId: sourceTopics.get(rootMessage.id)?.id ?? null,
           sourceTopicTitle: sourceTopics.get(rootMessage.id)?.title ?? null,
+          works: works.get(rootMessage.id) ?? [],
           replyTo: rootMessage.replyToId ? (quotes.get(rootMessage.replyToId) ?? null) : null,
         }
       : null,
@@ -256,6 +261,7 @@ export const readChannelView = async (
       ...publicMessage(message, files.get(message.id) ?? []),
       sourceTopicId: sourceTopics.get(message.id)?.id ?? null,
       sourceTopicTitle: sourceTopics.get(message.id)?.title ?? null,
+      works: works.get(message.id) ?? [],
       replyTo: message.replyToId ? (quotes.get(message.replyToId) ?? null) : null,
     })),
   };

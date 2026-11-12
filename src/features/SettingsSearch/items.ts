@@ -16,8 +16,6 @@ export interface SettingsSearchContext {
   enableComposio: boolean;
   enableGatewayMode: boolean;
   enableSTT: boolean;
-  /** Workspaces are available to this user */
-  enableWorkspace: boolean;
   /** Whether the signed-in user has an email on their profile */
   hasEmail: boolean;
   hideDocs: boolean;
@@ -366,6 +364,21 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
     visible: (ctx) => ctx.isDesktop,
   },
   {
+    anchor: 'about-debug-logs',
+    descKey: 'settingAbout.debugLogs.desc',
+    keywords: ['debug', 'logs', 'log level', 'diagnostics', 'troubleshoot'],
+    labelKey: 'settingAbout.debugLogs.title',
+    tab: SettingsTabs.About,
+    visible: (ctx) => ctx.isDesktop,
+  },
+  {
+    anchor: 'about-remote-debugging',
+    keywords: ['remote debugging', 'cdp', 'devtools', 'diagnostics', 'debug port'],
+    labelKey: 'settingAbout.remoteDebugging.title',
+    tab: SettingsTabs.About,
+    visible: (ctx) => ctx.isDesktop,
+  },
+  {
     anchor: 'appearance-font-family',
     descKey: 'settingAppearance.font.fontFamily.desc',
     keywords: ['font', 'font family', 'typeface', 'interface font'],
@@ -467,7 +480,9 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
       ns: 'labs',
       tab: SettingsTabs.Labs,
       ...(desktopOnly ? { visible: (ctx: SettingsSearchContext) => ctx.isDesktop } : {}),
-      ...(workspaceOnly ? { visible: (ctx: SettingsSearchContext) => ctx.enableWorkspace } : {}),
+      ...(workspaceOnly
+        ? { visible: (ctx: SettingsSearchContext) => ctx.enableBusinessFeatures }
+        : {}),
     }),
   ),
   // Service Model

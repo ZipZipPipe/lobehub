@@ -185,8 +185,21 @@ export const DEFAULT_DOCS_PAGE_SECTION_VIEW: DocsPageSectionView = {
   type: 'all',
 };
 
+/** How the Contacts list is ordered: by name, or most recently updated first. */
+export type ContactListSortBy = 'title' | 'updatedAt';
+
+/** How a sidebar Channel section orders its Channels. */
+export interface ChannelListSort {
+  /** `updatedAt` follows the latest message, so it orders by activity. */
+  by: 'createdAt' | 'title' | 'updatedAt';
+  order: 'asc' | 'desc';
+}
+
 /** How the sidebar project list is ordered; `manual` follows the shared drag order. */
 export type ProjectListSortBy = 'manual' | 'createdAt' | 'updatedAt';
+
+/** How the projects page lays out projects: folder cards or compact rows. */
+export type ProjectListViewMode = 'folder' | 'list';
 
 export interface SystemStatus {
   /**
@@ -231,6 +244,10 @@ export interface SystemStatus {
    * scalars instead of index-merging arrays.
    */
   assigneeAgentSelectorCollapsedGroups?: Record<string, boolean>;
+  /**
+   * Order of the sidebar Channel sections. Device-local view setting.
+   */
+  channelListSort?: ChannelListSort;
   chatInputHeight?: number;
   /**
    * Which topicGroups are collapsed, bucketed by group mode. We persist the
@@ -240,6 +257,8 @@ export interface SystemStatus {
    * match and every group would render collapsed.
    */
   collapsedTopicGroupKeysByMode?: Partial<Record<TopicGroupMode, string[]>>;
+  /** Order of the Contacts list; absent means by name. Device-local view setting. */
+  contactListSortBy?: ContactListSortBy;
   disabledModelProvidersSortType?: string;
   disabledModelsSortType?: string;
   /**
@@ -369,6 +388,8 @@ export interface SystemStatus {
    * order itself is shared and lives on `projects.sort_order`.
    */
   projectListSortBy?: ProjectListSortBy;
+  /** Layout of the projects page. Device-local view setting. */
+  projectListViewMode?: ProjectListViewMode;
   /**
    * Per byProject group (keyed by the group id, e.g. `project-id:<id>`): how its
    * topics are sectioned. Absent means `none`.

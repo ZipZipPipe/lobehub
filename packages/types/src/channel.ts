@@ -2,6 +2,7 @@ import type { LobeAgentAgencyConfig, LobeAgentConfig, RemoteHeterogeneousAgentTy
 import { LocalExecutionHeterogeneousAgentTypeSchema } from './agent/heterogeneousAgent';
 import { getWorkingDirEffectivePath } from './device';
 import type { BotWakeKind } from './signal';
+import type { ExternalWorkSummaryItem } from './work';
 
 /**
  * Channel: a shared conversation where people and Agents talk together.
@@ -147,8 +148,27 @@ export interface ChannelConfig {
   wake?: Record<string, unknown>;
 }
 
+/**
+ * A git worktree a member's conversation branch moved into when another run held its
+ * configured directory. Cut from that directory's HEAD; the branch keeps working there until
+ * the member's environment changes.
+ */
+export interface ChannelMemberWorktree {
+  branch: string;
+  deviceId: string;
+  /** Absolute path under `~/.lobehub/worktrees/`, see `deriveWorktreePath`. */
+  path: string;
+  /** The member's configured directory it was cut from. */
+  sourceDirectory: string;
+}
+
 /** Free-form member state that does not need its own column. */
-export type ChannelMemberMetadata = Record<string, unknown>;
+export type ChannelMemberMetadata = Record<string, unknown> & {
+  /** Worktree per conversation branch: a Thread id, or `main` for the main timeline. */
+  worktrees?: Record<string, ChannelMemberWorktree>;
+  /** The configured directory could not host a worktree (e.g. not a git repo); retried later. */
+  worktreeUnavailable?: { at: string; deviceId: string; sourceDirectory: string };
+};
 
 /** Free-form channel state that does not need its own column. */
 export type ChannelMetadata = Record<string, unknown>;
@@ -166,6 +186,8 @@ export type ChannelMessageMetadata = Record<string, unknown>;
 export interface ChannelExecutionConfig extends LobeAgentConfig, ChannelMemberConfig {
   provider: string;
   runtime: ChannelRuntime;
+  /** Set when the run works in its branch's worktree; `workingDirectory` is then that worktree. */
+  worktreeBranch?: string;
 }
 
 /**
@@ -213,6 +235,12 @@ export type ChannelJobStatus =
  * The details are what the woken Agent is told about the wake.
  */
 export interface ChannelJobWake {
+  /**
+   * The member whose reply to the same message this wake waits for: the message's one primary
+   * responder. The job starts only after that member's job settles, with its reply in the prompt,
+   * so it can stay silent when the reply already covers the request.
+   */
+  afterMemberId?: string;
   /** The message falls within the member's duties (`helpful`: it can settle an open question). */
   duty?: { helpful?: boolean; matched?: string };
   /** The member spoke here lately and this message followed. */
@@ -229,6 +257,8 @@ export interface ChannelJobWake {
 
 /** Why a queued job cannot start yet. Typed so clients never infer it from error text. */
 export type ChannelJobBlockCode =
+  /** A deferred `followup` waiting for the message's primary responder to settle. */
+  | 'awaiting_primary'
   | 'device_approval_pending'
   | 'device_offline'
   | 'device_required'
@@ -292,6 +322,11 @@ export interface ChannelHistoryMessageDetail {
 export interface ChannelInputManifest {
   /** Immutable at claim time; later public messages belong to the next run. */
   cutoffSequence: number;
+  /**
+   * A deferred `followup` (see `ChannelJobWake.afterMemberId`): the reply the primary responder
+   * published to the same request, delivered with the request even though it is past the cutoff.
+   */
+  primaryReplyMessageId?: string;
   /** The member that triggered this run; its user is the execution identity. */
   requesterMemberId: string;
   requestMessageId: string;
@@ -315,6 +350,8 @@ export interface ChannelListItem {
   id: string;
   /** The newest main-channel message, cut for a preview; set by the Channel list. */
   lastMessage?: { content: string; createdAt: Date } | null;
+  /** Unread messages, Threads included, that @mention the caller; set by the Channel list. */
+  mentionCount?: number;
   /** The project the channel is grouped under; null for a standalone channel. */
   projectId: string | null;
   /**
@@ -375,6 +412,11 @@ export interface ChannelPublicMessage {
   sourceTopicTitle?: string | null;
   threadId: string | null;
   userId: string | null;
+  /**
+   * External Works a reply's run touched: the conversation's work summaries, for every member,
+   * without the ids that link them to the requester's Work, topic and run. Empty on requests.
+   */
+  works?: ExternalWorkSummaryItem[];
 }
 
 export interface ChannelPublicJob {
@@ -389,6 +431,8 @@ export interface ChannelPublicJob {
   publicationRevoked: boolean;
   status: ChannelJobStatus;
   threadId: string | null;
+  /** Git branch of the worktree the run works in, instead of the member's own directory. */
+  worktreeBranch?: string | null;
   writerHeld: boolean;
 }
 
@@ -404,6 +448,8 @@ export interface ChannelPublicThread {
   rootMessageId: string;
   rootSequence: number;
   status: ChannelThreadStatus;
+  /** Name an Agent gave the Thread when it moved its reply there; otherwise the root names it. */
+  title?: string;
 }
 
 export interface ChannelDetail {

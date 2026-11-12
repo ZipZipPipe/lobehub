@@ -1044,6 +1044,7 @@ export default {
   'input.warp': 'New Line',
   'input.warpWithKey': 'Press <key/> to insert a line break',
   'inputQueue.delete': 'Delete',
+  'inputQueue.deliveringHint': 'With the agent, shows in the chat once it reads it',
   'inputQueue.edit': 'Edit',
   'inputQueue.enqueueRejected': 'Queue is full. Try again after the current run finishes.',
   'inputQueue.queuedHint': 'Sends when the current step finishes',
@@ -1051,7 +1052,10 @@ export default {
   'inputQueue.queuedRunEndHint': 'Sends when the current run finishes',
   'inputQueue.queuedRunEndMergeHint': 'Merged and sent when the current run finishes',
   'inputQueue.sendNow': 'Send now (interrupts current run)',
+  'inputQueue.sendNowFailed': 'Couldn’t interrupt the current run. Try again.',
   'inputQueue.alreadyDelivered': 'Already sent to the agent',
+  'inputQueue.alreadyDelivering':
+    'The agent already has this message. It shows in the chat once the agent reads it.',
   'inputQueue.withdrawFailed': 'Couldn’t take the message back. Try again.',
   'intentUnderstanding.title': 'Understanding your intent...',
   'inviteMembers': 'Invite members',
