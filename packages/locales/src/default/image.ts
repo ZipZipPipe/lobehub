@@ -1,4 +1,5 @@
 export default {
+  'config.editOverlay.pngRequired': 'Choose a transparent PNG for the mask or markup overlay.',
   'config.advanced.label': 'More options',
   'config.complexity.label': 'Planning Complexity',
   'config.svgModel.label': 'SVG Author Model (optional)',

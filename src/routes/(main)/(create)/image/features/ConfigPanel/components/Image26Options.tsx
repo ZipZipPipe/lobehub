@@ -1,4 +1,4 @@
-import { Flexbox, Input, InputNumber, Select, Switch, Text } from '@lobehub/ui';
+import { Flexbox, Input, InputNumber, Select, Switch, Text, toast } from '@lobehub/ui';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -25,6 +25,11 @@ export const Image26Options = ({ hasReferenceImages }: { hasReferenceImages: boo
   const mask = useGenerationConfigParam('maskUrl');
   const markup = useGenerationConfigParam('markupUrl');
   const raster = format.value !== 'gif' && format.value !== 'svg';
+  const validatePng = (file: File) => {
+    if (file.type === 'image/png') return true;
+    toast.error(t('config.editOverlay.pngRequired'));
+    return false;
+  };
 
   return (
     <Flexbox gap={12}>
@@ -116,8 +121,10 @@ export const Image26Options = ({ hasReferenceImages }: { hasReferenceImages: boo
               {format.value !== 'gif' && (
                 <Field label={t('config.mask.label')}>
                   <ImageUpload
+                    accept="image/png"
                     maxFileSize={4 * 1024 * 1024}
                     placeholderHeight={80}
+                    validateFile={validatePng}
                     value={mask.value}
                     onChange={(value) => {
                       mask.setValue(typeof value === 'string' ? value : (value?.url ?? ''));
@@ -128,8 +135,10 @@ export const Image26Options = ({ hasReferenceImages }: { hasReferenceImages: boo
               )}
               <Field label={t('config.markup.label')}>
                 <ImageUpload
+                  accept="image/png"
                   maxFileSize={50 * 1024 * 1024}
                   placeholderHeight={80}
+                  validateFile={validatePng}
                   value={markup.value}
                   onChange={(value) => {
                     markup.setValue(typeof value === 'string' ? value : (value?.url ?? ''));

@@ -10,6 +10,7 @@
   "config.cfg.label": "Guidance Intensity",
   "config.complexity.label": "Planning Complexity",
   "config.editOverlay.hint": "Upload a transparent PNG matching the first reference image. Choose either a mask or markup overlay.",
+  "config.editOverlay.pngRequired": "Choose a transparent PNG for the mask or markup overlay.",
   "config.frameCount.label": "Frames",
   "config.frameDurationMs.label": "Frame Duration (ms)",
   "config.header.desc": "Brief description, create instantly",

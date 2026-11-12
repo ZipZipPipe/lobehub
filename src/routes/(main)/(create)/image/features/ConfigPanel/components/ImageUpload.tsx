@@ -17,6 +17,7 @@ import { type FileUploadStatus } from '@/types/files/upload';
 // ======== Business Types ======== //
 
 export interface ImageUploadProps {
+  accept?: string;
   // Callback when URL changes - supports both old API (string) and new API (object with dimensions)
   className?: string; // Image URL
   /** Image dimension constraints with optional min/max for width and height */
@@ -30,6 +31,7 @@ export interface ImageUploadProps {
   /** Height of the empty placeholder area. Defaults to 160. */
   placeholderHeight?: number;
   style?: React.CSSProperties;
+  validateFile?: (file: File) => boolean;
   value?: string | null;
 }
 
@@ -427,7 +429,17 @@ SuccessDisplay.displayName = 'SuccessDisplay';
 // ======== Main Component ======== //
 
 const ImageUpload: FC<ImageUploadProps> = memo(
-  ({ value, onChange, style, className, maxFileSize, imageConstraints, placeholderHeight }) => {
+  ({
+    value,
+    onChange,
+    style,
+    className,
+    maxFileSize,
+    imageConstraints,
+    placeholderHeight,
+    accept = 'image/*',
+    validateFile,
+  }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const uploadWithProgress = useFileStore((s) => s.uploadWithProgress);
     const [uploadState, setUploadState] = useState<UploadState | null>(null);
@@ -455,6 +467,7 @@ const ImageUpload: FC<ImageUploadProps> = memo(
     const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
+      if (validateFile && !validateFile(file)) return;
 
       // Validate file using unified validation hook
       if (!validateFiles([file])) return;
@@ -542,6 +555,7 @@ const ImageUpload: FC<ImageUploadProps> = memo(
 
       // Take the first image file
       const file = files[0];
+      if (!file || (validateFile && !validateFile(file))) return;
 
       // Validate file using unified validation hook
       if (!validateFiles([file])) return;
@@ -629,7 +643,7 @@ const ImageUpload: FC<ImageUploadProps> = memo(
       <div className={className} {...dragHandlers} style={style}>
         {/* Hidden file input */}
         <input
-          accept="image/*"
+          accept={accept}
           ref={inputRef}
           style={{ display: 'none' }}
           type="file"

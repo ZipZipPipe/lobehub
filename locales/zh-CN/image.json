@@ -10,6 +10,7 @@
   "config.cfg.label": "引导强度",
   "config.complexity.label": "规划复杂度",
   "config.editOverlay.hint": "上传与第一张参考图同尺寸的透明 PNG；蒙版和标注图二选一。",
+  "config.editOverlay.pngRequired": "请为蒙版或标注图选择透明 PNG 文件。",
   "config.frameCount.label": "帧数",
   "config.frameDurationMs.label": "每帧时长（毫秒）",
   "config.header.desc": "简单描述，即刻创作",

@@ -180,6 +180,32 @@ describe.each(['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])(
       expect(edit).not.toHaveBeenCalled();
     });
 
+    it('rejects a non-PNG overlay before calling the paid edit endpoint', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          headers: { get: () => 'image/jpeg' },
+          arrayBuffer: async () => new Uint8Array([0xff, 0xd8, 0xff]).buffer,
+        }),
+      );
+      await expect(
+        createOpenAICompatibleImage(
+          client,
+          {
+            model,
+            params: {
+              prompt: 'edit',
+              imageUrls: ['https://example.com/input.png'],
+              markupUrl: 'https://example.com/wrong.jpg',
+            },
+          },
+          'openai',
+        ),
+      ).rejects.toThrow('transparent PNG');
+      expect(edit).not.toHaveBeenCalled();
+    });
+
     it('consumes streaming previews but stores only the final image', async () => {
       generate.mockResolvedValue(
         (async function* () {
