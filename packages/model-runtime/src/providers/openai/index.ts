@@ -139,6 +139,28 @@ export const params = {
         tools: openaiTools,
       } as any;
     },
+    prepareRequest: (payload) => {
+      if (payload.model !== 'gpt-6.2-astra' || !payload.tools) return { payload };
+
+      const tools = payload.tools.map((tool) => {
+        if (
+          tool.type !== 'function' ||
+          tool.name !== 'lobe-agent-documents____modifyNodes' ||
+          typeof tool.strict === 'boolean'
+        ) {
+          return tool;
+        }
+
+        const properties = tool.parameters?.properties as
+          { operations?: { items?: { oneOf?: unknown } } } | undefined;
+        // This schema fails Astra's implicit strict compilation of the operations union.
+        return Array.isArray(properties?.operations?.items?.oneOf)
+          ? { ...tool, strict: false }
+          : tool;
+      });
+
+      return { payload: { ...payload, tools } };
+    },
   },
 } satisfies OpenAICompatibleFactoryOptions;
 

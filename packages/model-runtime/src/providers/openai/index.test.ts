@@ -459,6 +459,71 @@ describe('LobeOpenAI', () => {
   });
 
   describe('responses.handlePayload', () => {
+    const modifyNodesName = 'lobe-agent-documents____modifyNodes';
+    const modifyNodesParameters = {
+      properties: {
+        operations: {
+          items: {
+            oneOf: [
+              { properties: { beforeId: { type: 'string' } }, required: ['beforeId'] },
+              { properties: { afterId: { type: 'string' } }, required: ['afterId'] },
+            ],
+          },
+          type: 'array',
+        },
+      },
+      required: ['operations'],
+      type: 'object',
+    };
+
+    it.each(['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-astra'])(
+      'limits the modifyNodes workaround to GPT-6.2 Astra (%s)',
+      async (model) => {
+        const modifyNodes = { name: modifyNodesName, parameters: modifyNodesParameters };
+        const otherTool = { ...modifyNodes, name: 'other_tool_with_one_of' };
+
+        await instance.chat({
+          enabledSearch: true,
+          messages: [{ content: 'Hello', role: 'user' }],
+          model,
+          tools: [
+            { function: modifyNodes, type: 'function' },
+            { function: otherTool, type: 'function' },
+          ],
+        });
+
+        const [request] = (instance['client'].responses.create as Mock).mock.calls[0];
+        expect(request.tools).toEqual([
+          { ...modifyNodes, ...(model === 'gpt-6.2-astra' && { strict: false }), type: 'function' },
+          { ...otherTool, type: 'function' },
+          { type: 'web_search' },
+        ]);
+      },
+    );
+
+    it('leaves an explicit strict value and a schema without oneOf untouched', async () => {
+      const tool = {
+        name: modifyNodesName,
+        parameters: modifyNodesParameters,
+        strict: true,
+        type: 'function',
+      } as const;
+      const simpleTool = {
+        ...tool,
+        parameters: { properties: {}, type: 'object' },
+        strict: null,
+      };
+
+      await instance.chat({
+        messages: [{ content: 'Hello', role: 'user' }],
+        model: 'gpt-6.2-astra',
+        responsesTools: [tool, simpleTool],
+      });
+
+      const [request] = (instance['client'].responses.create as Mock).mock.calls[0];
+      expect(request.tools).toEqual([tool, simpleTool]);
+    });
+
     it('should add web_search and prune legacy sampling params for GPT-5.6', async () => {
       const payload = {
         enabledSearch: true,
