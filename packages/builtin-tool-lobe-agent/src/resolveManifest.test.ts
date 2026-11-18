@@ -33,12 +33,13 @@ describe('resolveLobeAgentManifest', () => {
 
       const names = apiNames(result);
       expect(names).not.toContain(LobeAgentApiName.callSubAgent);
+      expect(names).not.toContain(LobeAgentApiName.cancelSubAgent);
       // the rest of lobe-agent stays available
       expect(names).toContain(LobeAgentApiName.createPlan);
       expect(names).toContain(LobeAgentApiName.createTodos);
       expect(names).toContain(LobeAgentApiName.analyzeMedia);
-      // exactly one API removed
-      expect(names).toHaveLength(LobeAgentManifest.api.length - 1);
+      // exactly the two sub-agent APIs removed
+      expect(names).toHaveLength(LobeAgentManifest.api.length - 2);
 
       // systemRole is rewritten so the prompt no longer mentions the hidden tool
       expect(result.systemRole).toBe(systemPromptWithoutSubAgent);
@@ -56,8 +57,10 @@ describe('resolveLobeAgentManifest', () => {
     const result = resolveLobeAgentManifest({ isSubAgent: true, scope: 'main' })!;
 
     expect(apiNames(result)).not.toContain(LobeAgentApiName.callSubAgent);
+    expect(apiNames(result)).not.toContain(LobeAgentApiName.cancelSubAgent);
     expect(apiNames(result)).toContain(LobeAgentApiName.createPlan);
     expect(result.systemRole).not.toContain('callSubAgent');
+    expect(result.systemRole).not.toContain('cancelSubAgent');
   });
 
   it('hides multimodal analysis when the active model can inspect all attached media natively', () => {
@@ -88,9 +91,10 @@ describe('resolveLobeAgentManifest', () => {
     const names = apiNames(result);
     expect(names).not.toContain(LobeAgentApiName.analyzeMedia);
     expect(names).not.toContain(LobeAgentApiName.callSubAgent);
+    expect(names).not.toContain(LobeAgentApiName.cancelSubAgent);
     expect(names).toContain(LobeAgentApiName.createPlan);
     expect(names).toContain(LobeAgentApiName.createTodos);
-    expect(names).toHaveLength(LobeAgentManifest.api.length - 2);
+    expect(names).toHaveLength(LobeAgentManifest.api.length - 3);
     expect(result.systemRole).toBe(systemPromptWithoutSubAgentAndMultimodalAnalysis);
     expect(result.systemRole).not.toContain('multimodal_analysis');
     expect(result.systemRole).not.toContain('sub_agents');

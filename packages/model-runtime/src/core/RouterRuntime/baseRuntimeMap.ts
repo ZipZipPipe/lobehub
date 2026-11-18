@@ -5,7 +5,10 @@ import { LobeBedrockAI } from '../../providers/bedrock';
 import { LobeBytePlusAI } from '../../providers/byteplus';
 import { LobeCloudflareAI } from '../../providers/cloudflare';
 import { LobeDeepSeekAI } from '../../providers/deepseek';
+import { LobeDoubaoSpeechAI } from '../../providers/doubaospeech';
+import { LobeElevenLabsAI } from '../../providers/elevenlabs';
 import { LobeFalAI } from '../../providers/fal';
+import { LobeFishAudioAI } from '../../providers/fishaudio';
 import { LobeGoogleAI } from '../../providers/google';
 import { LobeMetaAI } from '../../providers/meta';
 import { LobeMinimaxAI } from '../../providers/minimax';
@@ -28,7 +31,10 @@ export const baseRuntimeMap = {
   byteplus: LobeBytePlusAI,
   cloudflare: LobeCloudflareAI,
   deepseek: LobeDeepSeekAI,
+  doubaospeech: LobeDoubaoSpeechAI,
+  elevenlabs: LobeElevenLabsAI,
   fal: LobeFalAI,
+  fishaudio: LobeFishAudioAI,
   google: LobeGoogleAI,
   meta: LobeMetaAI,
   minimax: LobeMinimaxAI,

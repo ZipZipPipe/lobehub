@@ -9,6 +9,15 @@ import {
 import { LobeAgentApiName } from './types';
 
 /**
+ * Sub-agent dispatch and control: hidden together, never one without the other.
+ * The share-visitor gate strips the same set.
+ */
+export const LOBE_AGENT_SUB_AGENT_APIS: ReadonlySet<string> = new Set<string>([
+  LobeAgentApiName.callSubAgent,
+  LobeAgentApiName.cancelSubAgent,
+]);
+
+/**
  * Context-aware manifest for the lobe-agent tool.
  *
  * `lobe-agent` bundles plan / todo / media-analysis APIs together with the
@@ -35,7 +44,9 @@ export const resolveLobeAgentManifest: BuiltinManifestResolver = (context) => {
   if (!hideSubAgentDispatch && !hideMultimodalAnalysis) return LobeAgentManifest;
 
   const hiddenApiNames = new Set<LobeAgentApiName>();
-  if (hideSubAgentDispatch) hiddenApiNames.add(LobeAgentApiName.callSubAgent);
+  if (hideSubAgentDispatch) {
+    for (const api of LOBE_AGENT_SUB_AGENT_APIS) hiddenApiNames.add(api as LobeAgentApiName);
+  }
   if (hideMultimodalAnalysis) hiddenApiNames.add(LobeAgentApiName.analyzeMedia);
 
   const systemRole = hideSubAgentDispatch
