@@ -932,7 +932,6 @@ export default {
   'heteroAgent.executionTarget.sandboxUnsupported':
     '{{name}} currently runs only on a local or connected device',
   'heteroAgent.executionTarget.auto': 'Auto',
-  'heteroAgent.executionTarget.builtinGroup': 'Built-in',
   'heteroAgent.executionTarget.autoDesc':
     'Use an online device automatically, picking one when several are available',
   'heteroAgent.executionTarget.fixedTip':
@@ -983,9 +982,9 @@ export default {
     'Discarded after use, for coding and one-off data processing',
   'heteroAgent.executionTarget.workspaceGroup': 'Workspace Devices',
   'heteroAgent.executionTarget.deviceGroupSummary': '{{online}} online · {{total}} total',
-  'heteroAgent.executionTarget.devicesGroup': 'Devices',
   'heteroAgent.executionTarget.myDevicesGroup': 'My devices',
   'heteroAgent.executionTarget.sandboxGroup': 'Sandboxes',
+  'heteroAgent.executionTarget.sandboxGroupDesc': 'Run in an isolated environment',
   'heteroAgent.executionTarget.downloadDesktop': 'Get Desktop App',
   'heteroAgent.executionTarget.downloadDesktopDesc': 'Run agents with access to your computer',
   'heteroAgent.executionTarget.downloadDesktopTitle': 'Get the desktop app',
@@ -1813,9 +1812,8 @@ export default {
   'plus.search.off': 'Off',
   'plus.search.offDesc': '',
   'plus.addAttachments': 'Attachments',
-  'plus.addSkills': 'Add Skills...',
   'plus.title': 'Add',
-  'plus.tooltip': 'Add files, skills, and more context...',
+  'plus.contextTooltip': 'Add files, tools, and more context…',
   'chatMode.agentCap.env': 'Runtime env',
   'chatMode.agentCap.files': 'File access',
   'chatMode.agentCap.memory': 'Memory',
@@ -4187,10 +4185,6 @@ export default {
   'workingPanel.localFile.publish.version': 'Publish this version',
   'workingPanel.localFile.tooLarge': 'File too large to preview',
   'workingPanel.localFile.truncated': 'File preview truncated to {{limit}} characters',
-  'workingPanel.skills.actions.comingSoon': 'Coming soon',
-  'workingPanel.skills.actions.delete': 'Delete',
-  'workingPanel.skills.actions.rename': 'Rename',
-  'workingPanel.skills.actions.view': 'View',
   'workingPanel.skills.convert.action': 'Convert',
   'workingPanel.skills.convert.descriptionLabel': 'Description',
   'workingPanel.skills.convert.descriptionPlaceholder':
@@ -4209,26 +4203,26 @@ export default {
   'workingPanel.skills.convert.title': 'Convert document to skill',
   'workingPanel.skills.convert.titleLabel': 'Title',
   'workingPanel.skills.convert.titlePlaceholder': 'e.g. Weekly Report',
-  'workingPanel.skills.delete.agentConfirm':
-    'Remove the skill “{{name}}” from this agent? This cannot be undone.',
-  'workingPanel.skills.delete.error': 'Failed to delete skill',
-  'workingPanel.skills.delete.success': 'Skill deleted',
-  'workingPanel.skills.delete.title': 'Delete skill?',
-  'workingPanel.skills.delete.userConfirm':
-    'Uninstall the skill “{{name}}”? This cannot be undone.',
   'workingPanel.skills.detail.title': 'Skill details',
   'workingPanel.skills.empty': 'No skills available',
   'workingPanel.skills.manualOnly': 'Manual only',
   'workingPanel.skills.noSearchResults': 'No matching skills',
-  'workingPanel.skills.rename.action': 'Rename',
-  'workingPanel.skills.rename.error': 'Failed to rename skill',
-  'workingPanel.skills.rename.placeholder': 'Skill name',
-  'workingPanel.skills.rename.title': 'Rename skill',
   'workingPanel.skills.searchPlaceholder': 'Filter skills...',
   'workingPanel.skills.section.agent': 'Agent skills',
   'workingPanel.skills.section.device': 'Device skills',
   'workingPanel.skills.section.project': 'Project skills',
   'workingPanel.skills.section.user': 'User skills',
+  'workingPanel.skills.manage.noneEnabled':
+    'No skills selected. Use the settings icon to choose skills.',
+  'workingPanel.skills.manage.noPermission':
+    'You do not have permission to change skills for this agent.',
+  'workingPanel.skills.manage.save': 'Save',
+  'workingPanel.skills.manage.saveFailed':
+    'Could not save changes. Your selections are kept; try saving again.',
+  'workingPanel.skills.manage.selected': 'Selected skills: {{count}}',
+  'workingPanel.skills.manage.selectResults': 'Select all results ({{count}})',
+  'workingPanel.skills.manage.title': 'Choose the skills this agent can use',
+  'workingPanel.skills.manage.unsaved': 'Unsaved changes',
   'workingPanel.skills.title': 'Skills',
   'workingPanel.files.openNeedsTopic':
     'Send a message first — this environment’s files open once the conversation has a session.',
