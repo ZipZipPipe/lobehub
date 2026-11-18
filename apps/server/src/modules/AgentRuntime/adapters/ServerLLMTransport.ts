@@ -43,6 +43,7 @@ import { RequestTrigger, toAgentShareVisitorIds } from '@lobechat/types';
 import { type AiModelConfig, ModelProvider } from 'model-bank';
 
 import { AiModelModel } from '@/database/models/aiModel';
+import { fileEnv } from '@/envs/file';
 import {
   initModelRuntimeFromDB,
   resolveProviderResponseApiMode,
@@ -73,6 +74,72 @@ const getErrorMessage = (error: unknown): string => {
     if (typeof message === 'string' && message) return message;
   }
   return JSON.stringify(error);
+};
+
+// R2 custom domains serve a bucket without S3 signatures. Use that public route
+// for this bucket's image inputs at the model boundary, where providers fetch them.
+const resolvePublicR2ImageUrls = (
+  messages: ChatStreamPayload['messages'],
+  operationLogId: string,
+): ChatStreamPayload['messages'] => {
+  const { S3_BUCKET, S3_ENDPOINT, S3_PUBLIC_DOMAIN } = fileEnv;
+  if (!S3_BUCKET || !S3_ENDPOINT || !S3_PUBLIC_DOMAIN) return messages;
+
+  const endpoint = URL.parse(S3_ENDPOINT);
+  const publicDomain = URL.parse(S3_PUBLIC_DOMAIN);
+  if (
+    endpoint?.protocol !== 'https:' ||
+    !endpoint.hostname.endsWith('.r2.cloudflarestorage.com') ||
+    publicDomain?.protocol !== 'https:' ||
+    publicDomain.hostname.endsWith('.r2.cloudflarestorage.com') ||
+    publicDomain.username ||
+    publicDomain.password ||
+    publicDomain.search ||
+    publicDomain.hash
+  )
+    return messages;
+
+  const publicBase = publicDomain.href.replace(/\/+$/, '');
+  const bucketOrigin = `https://${S3_BUCKET}.${endpoint.host}`;
+  const bucketPath = `/${S3_BUCKET}/`;
+  let imageCount = 0;
+
+  const resolved = messages.map((message) => {
+    if (!Array.isArray(message.content)) return message;
+
+    const content = message.content.map((part) => {
+      if (part.type !== 'image_url' || !part.image_url.url.startsWith('https://')) return part;
+
+      const url = URL.parse(part.image_url.url);
+      if (
+        !url ||
+        url.searchParams.get('X-Amz-Algorithm') !== 'AWS4-HMAC-SHA256' ||
+        !url.searchParams.get('X-Amz-Signature')
+      )
+        return part;
+
+      let objectPath: string;
+      if (url.origin === bucketOrigin) objectPath = url.pathname;
+      else if (url.origin === endpoint.origin && url.pathname.startsWith(bucketPath))
+        objectPath = url.pathname.slice(bucketPath.length - 1);
+      else return part;
+
+      if (objectPath === '/') return part;
+      imageCount += 1;
+      return { ...part, image_url: { ...part.image_url, url: publicBase + objectPath } };
+    });
+
+    return { ...message, content };
+  });
+
+  if (imageCount === 0) return messages;
+
+  console.info('[ServerLLMTransport] Using public R2 URLs for model images', {
+    host: publicDomain.host,
+    imageCount,
+    operation: operationLogId,
+  });
+  return resolved;
 };
 
 const SERVER_LLM_RETRY_POLICY = {
@@ -696,6 +763,7 @@ export class ServerLLMTransport implements LLMTransport {
         ? frozenCard.deploymentName
         : await this.resolveAttemptDeploymentName(input.provider, input.model);
     const apiMode = await this.getResponseApiMode(input.provider);
+    const operationLogId = `${this.ctx.operationId}:${this.ctx.stepIndex}`;
     const chatPayload = {
       messages: input.context.messages as ChatStreamPayload['messages'],
       model: input.model,
@@ -708,7 +776,7 @@ export class ServerLLMTransport implements LLMTransport {
       }),
       ...(deploymentName && { deploymentName }),
     };
-    const operationLogId = `${this.ctx.operationId}:${this.ctx.stepIndex}`;
+    chatPayload.messages = resolvePublicR2ImageUrls(chatPayload.messages, operationLogId);
     const attempt = createServerCallLlmAttempt({
       attempt: input.attempt,
       blobStore: this.blobStore,

@@ -18,6 +18,21 @@ import { ServerLLMTransport } from './ServerLLMTransport';
 // controllable row lookup; per-test resets keep implementations from leaking
 // across tests the way `mockImplementation` on the constructor would.
 const findByIdAndProviderMock = vi.hoisted(() => vi.fn());
+const fileEnv = vi.hoisted(() => ({
+  S3_BUCKET: 'lobechat',
+  S3_ENDPOINT: 'https://account.r2.cloudflarestorage.com',
+  S3_PUBLIC_DOMAIN: '',
+}));
+
+vi.mock(import('@/envs/file'), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    get fileEnv() {
+      return { ...actual.fileEnv, ...fileEnv };
+    },
+  };
+});
 
 vi.mock('@/server/modules/ModelRuntime', () => ({
   initModelRuntimeFromDB: vi.fn(),
@@ -387,6 +402,58 @@ describe('ServerLLMTransport.runAttempt · deployment name without frozen model 
       provider: 'volcengine',
       state,
     }) as unknown as LLMAttemptInput;
+
+  it.each([
+    ['https://lobechat.account.r2.cloudflarestorage.com/files/image%20one.png', true],
+    ['https://account.r2.cloudflarestorage.com/lobechat/files/image%20one.png', true],
+    ['https://account.r2.cloudflarestorage.com/another-bucket/files/image%20one.png', false],
+    ['https://lobechat.another-account.r2.cloudflarestorage.com/files/image%20one.png', false],
+  ])(
+    'handles a historical image at %s before opening the model stream',
+    async (source, isLocal) => {
+      const chat = vi.fn().mockImplementation(async () => new Response(''));
+      vi.mocked(initModelRuntimeFromDB).mockImplementation(async () => new ModelRuntime({ chat }));
+      const url = source + '?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=test';
+      const image = { image_url: { detail: 'high', url }, type: 'image_url' } as const;
+      const otherParts = [
+        { type: 'text', text: 'Look at these images' },
+        { type: 'video_url', video_url: { url } },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+        { type: 'image_url', image_url: { url: source } },
+      ] as const;
+      const input = createAttemptInput({});
+      input.provider = 'deepseek';
+      input.context.messages = [
+        { content: [image, ...otherParts], role: 'user' },
+        { content: 'Which color is it?', role: 'user' },
+      ];
+
+      fileEnv.S3_PUBLIC_DOMAIN = 'https://r2.example.com/';
+      try {
+        await new ServerLLMTransport(createAttemptCtx()).runAttempt(input);
+      } finally {
+        fileEnv.S3_PUBLIC_DOMAIN = '';
+      }
+
+      expect(chat.mock.calls[0][0].messages).toEqual([
+        {
+          content: [
+            {
+              ...image,
+              image_url: {
+                ...image.image_url,
+                url: isLocal ? 'https://r2.example.com/files/image%20one.png' : url,
+              },
+            },
+            ...otherParts,
+          ],
+          role: 'user',
+        },
+        { content: 'Which color is it?', role: 'user' },
+      ]);
+      expect(input.context.messages[0].content).toEqual([image, ...otherParts]);
+    },
+  );
 
   it('resolves the deployment catalog live when the operation has no modelFacts', async () => {
     const chat = vi.fn().mockImplementation(async () => new Response(''));
