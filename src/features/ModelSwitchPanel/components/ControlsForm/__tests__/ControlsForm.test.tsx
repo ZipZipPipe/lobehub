@@ -66,6 +66,7 @@ vi.mock('@/store/agent/selectors', () => ({
 vi.mock('@/store/aiInfra', () => ({
   aiModelSelectors: {
     modelExtendParams: () => (state: TestAiState) => state.extendParams,
+    modelReasoningEffortOptions: () => () => undefined,
   },
   useAiInfraStore: <T,>(selector: (state: TestAiState) => T) => selector(testState.aiState),
 }));
