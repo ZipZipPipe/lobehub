@@ -1,6 +1,5 @@
 import type { LobeAgentChatConfig } from '@lobechat/types';
-import { Flexbox, Switch } from '@lobehub/ui';
-import { Select } from '@lobehub/ui/base-ui';
+import { Flexbox, Select, Switch } from '@lobehub/ui';
 import { Form, type FormFieldProps, useForm, useWatch } from '@lobehub/ui/form';
 import isEqual from 'fast-deep-equal';
 import { MODEL_REASONING_EXTEND_PARAMS } from 'model-bank/aiModel';
