@@ -1,4 +1,4 @@
-import type { AiModelReasoningConfig, ModelAbilities } from 'model-bank';
+import type { AiModelReasoningConfig, ModelAbilities, ReasoningEffortOptions } from 'model-bank';
 
 /** The subset of a model card the model-parameter rules read (bundled bank or user-enabled list). */
 export interface ModelCardFacts {
@@ -10,6 +10,7 @@ export interface ModelCardFacts {
   id: string;
   knowledgeCutoff?: string | null;
   providerId: string;
+  reasoningEffortOptions?: ReasoningEffortOptions;
 }
 
 /** The user's own row for the model, when they edited or created one. */
@@ -27,6 +28,7 @@ export interface UserModelRowFacts {
   displayName?: string | null;
   /** `[]` is an explicit opt-out from the card's params; absent falls back to the cards. */
   extendParams?: string[] | null;
+  reasoningEffortOptions?: ReasoningEffortOptions;
 }
 
 /** What a model can take natively, as the run decided it. */

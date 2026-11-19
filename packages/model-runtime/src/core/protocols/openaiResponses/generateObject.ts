@@ -62,7 +62,7 @@ export const generateObjectViaResponses = async (
   // whole request. String content survives untouched, which is why text-only callers
   // never hit this.
   const input = await convertOpenAIResponseInputs(messages as any, {
-    forceImageBase64: factory.chatCompletion?.forceImageBase64,
+    forceImageBase64: runtime._options.forceImageBase64 ?? factory.chatCompletion?.forceImageBase64,
     forceVideoBase64: factory.chatCompletion?.forceVideoBase64,
     provider: runtime.id,
     strictToolPairing: true,
@@ -116,7 +116,7 @@ export const generateToolCallsViaResponses = async (
     'responses',
   );
   const input = await convertOpenAIResponseInputs(messages as any, {
-    forceImageBase64: factory.chatCompletion?.forceImageBase64,
+    forceImageBase64: runtime._options.forceImageBase64 ?? factory.chatCompletion?.forceImageBase64,
     forceVideoBase64: factory.chatCompletion?.forceVideoBase64,
     provider: runtime.id,
     reasoningSignatureScope,

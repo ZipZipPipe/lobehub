@@ -29,8 +29,7 @@ import type { DecideConfig } from './decide';
 // passes a plain string, so narrow it back to keep `.trim()` / string assignments valid.
 export type LobeClientOptions = Omit<ClientOptions, 'apiKey'> & { apiKey?: string };
 export type ConstructorOptions<T extends Record<string, any> = any> = LobeClientOptions &
-  ModelIdMappingOptions &
-  T;
+  ModelIdMappingOptions & { forceImageBase64?: boolean } & T;
 export type OpenAIExtraParams = { prompt_cache_key?: string; safety_identifier?: string };
 export type ChatCompletionCreateParamsWithPromptCacheKey = Omit<
   OpenAI.ChatCompletionCreateParamsNonStreaming,

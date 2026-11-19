@@ -1,5 +1,6 @@
 import type { LobeAgentChatConfig } from '@lobechat/types';
 import { Flexbox, Switch } from '@lobehub/ui';
+import { Select } from '@lobehub/ui/base-ui';
 import { Form, type FormFieldProps, useForm, useWatch } from '@lobehub/ui/form';
 import isEqual from 'fast-deep-equal';
 import { MODEL_REASONING_EXTEND_PARAMS } from 'model-bank/aiModel';
@@ -134,6 +135,9 @@ const ControlsForm = memo<ControlsFormProps>(
     const config = chatConfigProp ?? storeConfig;
 
     const modelExtendParams = useAiInfraStore(aiModelSelectors.modelExtendParams(model, provider));
+    const effortOptions = useAiInfraStore(
+      aiModelSelectors.modelReasoningEffortOptions(model, provider),
+    );
     const initialValues = useMemo(() => {
       const enableReasoningInitialValue = resolveEnableReasoningInitialValue(config);
       const enableAdaptiveThinkingInitialValue = resolveEnableAdaptiveThinkingInitialValue(
@@ -297,7 +301,18 @@ const ControlsForm = memo<ControlsFormProps>(
         },
       },
       {
-        children: <ReasoningEffortSlider />,
+        children: effortOptions ? (
+          <Select
+            defaultValue={effortOptions.default}
+            disabled={disabled}
+            options={effortOptions.levels.map((value) => ({
+              label: t(`reasoningEffort.levels.${value}`),
+              value,
+            }))}
+          />
+        ) : (
+          <ReasoningEffortSlider />
+        ),
         label: t('extendParams.reasoningEffort.title'),
         layout: 'vertical',
         minWidth: undefined,

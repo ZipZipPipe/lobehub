@@ -2,7 +2,7 @@
 
 import { resolveDefaultThinkingLevelForModel } from '@lobechat/model-runtime/utils/modelExtendParams';
 import isEqual from 'fast-deep-equal';
-import type { AiModelReasoningConfig } from 'model-bank';
+import type { AiModelReasoningConfig, ReasoningEffortOptions } from 'model-bank';
 import { MODEL_REASONING_PARAM_DEFAULTS, MODEL_REASONING_PARAM_LEVELS } from 'model-bank/aiModel';
 import { useCallback } from 'react';
 
@@ -37,10 +37,16 @@ export const resolveReasoningEffortValue = (
   model: string,
   effortKey: EffortKey | undefined,
   config: AiModelReasoningConfig | undefined,
+  options?: ReasoningEffortOptions,
 ): EffortLevel | undefined => {
   if (!effortKey) return undefined;
 
   const saved = config?.[effortKey];
+  if (effortKey === 'reasoningEffort' && options) {
+    return config?.reasoningEffort && options.levels.includes(config.reasoningEffort)
+      ? config.reasoningEffort
+      : options.default;
+  }
   if (saved) return saved;
 
   if (effortKey === 'gpt5_2ReasoningEffort' && model === 'gpt-5.5') return 'medium';
@@ -86,6 +92,9 @@ export const useReasoningEffortControl = (
   const reasoningParams = useAiInfraStore(
     aiModelSelectors.modelReasoningExtendParams(model, provider),
     isEqual,
+  );
+  const effortOptions = useAiInfraStore(
+    aiModelSelectors.modelReasoningEffortOptions(model, provider),
   );
   const userConfig = useAiInfraStore(
     aiModelSelectors.modelReasoningConfig(model, provider),
@@ -140,8 +149,11 @@ export const useReasoningEffortControl = (
 
   return {
     effortKey,
-    effortLevels: effortKey ? MODEL_REASONING_PARAM_LEVELS[effortKey] : [],
-    effortValue: resolveReasoningEffortValue(model, effortKey, config),
+    effortLevels: effortKey
+      ? (effortKey === 'reasoningEffort' && effortOptions?.levels) ||
+        MODEL_REASONING_PARAM_LEVELS[effortKey]
+      : [],
+    effortValue: resolveReasoningEffortValue(model, effortKey, config, effortOptions),
     hasReasoningMode,
     hasReasoningParams,
     modeLevels: MODEL_REASONING_PARAM_LEVELS.reasoningMode,

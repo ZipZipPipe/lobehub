@@ -79,7 +79,11 @@ export const createBrowserModelParamsProviders = ({
     const own = aiModelSelectors.getEnabledModelById(m, p)(state);
     const extendParams = aiModelSelectors.modelExtendParams(m, p)(state);
     if (!own && extendParams === undefined) return null;
-    return { displayName: own?.displayName, extendParams };
+    return {
+      displayName: own?.displayName,
+      extendParams,
+      reasoningEffortOptions: own?.settings?.reasoningEffortOptions,
+    };
   },
   listModelCards: () => {
     const state = getAiInfraStoreState();

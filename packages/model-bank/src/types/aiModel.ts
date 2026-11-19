@@ -352,6 +352,29 @@ export interface AIBaseModelCard {
 
 export const isAiModelVisible = (model: { visible?: boolean }) => model.visible !== false;
 
+export const ReasoningEffortSchema = z.enum([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
+const ReasoningEffortOptionsSchema = z
+  .object({
+    default: ReasoningEffortSchema.optional(),
+    levels: z.array(ReasoningEffortSchema),
+  })
+  .refine(({ default: value, levels }) => value === undefined || levels.includes(value), {
+    message: 'Default reasoning effort must be an available level',
+    path: ['default'],
+  });
+
+export type ReasoningEffortOptions = z.infer<typeof ReasoningEffortOptionsSchema>;
+
 /**
  * User-level default reasoning params for a model instance (userId + providerId + modelId),
  * stored under `ai_models.config.chatConfig` on the personal-scope row (workspaceId IS NULL).
@@ -382,7 +405,7 @@ export interface AiModelReasoningConfig {
   hy3ReasoningEffort?: 'no_think' | 'low' | 'high';
   kimiK3ReasoningEffort?: 'low' | 'high' | 'max';
   opus47Effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningEffort?: ReasoningEffort;
   reasoningMode?: 'standard' | 'pro';
   ring2_6ReasoningEffort?: 'high' | 'xhigh';
   step3_5ReasoningEffort?: 'low' | 'high';
@@ -414,7 +437,7 @@ export const AiModelReasoningConfigSchema = z.object({
   hy3ReasoningEffort: z.enum(['no_think', 'low', 'high']).optional(),
   kimiK3ReasoningEffort: z.enum(['low', 'high', 'max']).optional(),
   opus47Effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
-  reasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+  reasoningEffort: ReasoningEffortSchema.optional(),
   reasoningMode: z.enum(['standard', 'pro']).optional(),
   ring2_6ReasoningEffort: z.enum(['high', 'xhigh']).optional(),
   step3_5ReasoningEffort: z.enum(['low', 'high']).optional(),
@@ -589,6 +612,9 @@ export interface AiModelSettings {
    */
   disabledParams?: DisabledParamType[];
   extendParams?: ExtendParamsType[];
+  maxOutputTokens?: number;
+  /** Available values and provider default for the generic `reasoningEffort` control. */
+  reasoningEffortOptions?: ReasoningEffortOptions;
   /**
    * How the model layer implements search
    */
@@ -661,6 +687,8 @@ export const DisabledParamTypeSchema = z.enum([
 export const AiModelSettingsSchema = z.object({
   disabledParams: z.array(DisabledParamTypeSchema).optional(),
   extendParams: z.array(ExtendParamsTypeSchema).optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+  reasoningEffortOptions: ReasoningEffortOptionsSchema.optional(),
   searchImpl: ModelSearchImplementTypeSchema.optional(),
   searchProvider: z.string().optional(),
   ttsVoice: z.string().optional(),

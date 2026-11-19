@@ -80,6 +80,7 @@ export const resolveModelExtendParamsForUser = async ({
               deploymentName: (row.config as AiModelConfig | null)?.deploymentName ?? null,
               displayName: row.displayName,
               extendParams: row.settings?.extendParams ?? undefined,
+              reasoningEffortOptions: row.settings?.reasoningEffortOptions,
             };
           },
         }

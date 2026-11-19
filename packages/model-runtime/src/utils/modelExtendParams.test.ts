@@ -1,4 +1,5 @@
 import type { LobeAgentChatConfig } from '@lobechat/types';
+import type { ExtendParamsType, ReasoningEffortOptions } from 'model-bank';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,6 +13,23 @@ const chatConfig = (config: Partial<LobeAgentChatConfig> = {}): LobeAgentChatCon
   ({ ...config }) as LobeAgentChatConfig;
 
 describe('applyModelExtendParams', () => {
+  it('only forwards generic effort choices advertised by the current model', () => {
+    const options = {
+      extendParams: ['reasoningEffort'] as ExtendParamsType[],
+      model: 'devin/swe-2-flash',
+      reasoningEffortOptions: {
+        levels: ['medium', 'high', 'max'],
+      } satisfies ReasoningEffortOptions,
+    };
+
+    expect(
+      applyModelExtendParams({ ...options, chatConfig: chatConfig({ reasoningEffort: 'max' }) }),
+    ).toMatchObject({ reasoning_effort: 'max' });
+    expect(
+      applyModelExtendParams({ ...options, chatConfig: chatConfig({ reasoningEffort: 'low' }) }),
+    ).not.toHaveProperty('reasoning_effort');
+  });
+
   it('returns empty when the model has no extend params', () => {
     expect(
       applyModelExtendParams({

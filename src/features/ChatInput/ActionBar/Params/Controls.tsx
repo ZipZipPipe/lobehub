@@ -429,6 +429,9 @@ const Controls = ({ variant = 'popover' }: ControlsProps) => {
     isEqual,
   );
   const { disabledParams, model, provider } = useParamsModelConfig(agentId);
+  const modelSettings = useAiInfraStore(
+    (s) => aiModelSelectors.getEnabledModelById(model, provider)(s)?.settings,
+  );
   const modelExtendParamsList = useAiInfraStore(
     aiModelSelectors.modelExtendParams(model, provider),
     isEqual,
@@ -1013,12 +1016,12 @@ const Controls = ({ variant = 'popover' }: ControlsProps) => {
                   >
                     {enableMaxTokens && (
                       <SliderField
-                        unlimitedInput
                         disabled={!canCreate}
                         inputWidth={64}
-                        max={32_000}
+                        max={modelSettings?.maxOutputTokens ?? 32_000}
                         min={0}
                         step={100}
+                        unlimitedInput={!modelSettings?.maxOutputTokens}
                         value={typeof maxTokensValue === 'number' ? maxTokensValue : 4096}
                         onChange={(value) => {
                           handleFieldChange('params.max_tokens', value);
@@ -1026,7 +1029,7 @@ const Controls = ({ variant = 'popover' }: ControlsProps) => {
                       />
                     )}
                   </ControlRow>
-                  {!hasReasoningExtendParams && (
+                  {!hasReasoningExtendParams && !modelSettings?.reasoningEffortOptions && (
                     <ControlRow
                       separated
                       tag="reasoning_effort"

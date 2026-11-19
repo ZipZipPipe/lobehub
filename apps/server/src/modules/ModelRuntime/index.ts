@@ -610,7 +610,12 @@ export const initModelRuntimeFromDB = async (
   const hooks = mergeModelRuntimeHooks(businessHooks, tracingHooks);
 
   // 6. Initialize ModelRuntime with the payload and hooks
-  return initModelRuntimeWithUserPayload(provider, payload, { userId, workspaceId }, hooks);
+  return initModelRuntimeWithUserPayload(
+    provider,
+    payload,
+    { forceImageBase64: providerConfig?.settings?.forceImageBase64, userId, workspaceId },
+    hooks,
+  );
 };
 
 /**

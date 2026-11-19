@@ -24,6 +24,7 @@ const toModelCard = (item: LobeDefaultAiModelListItem): ModelCardFacts => ({
   id: item.id,
   knowledgeCutoff: item.knowledgeCutoff,
   providerId: item.providerId,
+  reasoningEffortOptions: item.settings?.reasoningEffortOptions,
 });
 
 /**
@@ -75,6 +76,7 @@ export const createServerModelParamsProviders = ({
         deploymentName: (row.config as AiModelConfig | null)?.deploymentName ?? null,
         displayName: row.displayName,
         extendParams: row.settings?.extendParams ?? undefined,
+        reasoningEffortOptions: row.settings?.reasoningEffortOptions,
       };
     },
   };

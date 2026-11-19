@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react';
-import type { AiModelReasoningConfig } from 'model-bank';
+import type { AiModelReasoningConfig, ReasoningEffortOptions } from 'model-bank';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useReasoningEffortControl } from './useReasoningEffortControl';
@@ -7,6 +7,7 @@ import { useReasoningEffortControl } from './useReasoningEffortControl';
 const testState = vi.hoisted(() => ({
   ai: {
     config: undefined as AiModelReasoningConfig | undefined,
+    effortOptions: undefined as ReasoningEffortOptions | undefined,
     reasoningParams: [] as string[],
     updateModelReasoningConfig: vi.fn(() => Promise.resolve()),
     updating: false,
@@ -38,12 +39,14 @@ vi.mock('@/store/aiInfra', () => ({
     isModelReasoningConfigUpdating: () => (state: typeof testState.ai) => state.updating,
     modelReasoningConfig: () => (state: typeof testState.ai) => state.config,
     modelReasoningExtendParams: () => (state: typeof testState.ai) => state.reasoningParams,
+    modelReasoningEffortOptions: () => (state: typeof testState.ai) => state.effortOptions,
   },
   useAiInfraStore: <T>(selector: (state: typeof testState.ai) => T) => selector(testState.ai),
 }));
 
 beforeEach(() => {
   testState.ai.config = undefined;
+  testState.ai.effortOptions = undefined;
   testState.ai.reasoningParams = [];
   testState.ai.updating = false;
   testState.ai.updateModelReasoningConfig.mockClear();
@@ -53,6 +56,23 @@ beforeEach(() => {
 });
 
 describe('useReasoningEffortControl', () => {
+  it('uses the model options and falls back from a stale unsupported choice', () => {
+    testState.ai.reasoningParams = ['reasoningEffort'];
+    testState.ai.effortOptions = { default: 'high', levels: ['medium', 'high', 'max'] };
+    testState.ai.config = { reasoningEffort: 'low' };
+
+    const { result, rerender } = renderHook(() =>
+      useReasoningEffortControl('devin/swe-2-flash', 'devin'),
+    );
+
+    expect(result.current.effortLevels).toEqual(['medium', 'high', 'max']);
+    expect(result.current.effortValue).toBe('high');
+
+    testState.ai.config = { reasoningEffort: 'max' };
+    rerender();
+    expect(result.current.effortValue).toBe('max');
+  });
+
   it('reports no reasoning params when the model declares none', () => {
     const { result } = renderHook(() => useReasoningEffortControl('gpt-4o', 'openai'));
 

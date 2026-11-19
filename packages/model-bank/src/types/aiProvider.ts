@@ -168,6 +168,8 @@ export interface AiProviderSettings {
    * @default false
    */
   disableBrowserRequest?: boolean;
+  /** Embed image data when an OpenAI-compatible endpoint cannot fetch image URLs. */
+  forceImageBase64?: boolean;
   /**
    * Maximum number of tools the provider accepts in a single request.
    * When set, the harness will abort the request before dispatch if the
@@ -244,6 +246,7 @@ export const AiProviderSettingsSchema = z.object({
   checkMode: z.enum(['chat', 'credentials']).optional(),
   defaultShowBrowserRequest: z.boolean().optional(),
   disableBrowserRequest: z.boolean().optional(),
+  forceImageBase64: z.boolean().optional(),
   maxToolCount: z.number().optional(),
   maxToolPayloadBytes: z.number().optional(),
   modelEditable: z.boolean().optional(),

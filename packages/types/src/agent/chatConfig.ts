@@ -1,3 +1,4 @@
+import { type ReasoningEffort, ReasoningEffortSchema } from 'model-bank/aiModel';
 import { z } from 'zod';
 
 import type { SearchMode } from '../search';
@@ -154,7 +155,7 @@ export interface LobeAgentChatConfig extends AgentMemoryChatConfig, AgentSelfIte
    * Reasoning budget token for models with 80k max (Qwen3 series)
    */
   reasoningBudgetToken80k?: number;
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningEffort?: ReasoningEffort;
   /**
    * Selects the Responses API reasoning execution mode.
    */
@@ -289,7 +290,7 @@ export const AgentChatConfigSchema = z
     reasoningBudgetToken: z.number().optional(),
     reasoningBudgetToken32k: z.number().optional(),
     reasoningBudgetToken80k: z.number().optional(),
-    reasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+    reasoningEffort: ReasoningEffortSchema.optional(),
     reasoningMode: z.enum(['standard', 'pro']).optional(),
     searchFCModel: z
       .object({

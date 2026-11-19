@@ -45,6 +45,26 @@ describe('generateObject message conversion', () => {
       .spyOn(imageToBase64, 'imageUrlToBase64')
       .mockResolvedValue({ base64: 'forced', mimeType: 'image/jpeg' });
 
+  it('inlines images for the configured runtime without changing another instance', async () => {
+    mockImage();
+    const CustomRuntime = createOpenAICompatibleRuntime({
+      baseURL: 'https://api.test.com/v1',
+      provider: 'openai',
+    });
+    for (const [forceImageBase64, expected] of [
+      [true, inlinedImageUrl],
+      [undefined, remoteImageUrl],
+    ] as const) {
+      const runtime = new CustomRuntime({ apiKey: 'test', forceImageBase64 });
+      const create = vi.spyOn(runtime.client.chat.completions, 'create').mockResolvedValue({
+        choices: [{ message: { content: '{"title":"ok"}' } }],
+      } as any);
+
+      await runtime.generateObject(payload);
+      expect(sentImageUrl(create as any)).toBe(expected);
+    }
+  });
+
   it('applies forceImageBase64 on the json_schema path', async () => {
     mockImage();
     const runtime = new Runtime({ apiKey: 'test' });

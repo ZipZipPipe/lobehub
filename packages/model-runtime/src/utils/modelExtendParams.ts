@@ -1,6 +1,11 @@
 import type { LobeAgentChatConfig } from '@lobechat/types';
-import type { AiModelReasoningConfig, ExtendParamsType } from 'model-bank/aiModel';
-import { MODEL_REASONING_EXTEND_PARAMS } from 'model-bank/aiModel';
+import {
+  type AiModelReasoningConfig,
+  type ExtendParamsType,
+  MODEL_REASONING_EXTEND_PARAMS,
+  MODEL_REASONING_PARAM_LEVELS,
+  type ReasoningEffortOptions,
+} from 'model-bank/aiModel';
 
 import { isAdaptiveThinkingDefaultOnModel } from '../providers/anthropic/modelId';
 
@@ -189,6 +194,7 @@ export interface ApplyModelExtendParamsContext {
    */
   extendParams: ExtendParamsType[] | undefined;
   model: string;
+  reasoningEffortOptions?: ReasoningEffortOptions;
 }
 
 /**
@@ -288,8 +294,15 @@ export const applyModelExtendParams = (ctx: ApplyModelExtendParamsContext): Mode
   }
 
   // Reasoning effort variants
-  if (modelExtendParams.includes('reasoningEffort') && chatConfig.reasoningEffort) {
-    extendParams.reasoning_effort = chatConfig.reasoningEffort;
+  const reasoningEffort = chatConfig.reasoningEffort;
+  const effortLevels =
+    ctx.reasoningEffortOptions?.levels ?? MODEL_REASONING_PARAM_LEVELS.reasoningEffort;
+  if (
+    modelExtendParams.includes('reasoningEffort') &&
+    reasoningEffort &&
+    effortLevels.includes(reasoningEffort)
+  ) {
+    extendParams.reasoning_effort = reasoningEffort;
   }
 
   if (modelExtendParams.includes('gpt5ReasoningEffort') && chatConfig.gpt5ReasoningEffort) {

@@ -128,6 +128,9 @@ const modelExtendParams = (id: string, provider: string) => (s: AIProviderStoreS
   return model?.settings?.extendParams;
 };
 
+const modelReasoningEffortOptions = (id: string, provider: string) => (s: AIProviderStoreState) =>
+  getEnabledModelById(id, provider)(s)?.settings?.reasoningEffortOptions;
+
 const REASONING_EXTEND_PARAMS_SET = new Set<ExtendParamsType>(MODEL_REASONING_EXTEND_PARAMS);
 
 /**
@@ -255,5 +258,6 @@ export const aiModelSelectors = {
   modelExtendParams,
   modelReasoningConfig,
   modelReasoningExtendParams,
+  modelReasoningEffortOptions,
   totalAiProviderModelList,
 };

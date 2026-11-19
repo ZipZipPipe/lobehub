@@ -124,7 +124,12 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
         apiKey: inputOptions.apiKey?.trim() || DEFAULT_API_KEY,
         baseURL: inputOptions.baseURL?.trim() || DEFAULT_BASE_URL,
       };
-      const { apiKey, baseURL = DEFAULT_BASE_URL, ...res } = _options;
+      const {
+        apiKey,
+        baseURL = DEFAULT_BASE_URL,
+        forceImageBase64: _forceImageBase64,
+        ...res
+      } = _options;
       this._options = _options as ConstructorOptions<T>;
       this.modelIdMappingOptions = { modelIdMapping };
 

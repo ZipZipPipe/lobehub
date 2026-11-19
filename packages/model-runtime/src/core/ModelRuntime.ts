@@ -865,6 +865,7 @@ export class ModelRuntime {
         LobeCloudflareParams & {
           apiKey?: string;
           baseURL?: string;
+          forceImageBase64?: boolean;
           userId?: string;
           workspaceId?: string;
         }

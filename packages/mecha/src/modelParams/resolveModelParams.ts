@@ -309,6 +309,10 @@ export const resolveModelParams = async (
         chatConfig: effectiveChatConfig,
         extendParams: modelExtendParams as ExtendParamsType[] | undefined,
         model,
+        reasoningEffortOptions:
+          userModelRow?.reasoningEffortOptions ??
+          modelCard?.reasoningEffortOptions ??
+          canonicalModelCard?.reasoningEffortOptions,
       })
     : undefined;
   const { searchDecision } = request;

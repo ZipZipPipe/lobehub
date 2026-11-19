@@ -1,3 +1,5 @@
+import { getAiInfraStoreState } from '@/store/aiInfra';
+
 import { createPayloadWithKeyVaults } from '../../_auth';
 
 export interface InitializeWithClientStoreOptions {
@@ -39,6 +41,7 @@ export const initializeWithClientStore = async ({
    */
   return ModelRuntime.initializeWithProvider(runtimeProvider ?? provider, {
     ...commonOptions,
+    forceImageBase64: getAiInfraStoreState().runtimeConfig[provider]?.settings?.forceImageBase64,
     ...providerAuthPayload,
     ...payload,
     providerId: provider,

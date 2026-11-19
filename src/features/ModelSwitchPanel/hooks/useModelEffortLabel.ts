@@ -25,6 +25,9 @@ export const useModelEffortLabel = (model: string, provider: string): string | u
     aiModelSelectors.modelReasoningExtendParams(model, provider),
     isEqual,
   );
+  const effortOptions = useAiInfraStore(
+    aiModelSelectors.modelReasoningEffortOptions(model, provider),
+  );
   // modelReasoningExtendParams only returns reasoning-family params, so every
   // entry other than reasoningMode is an effort key
   const effortKey = reasoningParams.find((param) => param !== 'reasoningMode') as
@@ -40,7 +43,7 @@ export const useModelEffortLabel = (model: string, provider: string): string | u
 
   if (!effortKey || !loaded) return undefined;
 
-  const value = resolveReasoningEffortValue(model, effortKey, config);
+  const value = resolveReasoningEffortValue(model, effortKey, config, effortOptions);
 
   return value ? t(`reasoningEffort.levels.${value}`) : undefined;
 };
