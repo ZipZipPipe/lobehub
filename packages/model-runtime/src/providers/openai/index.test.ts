@@ -476,9 +476,13 @@ describe('LobeOpenAI', () => {
       type: 'object',
     };
 
-    it.each(['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-astra'])(
-      'limits the modifyNodes workaround to GPT-6.2 Astra (%s)',
-      async (model) => {
+    it.each([
+      { expectedFields: { strict: false }, model: 'gpt-6.2-astra' },
+      { expectedFields: { strict: false }, model: 'gpt-6.2-sol' },
+      { expectedFields: {}, model: 'gpt-6-astra' },
+    ])(
+      'applies the expected modifyNodes workaround for $model',
+      async ({ expectedFields, model }) => {
         const modifyNodes = { name: modifyNodesName, parameters: modifyNodesParameters };
         const otherTool = { ...modifyNodes, name: 'other_tool_with_one_of' };
 
@@ -494,7 +498,7 @@ describe('LobeOpenAI', () => {
 
         const [request] = (instance['client'].responses.create as Mock).mock.calls[0];
         expect(request.tools).toEqual([
-          { ...modifyNodes, ...(model === 'gpt-6.2-astra' && { strict: false }), type: 'function' },
+          { ...modifyNodes, ...expectedFields, type: 'function' },
           { ...otherTool, type: 'function' },
           { type: 'web_search' },
         ]);
