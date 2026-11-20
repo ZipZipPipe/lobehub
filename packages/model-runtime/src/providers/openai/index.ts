@@ -140,7 +140,12 @@ export const params = {
       } as any;
     },
     prepareRequest: (payload) => {
-      if (payload.model !== 'gpt-6.2-astra' || !payload.tools) return { payload };
+      if (
+        !payload.tools ||
+        (payload.model !== 'gpt-6.2-astra' && payload.model !== 'gpt-6.2-sol')
+      ) {
+        return { payload };
+      }
 
       const tools = payload.tools.map((tool) => {
         if (
@@ -153,7 +158,7 @@ export const params = {
 
         const properties = tool.parameters?.properties as
           { operations?: { items?: { oneOf?: unknown } } } | undefined;
-        // This schema fails Astra's implicit strict compilation of the operations union.
+        // GPT-6.2's implicit strict compilation rejects the operations union.
         return Array.isArray(properties?.operations?.items?.oneOf)
           ? { ...tool, strict: false }
           : tool;
