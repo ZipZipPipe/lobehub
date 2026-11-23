@@ -148,18 +148,43 @@ export const params = {
       }
 
       const tools = payload.tools.map((tool) => {
-        if (
-          tool.type !== 'function' ||
-          tool.name !== 'lobe-agent-documents____modifyNodes' ||
-          typeof tool.strict === 'boolean'
-        ) {
-          return tool;
-        }
+        if (tool.type !== 'function') return tool;
 
         const properties = tool.parameters?.properties as
-          { operations?: { items?: { oneOf?: unknown } } } | undefined;
+          | {
+              fieldNames?: { description?: string; uniqueItems?: boolean };
+              operations?: { items?: { oneOf?: unknown } };
+            }
+          | undefined;
+
+        const fieldNames = properties?.fieldNames;
+        if (
+          tool.name === 'lobe-creds____requestCredsInput' &&
+          tool.strict !== false &&
+          fieldNames?.uniqueItems === true
+        ) {
+          // Keep strict compilation available for the rest of the credential schema.
+          const compatibleFieldNames = {
+            ...fieldNames,
+            description: [fieldNames.description, 'Each field name must be unique.']
+              .filter(Boolean)
+              .join(' '),
+          };
+          delete compatibleFieldNames.uniqueItems;
+
+          return {
+            ...tool,
+            parameters: {
+              ...tool.parameters,
+              properties: { ...properties, fieldNames: compatibleFieldNames },
+            },
+          };
+        }
+
         // GPT-6.2's implicit strict compilation rejects the operations union.
-        return Array.isArray(properties?.operations?.items?.oneOf)
+        return tool.name === 'lobe-agent-documents____modifyNodes' &&
+          typeof tool.strict !== 'boolean' &&
+          Array.isArray(properties?.operations?.items?.oneOf)
           ? { ...tool, strict: false }
           : tool;
       });
