@@ -528,6 +528,65 @@ describe('LobeOpenAI', () => {
       expect(request.tools).toEqual([tool, simpleTool]);
     });
 
+    it.each([
+      { model: 'gpt-6.2-astra', removeUniqueItems: true, strict: undefined },
+      { model: 'gpt-6.2-sol', removeUniqueItems: true, strict: undefined },
+      { model: 'gpt-6.2-sol', removeUniqueItems: true, strict: true },
+      { model: 'gpt-6.2-sol', removeUniqueItems: false, strict: false },
+      { model: 'gpt-6-astra', removeUniqueItems: false, strict: undefined },
+    ])(
+      'handles the credential input schema for $model with strict=$strict',
+      async ({ model, removeUniqueItems, strict }) => {
+        const fieldNames = {
+          description: 'Names of the values to enter.',
+          items: { pattern: '^[A-Za-z_][A-Za-z0-9_-]*$', type: 'string' },
+          maxItems: 10,
+          minItems: 1,
+          type: 'array',
+        };
+        const credentialsTool = {
+          name: 'lobe-creds____requestCredsInput',
+          parameters: {
+            additionalProperties: false,
+            properties: { fieldNames: { ...fieldNames, uniqueItems: true } },
+            required: ['fieldNames'],
+            type: 'object',
+          },
+          ...(strict !== undefined && { strict }),
+        };
+        const otherTool = { ...credentialsTool, name: 'other_tool_with_unique_items' };
+        const rewrittenParameters = {
+          ...credentialsTool.parameters,
+          properties: {
+            fieldNames: {
+              ...fieldNames,
+              description: 'Names of the values to enter. Each field name must be unique.',
+            },
+          },
+        };
+
+        await instance.chat({
+          messages: [{ content: 'Hello', role: 'user' }],
+          model,
+          tools: [
+            { function: credentialsTool, type: 'function' },
+            { function: otherTool, type: 'function' },
+          ],
+        });
+
+        const [request] = (instance['client'].responses.create as Mock).mock.calls[0];
+        expect(request.tools).toEqual([
+          {
+            ...credentialsTool,
+            parameters: removeUniqueItems ? rewrittenParameters : credentialsTool.parameters,
+            type: 'function',
+          },
+          { ...otherTool, type: 'function' },
+        ]);
+        expect(credentialsTool.parameters.properties.fieldNames.uniqueItems).toBe(true);
+      },
+    );
+
     it('should add web_search and prune legacy sampling params for GPT-5.6', async () => {
       const payload = {
         enabledSearch: true,
