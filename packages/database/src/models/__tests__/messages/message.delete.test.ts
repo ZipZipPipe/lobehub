@@ -73,7 +73,10 @@ describe('MessageModel Delete Tests', () => {
         await serverDB.insert(topics).values({
           id: 'active-soft-topic',
           metadata: {
-            runningOperation: { assistantMessageId: 'active-soft-assistant', operationId: 'op-soft' },
+            runningOperation: {
+              assistantMessageId: 'active-soft-assistant',
+              operationId: 'op-soft',
+            },
           },
           sessionId: '1',
           userId,
@@ -99,7 +102,9 @@ describe('MessageModel Delete Tests', () => {
 
         await expect(
           messageModel.softDeleteMessages(ids, { deletedAt: new Date() }),
-        ).rejects.toThrow('Cannot delete message active-soft-assistant while its agent run is active');
+        ).rejects.toThrow(
+          'Cannot delete message active-soft-assistant while its agent run is active',
+        );
         const before = await serverDB.select().from(messages).where(eq(messages.userId, userId));
         expect(before).toHaveLength(2);
         expect(before.every((row) => row.deletedAt === null)).toBe(true);

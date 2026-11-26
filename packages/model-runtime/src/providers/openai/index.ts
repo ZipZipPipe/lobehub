@@ -1,8 +1,13 @@
 import { ModelProvider, openaiChatModels } from 'model-bank';
+import type OpenAI from 'openai';
 
 import { pruneReasoningPayload } from '../../core/contextBuilders/openai';
 import type { OpenAICompatibleFactoryOptions } from '../../core/openaiCompatible';
 import { createOpenAICompatibleRuntime } from '../../core/openaiCompatible';
+import {
+  resolveOpenAIToolAnchoring,
+  type ResponsesToolAnchoringOptions,
+} from '../../core/protocols/openaiResponses/toolAnchoring';
 import type { ChatStreamPayload } from '../../types';
 import { processMultiProviderModelList } from '../../utils/modelParse';
 import { appendDecisionModels } from '../../utils/postProcessModelList';
@@ -11,6 +16,7 @@ import {
   isOpenAIComputerUseModel,
   isOpenAIReasoningPayloadModel,
   isResponsesAPIModel,
+  isToolAnchoringGPTModel,
   supportsOpenAIServiceTierFlex,
 } from './modelId';
 
@@ -140,14 +146,11 @@ export const params = {
       } as any;
     },
     prepareRequest: (payload) => {
-      if (
-        !payload.tools ||
-        (payload.model !== 'gpt-6.2-astra' && payload.model !== 'gpt-6.2-sol')
-      ) {
+      if (payload.model !== 'gpt-6.2-astra' && payload.model !== 'gpt-6.2-sol') {
         return { payload };
       }
 
-      const tools = payload.tools.map((tool) => {
+      const prepareTool = (tool: OpenAI.Responses.Tool): OpenAI.Responses.Tool => {
         if (tool.type !== 'function') return tool;
 
         const properties = tool.parameters?.properties as
@@ -187,10 +190,28 @@ export const params = {
           Array.isArray(properties?.operations?.items?.oneOf)
           ? { ...tool, strict: false }
           : tool;
-      });
+      };
 
-      return { payload: { ...payload, tools } };
+      // Tool anchoring can send the same schemas in history instead of the top-level tools array.
+      const input = Array.isArray(payload.input)
+        ? payload.input.map((item) =>
+            item.type === 'additional_tools' || item.type === 'tool_search_output'
+              ? { ...item, tools: item.tools.map(prepareTool) }
+              : item,
+          )
+        : payload.input;
+
+      return { payload: { ...payload, input, tools: payload.tools?.map(prepareTool) } };
     },
+    // Read the env per request so an operator's override applies without a rebuild.
+    toolAnchoring: ({ baseURL, model, options }) =>
+      resolveOpenAIToolAnchoring({
+        baseURL,
+        isSupportedModel: isToolAnchoringGPTModel(model),
+        override:
+          (options as ResponsesToolAnchoringOptions).responsesToolAnchoring ??
+          process.env.OPENAI_RESPONSES_TOOL_ANCHORING,
+      }),
   },
 } satisfies OpenAICompatibleFactoryOptions;
 

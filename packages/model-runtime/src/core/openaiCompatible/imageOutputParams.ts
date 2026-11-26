@@ -51,7 +51,11 @@ export const applyImageOutputParams = (
     delete userInput.maskUrl;
     delete userInput.markupUrl;
   }
-  if (format === 'gif' && userInput.maskUrl) throw new Error('GIF output does not support masks.');
+  if (format === 'gif') {
+    if (userInput.maskUrl) throw new Error('GIF output does not support masks.');
+    // The API chooses a size that keeps all frames within its sheet pixel budget.
+    delete userInput.size;
+  }
 
   if (format !== 'gif') for (const field of GIF_ONLY_FIELDS) delete userInput[field];
   if (format !== 'jpeg' && format !== 'webp') delete userInput.output_compression;

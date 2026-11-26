@@ -14,7 +14,10 @@ vi.mock('@/features/SettingsSearch/anchor', () => ({
   SettingsSearchAnchor: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock('./const', () => ({
-  opeanaiTTSOptions: ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'].map((value) => ({ label: value, value })),
+  opeanaiTTSOptions: ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'].map((value) => ({
+    label: value,
+    value,
+  })),
 }));
 
 const initialState = useUserStore.getState();

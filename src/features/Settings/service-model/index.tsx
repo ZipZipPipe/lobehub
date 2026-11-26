@@ -10,18 +10,18 @@ import Image from '../image/features/Image';
 import OpenAI from '../tts/features/OpenAI';
 
 interface PageProps {
-  hidePersonalPreferences?: boolean;
+  scope?: 'personal' | 'workspace';
   showSettingHeader?: boolean;
 }
 
-const Page = ({ hidePersonalPreferences, showSettingHeader = true }: PageProps) => {
+const Page = ({ scope, showSettingHeader = true }: PageProps) => {
   const { t } = useTranslation('setting');
   const { enableSTT, showAiImage } = useServerConfigStore(featureFlagsSelectors);
   return (
     <>
       {showSettingHeader && <SettingHeader title={t('tab.serviceModel')} />}
-      <ServiceModelForm hidePersonalPreferences={hidePersonalPreferences} />
-      {enableSTT && <OpenAI />}
+      <ServiceModelForm scope={scope} />
+      {scope !== 'workspace' && enableSTT && <OpenAI />}
       {showAiImage && <Image />}
     </>
   );

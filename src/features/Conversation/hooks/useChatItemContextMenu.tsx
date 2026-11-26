@@ -18,8 +18,6 @@ import type { NativeContextMenuItem } from '@/libs/contextMenu/types';
 import { useChatStore } from '@/store/chat';
 import { useSessionStore } from '@/store/session';
 import { sessionSelectors } from '@/store/session/selectors';
-import { useUserStore } from '@/store/user';
-import { userGeneralSettingsSelectors } from '@/store/user/selectors';
 
 import { openShareMessageModal } from '../components/ShareMessageModal';
 import {
@@ -55,8 +53,6 @@ export const useChatItemContextMenu = ({
   inPortalThread,
   topic,
 }: UseChatItemContextMenuProps) => {
-  const contextMenuMode = useUserStore(userGeneralSettingsSelectors.contextMenuMode);
-
   const { t } = useTranslation('common');
   const { allowed: canCreateContent } = usePermission('create_content');
   const { allowed: canEditContent } = usePermission('edit_own_content');
@@ -84,7 +80,6 @@ export const useChatItemContextMenu = ({
 
   const isThreadMode = useConversationStore(messageStateSelectors.isThreadMode);
   const isGroupSession = useSessionStore(sessionSelectors.isCurrentSessionGroupSession);
-  const isDevMode = useUserStore((s) => userGeneralSettingsSelectors.config(s).isDevMode);
   const actionsBar = useChatListActionsBar({ hasThread, isRegenerating });
   const inThread = isThreadMode || inPortalThread;
 
@@ -168,10 +163,7 @@ export const useChatItemContextMenu = ({
       const collapseAction = isCollapsed ? expand : collapse;
       const list: MenuItem[] = [edit, copy, collapseAction];
 
-      // Forking a message into a standalone topic is GA; the in-topic thread
-      // creator (`branching`) is still gated behind dev mode.
-      if (!inThread && !isGroupSession) list.push(fork);
-      if (!inThread && !isGroupSession && isDevMode) list.push(branching);
+      if (!inThread && !isGroupSession) list.push(fork, branching);
 
       list.push(
         divider,
@@ -215,7 +207,7 @@ export const useChatItemContextMenu = ({
     if (role === 'user') {
       const list: MenuItem[] = [edit, copy];
 
-      if (!inThread && isDevMode) list.push(branching);
+      if (!inThread) list.push(branching);
 
       list.push(divider, tts, translate, divider, regenerate, del);
 
@@ -223,21 +215,13 @@ export const useChatItemContextMenu = ({
     }
 
     return [];
-  }, [
-    actionsBar,
-    canCreate,
-    canEdit,
-    error,
-    inThread,
-    isCollapsed,
-    isDevMode,
-    isGroupSession,
-    role,
-  ]);
+  }, [actionsBar, canCreate, canEdit, error, inThread, isCollapsed, isGroupSession, role]);
 
   const handleShare = useCallback(() => {
     const item = getMessage();
-    if (!item || item.role !== 'assistant') return;
+    // The menu offers Share on single replies and on multi-step replies
+    // (`assistantGroup`); both open the same modal as the hover action bar.
+    if (!item || (item.role !== 'assistant' && item.role !== 'assistantGroup')) return;
 
     openShareMessageModal(item, () => {
       const state = storeApi.getState();
@@ -405,10 +389,6 @@ export const useChatItemContextMenu = ({
 
   const handleContextMenu = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
-      if (contextMenuMode === 'disabled') {
-        return;
-      }
-
       if (editing) {
         return;
       }
@@ -446,7 +426,7 @@ export const useChatItemContextMenu = ({
 
       showContextMenu(contextMenuItems);
     },
-    [contextMenuItems, contextMenuMode, editing],
+    [contextMenuItems, editing],
   );
 
   return {

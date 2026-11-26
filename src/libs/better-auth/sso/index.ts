@@ -107,8 +107,7 @@ export const initBetterAuthSSOProviders = () => {
 
     if (config) {
       config.disableSignUp = authEnv.AUTH_DISABLE_SIGNUP;
-      // the generic oidc callback url is /api/auth/oauth2/callback/{providerId}
-      // different from builtin providers' /api/auth/callback/{providerId}
+      // Better Auth 1.7 uses the same callback path for built-in and generic providers.
       config.redirectURI = `${appEnv.APP_URL}/api/auth/callback/${definition.id}`;
       genericOAuthProviders.push(config);
     }

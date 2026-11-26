@@ -8,6 +8,7 @@ import {
 import {
   createStaticStyles,
   cssVar,
+  cx,
   Flexbox,
   Icon,
   Popover,
@@ -20,7 +21,7 @@ import {
 import dayjs from 'dayjs';
 import isEqual from 'fast-deep-equal';
 import { MessageSquareDashed, TargetIcon } from 'lucide-react';
-import type { CSSProperties, DragEvent, RefObject } from 'react';
+import type { CSSProperties, DragEvent, KeyboardEvent, MouseEvent, RefObject } from 'react';
 import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -48,7 +49,7 @@ import { useChatStore } from '@/store/chat';
 import { operationSelectors } from '@/store/chat/selectors';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { useUserStore } from '@/store/user';
-import { labPreferSelectors, userProfileSelectors } from '@/store/user/selectors';
+import { userProfileSelectors } from '@/store/user/selectors';
 
 import { useTopicHoverPrefetch } from '../../hooks/topicHoverPrefetch/useTopicHoverPrefetch';
 import { markSidebarTopicActivation } from '../../hooks/useScrollActiveTopicIntoView';
@@ -58,13 +59,11 @@ import { useTopicListScope } from '../../TopicListScope';
 import { useScopedTopic } from '../../useScopedTopics';
 import Actions from './Actions';
 import TopicItemContextMenu from './ContextMenu';
-import {
-  getCiVisual,
-  getPullRequestState,
-  getTopicMetaCard,
-  PR_STATE_VISUAL,
-} from './metaCardData';
+import InlineTitleEditor from './InlineTitleEditor';
+import { getTopicMetaCard } from './metaCardData';
 import MetaHoverCard from './MetaHoverCard';
+import { focusTopicRow, handleTopicRowKeyDown, TOPIC_ROW_ATTR } from './topicRowKeyboard';
+import { useRenameTopic } from './useRenameTopic';
 
 // Base UI Popover plays an opacity/scale enter+exit transition driven by these
 // CSS vars on the positioner. Zero them so the meta hover card appears instantly
@@ -80,30 +79,20 @@ const META_HOVER_CARD_STYLES = {
 };
 
 const styles = createStaticStyles(({ css }) => ({
-  ciBadge: css`
-    position: absolute;
-    inset-block-end: -3px;
-    inset-inline-end: -3px;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-
-    line-height: 0;
-
-    background: ${cssVar.colorBgContainer};
+  /* Keyboard focus marks the row with the hover fill instead of an outline ring,
+     so arrow-key navigation reads like moving the hover. Only inactive rows get
+     focusFill: the active row keeps its own fill. A mouse click shows nothing.
+     Rows also carry `data-lobe-focus-ring="self-off"`: lobe-ui draws a global
+     focus ring overlay on any :focus-visible element, which `outline: none`
+     does not reach. */
+  focusVisible: css`
+    &:focus-visible {
+      outline: none;
+    }
   `,
-  ciPending: css`
-    animation: ci-spin 1s linear infinite;
-
-    @keyframes ci-spin {
-      to {
-        transform: rotate(360deg);
-      }
+  focusFill: css`
+    &:focus-visible {
+      background: ${cssVar.colorFillTertiary};
     }
   `,
   markerIcon: css`
@@ -274,7 +263,6 @@ const TopicItemRow = memo<TopicItemRowProps>(
     const inboxId = useAgentStore(builtinAgentSelectors.inboxAgentId);
     const { t } = useTranslation('topic');
     const { isDarkMode } = useTheme();
-    const goalsEnabled = useUserStore(labPreferSelectors.enableGoals);
     // Rows render by the dozen, so agent-level reads share ONE subscription.
     // Only workspace-shared (`public`) agents get the creator avatar — a
     // workspace-private agent's topics all belong to the viewer.
@@ -344,6 +332,49 @@ const TopicItemRow = memo<TopicItemRowProps>(
       if (id) markSidebarTopicActivation(id);
       void navRef.current.navigateToTopic(id);
     }, [id, navRef]);
+
+    // Double clicking the row, or the menu's Rename, turns the title into an
+    // input in place. The first click of a double click has already switched
+    // to the topic.
+    const [editing, setEditing] = useState(false);
+    const { autoRename, canRename, saveTitle } = useRenameTopic(id, title, activeAgentId);
+    const startEditing = useCallback(() => setEditing(true), []);
+    const stopEditing = useCallback(() => setEditing(false), []);
+    const handleKeyDown = useCallback(
+      (event: KeyboardEvent<HTMLElement>) =>
+        handleTopicRowKeyDown(event, {
+          onOpen: handleClick,
+          onRename: id && canRename ? startEditing : undefined,
+        }),
+      [canRename, handleClick, id, startEditing],
+    );
+
+    // Leaving the editor (Enter, Escape, the auto-rename button) unmounts the
+    // focused input; hand focus back to the row so the keyboard user stays in
+    // the list. A blur that moved focus somewhere else keeps it there.
+    const containerRef = useRef<HTMLDivElement>(null);
+    const wasEditingRef = useRef(false);
+    useEffect(() => {
+      if (editing) {
+        wasEditingRef.current = true;
+        return;
+      }
+      if (!wasEditingRef.current) return;
+      wasEditingRef.current = false;
+
+      const container = containerRef.current;
+      const focused = container?.ownerDocument.activeElement;
+      if (focused && focused !== container?.ownerDocument.body && !container?.contains(focused))
+        return;
+      focusTopicRow(container?.querySelector<HTMLElement>(`[${TOPIC_ROW_ATTR}]`));
+    }, [editing]);
+
+    const handleDoubleClick = useCallback((event: MouseEvent) => {
+      // The trailing actions (complete, archive, more) stop click propagation
+      // but not double clicks; a fast double click on them must not rename.
+      if ((event.target as HTMLElement).closest('[data-nav-item-actions]')) return;
+      setEditing(true);
+    }, []);
 
     const isFailed = status === 'failed';
     const isRunning = status === 'running';
@@ -422,18 +453,18 @@ const TopicItemRow = memo<TopicItemRowProps>(
     // Codex-style hover detail card: when the topic carries git context, hovering
     // the row reveals a card on the right with repo / branch / worktree / PR / CI —
     // keeping the row itself clean.
-    const betterCoding = useUserStore(labPreferSelectors.enableBetterCodingExperience);
-    const metaCard = useMemo(
-      () => getTopicMetaCard(metadata, { hideRecordedPullRequest: betterCoding }),
-      [betterCoding, metadata],
-    );
+    const metaCard = useMemo(() => getTopicMetaCard(metadata), [metadata]);
 
     // For default topic (no id)
     if (!id) {
       return (
         <NavItem
           active={defaultTopicActive}
+          className={cx(styles.focusVisible, !defaultTopicActive && styles.focusFill)}
+          data-lobe-focus-ring="self-off"
+          data-topic-row=""
           slots={{ titlePrefix: draftPrefix }}
+          tabIndex={0}
           titleColor={cssVar.colorText}
           icon={
             isLoading ? (
@@ -461,6 +492,7 @@ const TopicItemRow = memo<TopicItemRowProps>(
             </Flexbox>
           }
           onClick={handleClick}
+          onKeyDown={handleKeyDown}
         />
       );
     }
@@ -526,7 +558,7 @@ const TopicItemRow = memo<TopicItemRowProps>(
       // The conversation a goal was planned in says more about the row than
       // the PR it produced, so it outranks the PR marker (which stays in the
       // meta hover card).
-      if (hasGoal && goalsEnabled) {
+      if (hasGoal) {
         return (
           <Tooltip title={t('metaCard.goal')}>
             <span aria-label={t('metaCard.goal')} className={styles.markerIcon}>
@@ -535,37 +567,6 @@ const TopicItemRow = memo<TopicItemRowProps>(
                 size={'small'}
                 style={{ color: cssVar.colorTextDescription }}
               />
-            </span>
-          </Tooltip>
-        );
-      }
-      // GitHub PR state marker (open=green, merged=purple, closed=red),
-      // like Codex. It is secondary metadata, so only an idle topic uses it
-      // as the leading icon.
-      if (metaCard?.pullRequest) {
-        const prState = getPullRequestState(metaCard.pullRequest);
-        const prVisual = PR_STATE_VISUAL[prState];
-        const ciStatus = metaCard.pullRequest.ciStatus;
-        const ciVisual = getCiVisual(ciStatus);
-        const showCiBadge =
-          prState !== 'merged' && ciStatus !== undefined && ciStatus !== 'unknown';
-        const tooltip = showCiBadge
-          ? `${t(prVisual.labelKey)} · ${t(ciVisual.labelKey)}`
-          : t(prVisual.labelKey);
-        return (
-          <Tooltip title={tooltip}>
-            <span className={styles.markerIcon}>
-              <Icon icon={prVisual.icon} size={'small'} style={{ color: prVisual.color }} />
-              {showCiBadge && (
-                <span className={styles.ciBadge}>
-                  <Icon
-                    className={ciStatus === 'pending' ? styles.ciPending : undefined}
-                    icon={ciVisual.icon}
-                    size={9}
-                    style={{ color: ciVisual.color }}
-                  />
-                </span>
-              )}
             </span>
           </Tooltip>
         );
@@ -583,7 +584,7 @@ const TopicItemRow = memo<TopicItemRowProps>(
 
     // Workspace mode (creator resolvable): the creator's round avatar is the
     // primary visual and always leads the row; the row's own icon — execution
-    // status first, then identity icons (Discord / WeChat / PR marker) —
+    // status first, then identity icons (Discord / WeChat) —
     // shrinks into a bottom-right corner badge. Personal mode keeps the
     // original layout untouched.
     const ownIconNode = statusIconNode ?? identityIconNode;
@@ -611,14 +612,18 @@ const TopicItemRow = memo<TopicItemRowProps>(
       );
 
     const navItem = (
-      <TopicItemContextMenu fav={fav} id={id} status={status} title={title}>
+      <TopicItemContextMenu fav={fav} id={id} status={status} title={title} onRename={startEditing}>
         <NavItem
           draggable
           titleMarquee
           active={isTopicActive}
+          className={cx(styles.focusVisible, !isTopicActive && styles.focusFill)}
+          data-lobe-focus-ring="self-off"
+          data-topic-row=""
           description={workingDirectoryNode}
           href={href}
           icon={leadingIconNode}
+          tabIndex={0}
           title={title === '...' ? <DotsLoading gap={3} size={4} /> : title}
           titleColor={cssVar.colorText}
           actions={() => (
@@ -629,6 +634,7 @@ const TopicItemRow = memo<TopicItemRowProps>(
               showInlineArchive={!shouldShowRunningIcon}
               status={status}
               title={title}
+              onRename={startEditing}
             />
           )}
           extra={
@@ -655,7 +661,9 @@ const TopicItemRow = memo<TopicItemRowProps>(
             workingDirectoryNode ? { iconBelow: draftBelowIcon } : { titlePrefix: draftPrefix }
           }
           onClick={handleClick}
+          onDoubleClick={canRename ? handleDoubleClick : undefined}
           onDragStart={handleDragStart}
+          onKeyDown={handleKeyDown}
         />
       </TopicItemContextMenu>
     );
@@ -664,13 +672,22 @@ const TopicItemRow = memo<TopicItemRowProps>(
       <Flexbox
         data-testid="topic-item"
         data-topic-id={id}
+        ref={containerRef}
         style={{ position: 'relative' }}
         {...hoverPrefetchHandlers}
       >
-        {metaCard ? (
+        {editing ? (
+          <InlineTitleEditor
+            icon={leadingIconNode}
+            title={title}
+            onAutoRename={autoRename}
+            onClose={stopEditing}
+            onSave={saveTitle}
+          />
+        ) : metaCard ? (
           <Popover
             arrow={false}
-            content={<MetaHoverCard metadata={metadata} title={title} topicId={id} />}
+            content={<MetaHoverCard metadata={metadata} title={title} />}
             mouseEnterDelay={0.8}
             placement={'right'}
             styles={META_HOVER_CARD_STYLES}

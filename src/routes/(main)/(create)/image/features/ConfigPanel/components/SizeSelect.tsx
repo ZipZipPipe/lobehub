@@ -10,7 +10,9 @@ import { Check, Plus, X } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useImageStore } from '@/store/image';
 import { useGenerationConfigParam } from '@/store/image/slices/generationConfig/hooks';
+import { imageGenerationConfigSelectors } from '@/store/image/slices/generationConfig/selectors';
 
 import Select from './Select';
 
@@ -56,11 +58,15 @@ const parseSize = (size: string | undefined): [number, number] | undefined => {
 
 const SizeSelect = memo(() => {
   const { t } = useTranslation('image');
+  const isAutomaticSize = useImageStore(imageGenerationConfigSelectors.isAutomaticSize);
   const { value, setValue, enumValues, custom, presets } = useGenerationConfigParam('size');
   const parsedSize = parseSize(value);
   const [isEditing, setIsEditing] = useState(false);
   const [width, setWidth] = useState<number | null>(parsedSize?.[0] ?? 1024);
   const [height, setHeight] = useState<number | null>(parsedSize?.[1] ?? 1024);
+
+  if (isAutomaticSize) return <Text type="secondary">{t('config.size.autoByOpenAI')}</Text>;
+
   const options = enumValues!.map((size) => ({
     label:
       size === 'auto'

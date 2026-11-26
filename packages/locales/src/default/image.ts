@@ -71,6 +71,7 @@ export default {
   'config.resolution.options.4K': '4K',
   'config.seed.label': 'Seed',
   'config.seed.random': 'Random Seed',
+  'config.size.autoByOpenAI': 'Auto (determined by OpenAI)',
   'config.size.custom.cancel': 'Cancel custom size',
   'config.size.custom.confirm': 'Use custom size',
   'config.size.custom.error':

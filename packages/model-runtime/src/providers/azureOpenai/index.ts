@@ -10,6 +10,10 @@ import {
   collectImageResponse,
   resolveImageOutputMimeType,
 } from '../../core/openaiCompatible/imageOutputParams';
+import {
+  resolveOpenAIToolAnchoring,
+  type ResponsesToolAnchoringOptions,
+} from '../../core/protocols/openaiResponses/toolAnchoring';
 import { refineErrorCode } from '../../errors';
 import type {
   ASROptions,
@@ -22,7 +26,12 @@ import { AgentRuntimeErrorType } from '../../types/error';
 import type { CreateImagePayload } from '../../types/image';
 import { AgentRuntimeError } from '../../utils/createError';
 import { sanitizeError } from '../../utils/sanitizeError';
-import { isResponsesAPIModel, responsesAPIModels, systemToUserModels } from '../openai/modelId';
+import {
+  isResponsesAPIModel,
+  isToolAnchoringGPTModel,
+  responsesAPIModels,
+  systemToUserModels,
+} from '../openai/modelId';
 
 const azureImageLogger = debug('lobe-image:azure');
 const azureSearchContextSize = process.env.OPENAI_SEARCH_CONTEXT_SIZE;
@@ -213,6 +222,20 @@ const BaseAzureOpenAI = createOpenAICompatibleRuntime({
         tools: azureTools,
       } as ChatStreamPayload;
     },
+    // An Azure endpoint is never the official OpenAI host, so it anchors only when an
+    // operator opts in after verifying the deployment accepts the anchored items: per
+    // endpoint through the option, or for every Azure endpoint through its own env, kept
+    // apart from the OpenAI relay env because each backend needs its own verification.
+    // The model checked is the deployment name, so it must be named after the GPT model
+    // it serves. The env is read per request so a change applies without a rebuild.
+    toolAnchoring: ({ baseURL, model, options }) =>
+      resolveOpenAIToolAnchoring({
+        baseURL,
+        isSupportedModel: isToolAnchoringGPTModel(model),
+        override:
+          (options as ResponsesToolAnchoringOptions).responsesToolAnchoring ??
+          process.env.AZURE_OPENAI_RESPONSES_TOOL_ANCHORING,
+      }),
   },
 });
 

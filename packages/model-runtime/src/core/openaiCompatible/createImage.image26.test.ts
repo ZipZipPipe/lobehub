@@ -2,12 +2,16 @@
 import type OpenAI from 'openai';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { clearReferenceImageCache } from '../../utils/referenceImageCache';
+import { ssrfFetch } from '../../utils/ssrfFetch';
 import { createOpenAICompatibleImage } from './createImage';
 import { applyImageOutputParams, collectImageResponse } from './imageOutputParams';
 
 vi.mock('@lobechat/business-model-bank/model-config', () => ({
   loadModels: vi.fn().mockResolvedValue([]),
 }));
+
+vi.mock('../../utils/ssrfFetch', () => ({ ssrfFetch: vi.fn() }));
 
 describe.each(['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])(
   '%s Images API contract',
@@ -17,15 +21,14 @@ describe.each(['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])(
     const client = { images: { generate, edit } } as unknown as OpenAI;
     beforeEach(() => {
       vi.clearAllMocks();
+      clearReferenceImageCache();
       generate.mockResolvedValue({ data: [{ b64_json: 'complete' }] });
       edit.mockResolvedValue({ data: [{ b64_json: 'complete' }] });
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue({
-          ok: true,
-          headers: { get: () => 'image/png' },
-          arrayBuffer: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47]).buffer,
-        }),
+      vi.mocked(ssrfFetch).mockImplementation(
+        async () =>
+          new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+            headers: { 'Content-Type': 'image/png' },
+          }),
       );
     });
 
@@ -176,17 +179,14 @@ describe.each(['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])(
           'openai',
         ),
       ).rejects.toThrow('either a mask or a markup');
-      expect(fetch).not.toHaveBeenCalled();
+      expect(ssrfFetch).not.toHaveBeenCalled();
       expect(edit).not.toHaveBeenCalled();
     });
 
     it('rejects a non-PNG overlay before calling the paid edit endpoint', async () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue({
-          ok: true,
-          headers: { get: () => 'image/jpeg' },
-          arrayBuffer: async () => new Uint8Array([0xff, 0xd8, 0xff]).buffer,
+      vi.mocked(ssrfFetch).mockResolvedValueOnce(
+        new Response(new Uint8Array([0xff, 0xd8, 0xff]), {
+          headers: { 'Content-Type': 'image/jpeg' },
         }),
       );
       await expect(

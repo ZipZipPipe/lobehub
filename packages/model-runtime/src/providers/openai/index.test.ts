@@ -587,6 +587,57 @@ describe('LobeOpenAI', () => {
       },
     );
 
+    it.each(['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-6-astra'])(
+      'prepares tool schemas carried in Responses history for %s',
+      (model) => {
+        const documentTool: OpenAI.Responses.FunctionTool = {
+          name: modifyNodesName,
+          parameters: modifyNodesParameters,
+          strict: null,
+          type: 'function',
+        };
+        const credentialsTool: OpenAI.Responses.FunctionTool = {
+          name: 'lobe-creds____requestCredsInput',
+          parameters: { properties: { fieldNames: { type: 'array', uniqueItems: true } } },
+          strict: null,
+          type: 'function',
+        };
+        const tools = [documentTool, credentialsTool];
+        const request = params.responses.prepareRequest({
+          input: [
+            { role: 'developer', tools, type: 'additional_tools' },
+            { tools, type: 'tool_search_output' },
+          ],
+          model,
+        });
+        const input = request.payload.input as OpenAI.Responses.ResponseInput;
+
+        if (model === 'gpt-6-astra') {
+          expect(input).toEqual([
+            { role: 'developer', tools, type: 'additional_tools' },
+            { tools, type: 'tool_search_output' },
+          ]);
+          return;
+        }
+        for (const item of input) {
+          expect(item).toMatchObject({
+            tools: [
+              { ...documentTool, strict: false },
+              {
+                ...credentialsTool,
+                parameters: {
+                  properties: {
+                    fieldNames: { description: 'Each field name must be unique.', type: 'array' },
+                  },
+                },
+              },
+            ],
+          });
+          expect(item).not.toHaveProperty('tools.1.parameters.properties.fieldNames.uniqueItems');
+        }
+      },
+    );
+
     it('should add web_search and prune legacy sampling params for GPT-5.6', async () => {
       const payload = {
         enabledSearch: true,

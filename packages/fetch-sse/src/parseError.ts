@@ -88,9 +88,7 @@ export const getMessageError = async (response: Response): Promise<ChatMessageEr
     chatMessageError = {
       ...normalized,
       body,
-      message: shouldPreferBodyMessage
-        ? bodyMessage
-        : translateErrorType(normalized.type, body),
+      message: shouldPreferBodyMessage ? bodyMessage : translateErrorType(normalized.type, body),
     };
   } catch {
     // if not return, then it's a common error

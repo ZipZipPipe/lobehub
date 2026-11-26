@@ -24,11 +24,13 @@ const SignIn = () => {
     lastAuthProvider,
     loading,
     oAuthSSOProviders,
+    sendError,
     sending,
     sessionExpired,
     sentInfo,
     serverConfigInit,
     setAgreementChecked,
+    socialErrorProvider,
     socialLoading,
     step,
   } = useSignIn();
@@ -37,6 +39,7 @@ const SignIn = () => {
     return (
       <SignInEmailSentStep
         email={sentInfo.email}
+        sendError={sendError}
         sending={sending}
         type={sentInfo.type}
         onBack={handleBackFromSent}
@@ -51,6 +54,7 @@ const SignIn = () => {
         forgotLoading={sending}
         form={form as any}
         loading={loading}
+        sendError={sendError}
         onBackToEmail={handleBackToEmail}
         onForgotPassword={handleForgotPassword}
       />
@@ -68,9 +72,11 @@ const SignIn = () => {
         lastAuthProvider={lastAuthProvider}
         loading={loading}
         oAuthSSOProviders={oAuthSSOProviders}
+        sendError={sendError}
         serverConfigInit={serverConfigInit}
         sessionExpired={sessionExpired}
         setAgreementChecked={setAgreementChecked}
+        socialErrorProvider={socialErrorProvider}
         socialLoading={socialLoading}
         onGoToSignup={handleGoToSignup}
         onResetEmail={handleBackToEmail}

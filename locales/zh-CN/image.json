@@ -60,6 +60,7 @@
   "config.safetyIdentifier.placeholder": "不含个人信息的标识，最多 128 个字符",
   "config.seed.label": "种子",
   "config.seed.random": "随机种子",
+  "config.size.autoByOpenAI": "自动（由 OpenAI 决定）",
   "config.size.custom.cancel": "取消自定义尺寸",
   "config.size.custom.confirm": "使用自定义尺寸",
   "config.size.custom.error": "宽高须为 {{step}} 的倍数，宽高比在 1:3–3:1 之间，总像素为 {{minPixels}}–{{maxPixels}}，且单边不超过 {{maxEdge}} px。",

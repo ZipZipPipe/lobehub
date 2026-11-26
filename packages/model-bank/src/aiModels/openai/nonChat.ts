@@ -1,9 +1,4 @@
-import {
-  gptImage1Schema,
-  gptImage2Schema,
-  gptImage25Schema,
-  gptImage26Schema,
-} from '../../const/imageParameters';
+import { gptImage1Schema, gptImage2Schema, gptImage25Schema } from '../../const/imageParameters';
 import {
   openaiGpt4oMiniTTSSchema,
   openaiGpt4oTTSVoices,
@@ -18,6 +13,7 @@ import type {
   AITTSModelCard,
   AIVideoModelCard,
 } from '../../types/aiModel';
+import { gptImage26Schema } from './gptImage26Parameters';
 
 /** OpenAI cards for endpoints other than chat and decisions; `allModels` lives in `./index`. */
 
@@ -159,16 +155,15 @@ export const openaiASRModels: AIASRModelCard[] = [
 export const openaiImageModels: AIImageModelCard[] = [
   {
     description:
-      "OpenAI's most capable image generation and editing model, built for workflows where editing precision matters most, with native animated GIF output and up to 4K still images.",
+      'GPT Image 2.6 Sunburst generates and edits images from text and image inputs for detailed compositions and precise visual editing.',
     displayName: 'GPT Image 2.6 Sunburst',
     enabled: true,
     id: 'gpt-image-2.6-sunburst',
     isOfficial: true,
     parameters: gptImage26Schema,
+    // https://developers.openai.com/api/docs/models/gpt-image-2.6-sunburst
     pricing: {
-      // Token rates match GPT Image 2; OpenAI publishes no per-image estimate for GPT Image 2.6,
-      // so there is no `approximatePricePerImage`.
-      // https://developers.openai.com/api/docs/models/gpt-image-2.6-sunburst
+      // Token rates match GPT Image 2.5; a GIF bills its frames as image output tokens.
       units: [
         { name: 'textInput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
         { name: 'textInput_cacheRead', rate: 1.25, strategy: 'fixed', unit: 'millionTokens' },
@@ -182,16 +177,15 @@ export const openaiImageModels: AIImageModelCard[] = [
   },
   {
     description:
-      "OpenAI's fastest model for high-quality everyday image generation and editing, with native animated GIF output and up to 4K still images.",
+      'GPT Image 2.6 Flare generates and edits images from text and image inputs for fast, interactive visual workflows.',
     displayName: 'GPT Image 2.6 Flare',
     enabled: true,
     id: 'gpt-image-2.6-flare',
     isOfficial: true,
     parameters: gptImage26Schema,
+    // https://developers.openai.com/api/docs/models/gpt-image-2.6-flare
     pricing: {
-      // Token rates match GPT Image 2; OpenAI publishes no per-image estimate for GPT Image 2.6,
-      // so there is no `approximatePricePerImage`.
-      // https://developers.openai.com/api/docs/models/gpt-image-2.6-flare
+      // Token rates match GPT Image 2.5; a GIF bills its frames as image output tokens.
       units: [
         { name: 'textInput', rate: 5, strategy: 'fixed', unit: 'millionTokens' },
         { name: 'textInput_cacheRead', rate: 1.25, strategy: 'fixed', unit: 'millionTokens' },

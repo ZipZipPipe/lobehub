@@ -50,6 +50,7 @@ export type WorkingSidebarTab =
   | 'review'
   | 'search'
   | 'skills'
+  | 'tools'
   | 'web'
   | (string & {});
 
@@ -57,6 +58,11 @@ export const CANVAS_TAB_PREFIX = 'canvas:';
 export const canvasTabKey = (canvasId: string) => `${CANVAS_TAB_PREFIX}${canvasId}`;
 export const canvasIdOfTab = (tab: string) =>
   tab.startsWith(CANVAS_TAB_PREFIX) ? tab.slice(CANVAS_TAB_PREFIX.length) : undefined;
+
+export const ARTBOARD_TAB_PREFIX = 'artboard:';
+export const artboardTabKey = (artboardId: string) => `${ARTBOARD_TAB_PREFIX}${artboardId}`;
+export const artboardIdOfTab = (tab: string) =>
+  tab.startsWith(ARTBOARD_TAB_PREFIX) ? tab.slice(ARTBOARD_TAB_PREFIX.length) : undefined;
 
 export const DEFAULT_RESOURCE_MANAGER_COLUMN_WIDTHS = {
   date: 160,
@@ -74,11 +80,14 @@ export enum SettingsTabs {
   Appearance = 'appearance',
   Automations = 'automations',
   Billing = 'billing',
-  /** @deprecated Use Appearance instead */
+  /** @deprecated Use Conversation instead */
   ChatAppearance = 'chat-appearance',
+  /** Optional business tab; listed only where `useCodingPlansTab` supplies it. */
+  CodingPlans = 'coding-plans',
   /** @deprecated Use Appearance instead */
   Common = 'common',
   Connector = 'connector',
+  Conversation = 'conversation',
   Credits = 'credits',
   Creds = 'credential',
   Devices = 'devices',
@@ -86,12 +95,10 @@ export enum SettingsTabs {
   Hotkey = 'hotkey',
   /** @deprecated Use ServiceModel instead */
   Image = 'image',
-  Integrations = 'integrations',
   Labels = 'labels',
   Labs = 'labs',
   LLM = 'llm',
   Memory = 'memory',
-  Messenger = 'messenger',
   Notification = 'notification',
   OAuthApps = 'oauth-apps',
   // business
@@ -217,10 +224,22 @@ export interface SystemStatus {
    */
   agentListExpandedGroupKeys?: string[];
   /**
-   * Whether the "in sidebar" overview section of the agent view-all page is
-   * collapsed. Defaults to expanded so the section is discoverable.
+   * Whether the "Recommended agents" section of the agent view-all page is
+   * collapsed. Defaults to expanded: it is how members find what their
+   * workspace recommends.
+   */
+  agentListRecommendedSectionCollapsed?: boolean;
+  /**
+   * @deprecated Read and written by earlier builds only, whose default
+   *   (expanded) was persisted for everyone; replaced by
+   *   `agentListSidebarSectionExpanded` so the section starts collapsed.
    */
   agentListSidebarSectionCollapsed?: boolean;
+  /**
+   * Whether the "in sidebar" overview section of the agent view-all page is
+   * expanded. Defaults to collapsed: the sidebar itself already shows it.
+   */
+  agentListSidebarSectionExpanded?: boolean;
   /**
    * View mode of the agent view-all page (badge-wall card grid vs table list); defaults to card
    */
@@ -249,6 +268,11 @@ export interface SystemStatus {
    * Order of the sidebar Channel sections. Device-local view setting.
    */
   channelListSort?: ChannelListSort;
+  /**
+   * Channels whose sidebar thread list is folded, keyed by Channel id. Nested booleans for the
+   * same lodash `merge` reason as `assigneeAgentSelectorCollapsedGroups`. Device-local.
+   */
+  channelThreadsCollapsed?: Record<string, boolean>;
   chatInputHeight?: number;
   /**
    * Which topicGroups are collapsed, bucketed by group mode. We persist the
@@ -495,6 +519,13 @@ export interface SystemStatus {
    */
   taskKanbanHiddenPanelCollapsed?: boolean;
   /**
+   * Folded group / sub-group headers of the task list view, one entry per view
+   * (`taskListCollapseScopeKey`), so a folded group stays folded across
+   * navigation and reloads, as Linear keeps them per view. An array for the
+   * same reason as `taskListFilters`; see `useTaskListGroupCollapse`.
+   */
+  taskListCollapsedGroups?: { keys: string[]; scope: string }[];
+  /**
    * Tasks page filters, one entry per list scope (workspace + global / agent /
    * project page). An array, not a map: status is deep-merged on write, which
    * could never drop a removed condition from a nested object, while arrays
@@ -651,7 +682,8 @@ export interface GlobalState {
 export const INITIAL_STATUS = {
   agentBuilderPanelWidth: 360,
   agentListExpandedGroupKeys: [] as string[],
-  agentListSidebarSectionCollapsed: false,
+  agentListRecommendedSectionCollapsed: false,
+  agentListSidebarSectionExpanded: false,
   agentListViewMode: 'card' as const,
   agentListViewOptions: {
     orderBy: 'updatedAt' as const,
